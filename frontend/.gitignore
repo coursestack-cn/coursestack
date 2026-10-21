@@ -1,0 +1,13 @@
+node_modules/
+dist/
+.vite/
+.pnpm-store/
+.wrangler/
+.env
+.env.*
+!.env.example
+*.local
+*.log
+*.tsbuildinfo
+.DS_Store
+Thumbs.db
