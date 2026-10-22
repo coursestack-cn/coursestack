@@ -1,4 +1,4 @@
-# AGENTS.md
+# AGENTS.global.md
 
 本文件面向参与 CourseStack 开发的 Agent，适用于整个仓库。开始任务前先阅读本文件和相关项目文档，再检查当前分支及工作区状态。
 
