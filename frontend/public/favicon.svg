@@ -1,0 +1,17 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="48 48 416 416">
+  <style>.ink { fill: #000; } @media (prefers-color-scheme: dark) { .ink { fill: #fff; } }</style>
+  <defs>
+    <g id="coursestack-mask-book">
+      <path d="M 257.5 47.6 Q 263.5 44 269.5 47.6 L 439.5 149.6 Q 443.5 152 443.5 156.8 V 188 Q 443.5 192 439.5 194.4 L 269.5 296.4 Q 263.5 300 257.5 296.4 L 83.5 192 C 63.5 180 63.5 164 83.5 152 Z" fill="#fff" stroke="#000" stroke-width="16" stroke-linejoin="round" paint-order="stroke fill"/>
+      <path d="M 275.5 257.8 L 438 160.3 Q 439.5 159.4 439.5 160.9 L 439.5 187.9 Q 439.5 189.4 438 190.3 L 275.5 287.8 C 268.872583 291.77645 263.5 288.284271 263.5 280 C 263.5 271.715729 268.872583 261.77645 275.5 257.8 Z" fill="#000"/>
+      <path d="M 287.5 265.6 L 415.5 188.8" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/>
+    </g>
+    <mask id="coursestack-ink-mask" x="0" y="0" width="512" height="512" maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" mask-type="luminance">
+      <rect width="512" height="512" fill="#000"/>
+      <use href="#coursestack-mask-book" y="148"/>
+      <use href="#coursestack-mask-book" y="84"/>
+      <use href="#coursestack-mask-book" y="20"/>
+    </mask>
+  </defs>
+  <rect class="ink" width="512" height="512" fill="#000" mask="url(#coursestack-ink-mask)"/>
+</svg>
