@@ -1,0 +1,27 @@
+{
+  "name": "coursestack-backend",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.5.1",
+  "engines": {
+    "node": "^22.12.0 || >=24.0.0"
+  },
+  "scripts": {
+    "dev": "wrangler dev --env local --local --persist-to .wrangler/state",
+    "check": "tsc --noEmit",
+    "test": "node --experimental-strip-types --test tests/*.test.mjs",
+    "admin:init:local": "node --experimental-strip-types scripts/init-admin.mjs",
+    "db:migrate:local": "wrangler d1 migrations apply DB --env local --local --persist-to .wrangler/state",
+    "db:seed:local": "wrangler d1 execute DB --env local --local --persist-to .wrangler/state --file seed/local.sql"
+  },
+  "dependencies": {
+    "bcryptjs": "3.0.3",
+    "drizzle-orm": "0.45.4"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261021.1",
+    "miniflare": "5.20261019.1-beta",
+    "typescript": "7.0.2",
+    "wrangler": "4.151.3"
+  }
+}
