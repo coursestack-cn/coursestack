@@ -3,11 +3,17 @@ import { createDatabase } from './db/index.ts';
 import type { Env } from './env.ts';
 import { authRoutes } from './auth/routes.ts';
 import { HttpError, json } from './http.ts';
+import { accountRoutes } from './accounts/routes.ts';
+import { emailRoutes } from './auth/email.ts';
+import { avatarRoutes } from './accounts/avatar.ts';
 
 export default {
   async fetch(request: Request, env: Env): Promise<Response> {
     try {
-      const response = await authRoutes(request, env);
+      const response = await accountRoutes(request, env)
+        ?? await emailRoutes(request, env)
+        ?? await avatarRoutes(request, env)
+        ?? await authRoutes(request, env);
       if (response) return response;
     } catch (error) {
       if (error instanceof HttpError) return json({ error: { code: error.code, message: error.message } }, error.status);

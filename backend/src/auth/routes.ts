@@ -6,6 +6,7 @@ import { HttpError, json, readJson, requireSameOrigin, stringField } from '../ht
 import { isAdministrator } from '../permissions.ts';
 import { hashPassword, passwordField } from './crypto.ts';
 import { changePassword, limitAttempts, login, ownProfile, readSession, requireSession, sessionCookie } from './service.ts';
+import { allowFields, conflict, emailField } from '../accounts/validation.ts';
 
 const methods: Record<string, string> = {
   '/api/auth/login': 'POST',
@@ -35,24 +36,30 @@ export async function authRoutes(request: Request, env: Env): Promise<Response |
     const session = await requireSession(env.DB, request);
     if (!await isAdministrator(createDatabase(env.DB), session.id)) throw new HttpError(403, 'FORBIDDEN', '需要管理员权限');
     const body = await readJson(request);
+    allowFields(body, ['role', 'schoolNumber', 'publicName', 'realName', 'password', 'email']);
     if (body.role !== 'student' && body.role !== 'teacher') throw new HttpError(400, 'INVALID_ROLE', '只能创建学生或教师账号');
     const schoolNumber = stringField(body, 'schoolNumber', 64);
     const publicName = stringField(body, 'publicName');
-    const realName = body.role === 'student' ? stringField(body, 'realName') : null;
+    const realName = body.role === 'student' || body.realName !== undefined ? stringField(body, 'realName') : null;
+    const email = body.email === undefined ? null : emailField(body.email);
     const passwordHash = await hashPassword(passwordField(body.password));
     const id = crypto.randomUUID();
     try {
       await env.DB.batch([
-        env.DB.prepare('INSERT INTO accounts (id, public_name) VALUES (?, ?)').bind(id, publicName),
+        env.DB.prepare(`INSERT INTO accounts (id, public_name) SELECT ?, ? WHERE EXISTS (
+          SELECT 1 FROM sessions s JOIN accounts a ON a.id = s.account_id
+          JOIN credentials c ON c.account_id = a.id AND c.version = s.credential_version
+          JOIN account_roles r ON r.account_id = a.id AND r.role = 'admin'
+          WHERE s.token_hash = ? AND s.expires_at > unixepoch() AND a.status = 'active')`).bind(id, publicName, session.tokenHash),
         env.DB.prepare('INSERT INTO account_roles (account_id, role) VALUES (?, ?)').bind(id, body.role),
         env.DB.prepare('INSERT INTO credentials (account_id, school_number, password_hash) VALUES (?, ?, ?)').bind(id, schoolNumber, passwordHash),
-        ...(realName ? [env.DB.prepare('INSERT INTO student_records (account_id, student_number, real_name) VALUES (?, ?, ?)').bind(id, schoolNumber, realName)] : []),
+        env.DB.prepare('INSERT INTO account_private (account_id, real_name, email) VALUES (?, ?, ?)').bind(id, realName, email),
+        ...(body.role === 'student' ? [env.DB.prepare('INSERT INTO student_records (account_id, student_number, real_name) VALUES (?, ?, ?)').bind(id, schoolNumber, realName)] : []),
+        env.DB.prepare("INSERT INTO account_audit (id, actor_id, target_id, action, fields) VALUES (?, ?, ?, 'account.create', ?)")
+          .bind(crypto.randomUUID(), session.id, id, JSON.stringify(['role', 'schoolNumber', 'publicName', 'realName', 'email'])),
       ]);
     } catch (error) {
-      if (error instanceof Error && /UNIQUE constraint failed.*(?:credentials.school_number|student_records.student_number)/.test(error.message)) {
-        throw new HttpError(409, 'SCHOOL_NUMBER_EXISTS', '该学工号已存在');
-      }
-      throw error;
+      conflict(error);
     }
     return json({ data: { id, publicName, role: body.role, schoolNumber } }, 201);
   }

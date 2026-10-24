@@ -46,6 +46,10 @@ beforeEach(async () => {
   // Delete only isolated in-memory test data, in foreign-key dependency order.
   await binding.exec(`
 DELETE FROM sessions;
+DELETE FROM avatar_objects;
+DELETE FROM email_tokens;
+DELETE FROM account_audit;
+DELETE FROM account_private;
 DELETE FROM credentials;
 DELETE FROM login_attempts;
 DELETE FROM enrollments;
@@ -61,7 +65,7 @@ DELETE FROM courses;
 });
 
 test('public profile is a field allowlist and never includes academic identity', async () => {
-  assert.deepEqual(await getPublicProfile(db, 'student'), { id: 'student', publicName: '公开同学' });
+  assert.deepEqual(await getPublicProfile(db, 'student'), { id: 'student', publicName: '公开同学', avatarUrl: null });
   assert.equal(await getPublicProfile(db, 'missing'), null);
   await db.update(accounts).set({ status: 'disabled' }).where(eq(accounts.id, 'student'));
   assert.equal(await getPublicProfile(db, 'student'), null);
@@ -222,7 +226,7 @@ test('administrator can create students and teachers; duplicate school numbers r
   const created = await call('/api/admin/accounts', body, cookie);
   assert.equal(created.status, 201);
   const { data } = await created.json();
-  assert.deepEqual(await getPublicProfile(db, data.id), { id: data.id, publicName: '新同学' });
+  assert.deepEqual(await getPublicProfile(db, data.id), { id: data.id, publicName: '新同学', avatarUrl: null });
   assert.equal((await call('/api/admin/accounts', body, cookie)).status, 409);
   assert.equal(await binding.prepare("SELECT COUNT(*) AS n FROM accounts WHERE public_name = '新同学'").first('n'), 1);
   assert.equal((await call('/api/admin/accounts', { ...body, role: 'admin' }, cookie)).status, 400);

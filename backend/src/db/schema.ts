@@ -8,9 +8,12 @@ export const accounts = sqliteTable('accounts', {
   status: text('status', { enum: ['active', 'disabled'] }).notNull().default('active'),
   createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
   lastLoginAt: integer('last_login_at'),
+  revision: integer('revision').notNull().default(1),
+  avatarKey: text('avatar_key'),
 }, (t) => [
   check('accounts_public_name', sql`length(trim(${t.publicName})) BETWEEN 1 AND 80`),
   check('accounts_status', sql`${t.status} IN ('active', 'disabled')`),
+  check('accounts_revision', sql`${t.revision} > 0`),
 ]);
 
 export const accountRoles = sqliteTable('account_roles', {
@@ -98,3 +101,38 @@ export const loginAttempts = sqliteTable('login_attempts', {
   attempts: integer('attempts').notNull(),
   expiresAt: integer('expires_at').notNull(),
 }, (t) => [index('login_attempts_expiry').on(t.expiresAt)]);
+
+export const accountPrivate = sqliteTable('account_private', {
+  accountId: text('account_id').primaryKey().notNull().references(() => accounts.id, { onDelete: 'restrict' }),
+  realName: text('real_name'),
+  email: text('email').unique(),
+  emailVerifiedAt: integer('email_verified_at'),
+  emailVersion: integer('email_version').notNull().default(1),
+}, (t) => [check('account_private_email_version', sql`${t.emailVersion} > 0`)]);
+
+export const accountAudit = sqliteTable('account_audit', {
+  id: text('id').primaryKey().notNull(),
+  actorId: text('actor_id').references(() => accounts.id, { onDelete: 'restrict' }),
+  targetId: text('target_id').notNull().references(() => accounts.id, { onDelete: 'restrict' }),
+  action: text('action').notNull(),
+  fields: text('fields').notNull(),
+  createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
+}, (t) => [index('account_audit_target_time').on(t.targetId, t.createdAt, t.id)]);
+
+export const emailTokens = sqliteTable('email_tokens', {
+  tokenHash: text('token_hash').primaryKey().notNull(),
+  accountId: text('account_id').notNull().references(() => accounts.id, { onDelete: 'cascade' }),
+  purpose: text('purpose', { enum: ['verify-email', 'reset-password'] }).notNull(),
+  emailVersion: integer('email_version').notNull(),
+  credentialVersion: integer('credential_version').notNull(),
+  expiresAt: integer('expires_at').notNull(),
+}, (t) => [
+  check('email_tokens_purpose', sql`${t.purpose} IN ('verify-email', 'reset-password')`),
+  index('email_tokens_account').on(t.accountId),
+  index('email_tokens_expiry').on(t.expiresAt),
+]);
+
+export const avatarObjects = sqliteTable('avatar_objects', {
+  objectKey: text('object_key').primaryKey().notNull(),
+  createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
+});

@@ -2,6 +2,8 @@
 
 当前提供 Workers / TypeScript / Drizzle / D1 后端，以及本地模拟 R2 绑定。业务进展和接口详见[账号与权限基础](../docs/组员1-账号与权限基础.md)。本轮基于 `main` 的提案重新实施，不依赖其他分支的代码或账号草案。
 
+账号列表、禁用／恢复、身份与私有资料维护、公开名称与头像、邮箱验证和找回密码已实现，完整接口见[账号管理与资料接口](../docs/组员1-账号管理与资料接口.md)。
+
 ## 启动
 
 要求 Node.js `^22.12.0 || >=24.0.0`、`pnpm@12.5.1`。所有命令在 `backend/` 执行，各应用独立安装依赖：
@@ -36,11 +38,12 @@ curl --fail http://127.0.0.1:8787/api/health
 | --- | --- |
 | `src/index.ts` | Worker 入口和错误响应 |
 | `src/auth/` | 密码、会话、账号接口 |
+| `src/accounts/` | 账号查询维护、资料、头像、修改审计 |
 | `src/permissions.ts` | 管理员、当前授课教师、学籍查询 |
 | `src/db/schema.ts` | 共享 Drizzle 表定义 |
 | `migrations/` | 按编号追加的 D1 SQL 迁移 |
 | `seed/local.sql` | 可重复执行的虚构关系数据 |
-| `tests/permissions.test.mjs` | 长期保留的身份、隐私、会话与事务回归测试 |
+| `tests/` | 长期保留的账号、隐私、会话、邮件和 R2 回归测试 |
 
 SQL 迁移与 Drizzle schema 同步修改。已共享或已应用的迁移不改写，后续追加新编号；测试读取全部迁移后执行真实 D1 查询，不使用伪造数据库。`pnpm check` 只执行 TypeScript 静态检查，`pnpm test` 不执行项目完整构建。
 
@@ -52,8 +55,10 @@ SQL 迁移与 Drizzle schema 同步修改。已共享或已应用的迁移不改
 
 ## 环境边界与未完成项
 
-本轮配置只包含可运行的 `local`，D1 ID 是本地占位符。云端 `dev`、生产 `coursestack.cn` 的资源绑定、部署、远程迁移、Secrets、CORS 和 CPU 配额验证分别作为后续任务处理，没有添加发布命令或连接云资源。R2 只有绑定，没有上传下载接口。
+本轮配置只包含可运行的 `local`，D1 ID 是本地占位符。云端 `dev`、生产 `coursestack.cn` 的资源绑定、部署、远程迁移、Secrets、CORS 和 CPU 配额验证分别作为后续任务处理，没有添加发布命令或连接云资源。R2 用于头像和本地模拟收件箱，尚无课程资料上传下载接口。
 
-当前后端已提供账号建号与登录闭环；管理页面、密码恢复、账号禁用管理接口、个人资料编辑、名单导入和授课管理接口仍待完成。学期采用单一当前学期指针保存历史关系；尚无学期切换管理接口或自动调度。不要把底层权限查询当成完整的内容下架、采纳或文件下载授权。
+当前后端已提供账号管理、资料维护和邮箱找回接口；管理页面、邮件确认页面、名单导入和授课管理接口仍待完成。学期采用单一当前学期指针保存历史关系；尚无学期切换管理接口或自动调度。不要把底层权限查询当成完整的内容下架、采纳或文件下载授权。
+
+管理员初始化后，应登录并设置、验证自己的邮箱；忘记密码通过已验证邮箱恢复。local 不发送真实邮件，`pnpm mail:local` 将模拟邮件导出到被忽略的 `backend/.local/mail/`，不打印邮件正文。`pnpm avatars:cleanup:local` 清理超过一小时的未引用头像。云端邮件服务及前端确认页面尚未联调，详见接口文档。
 
 参考：[Drizzle D1](https://orm.drizzle.team/docs/get-started/d1-new)、[D1 外键](https://developers.cloudflare.com/d1/sql-api/foreign-keys/)、[Wrangler 配置](https://developers.cloudflare.com/workers/wrangler/configuration/)、[bcrypt.js 的 72 字节限制](https://github.com/dcodeIO/bcrypt.js#security-considerations)。

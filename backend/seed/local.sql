@@ -13,6 +13,11 @@ INSERT INTO student_records (account_id, student_number, real_name) VALUES
   ('demo-student', 'DEMO-001', '虚构学生甲'), ('demo-history', 'DEMO-002', '虚构学生乙')
 ON CONFLICT(account_id) DO NOTHING;
 
+INSERT INTO account_private (account_id, real_name)
+SELECT a.id, s.real_name FROM accounts a LEFT JOIN student_records s ON s.account_id = a.id
+WHERE a.id IN ('demo-teacher', 'demo-student', 'demo-history')
+ON CONFLICT(account_id) DO NOTHING;
+
 INSERT INTO courses (id, name) VALUES ('demo-course', '演示课程') ON CONFLICT(id) DO NOTHING;
 INSERT INTO terms (id, name) VALUES ('demo-current', '演示当前学期'), ('demo-previous', '演示历年学期')
 ON CONFLICT(id) DO NOTHING;

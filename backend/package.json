@@ -11,6 +11,8 @@
     "check": "tsc --noEmit",
     "test": "node --experimental-strip-types --test tests/*.test.mjs",
     "admin:init:local": "node --experimental-strip-types scripts/init-admin.mjs",
+    "mail:local": "node scripts/export-local-mail.mjs",
+    "avatars:cleanup:local": "node --experimental-strip-types scripts/cleanup-local-avatars.mjs",
     "db:migrate:local": "wrangler d1 migrations apply DB --env local --local --persist-to .wrangler/state",
     "db:seed:local": "wrangler d1 execute DB --env local --local --persist-to .wrangler/state --file seed/local.sql"
   },

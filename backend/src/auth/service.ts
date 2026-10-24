@@ -93,12 +93,21 @@ export async function changePassword(binding: D1Database, request: Request, oldP
   const credential = await createDatabase(binding).select().from(credentials).where(eq(credentials.accountId, session.id)).get();
   if (!credential || !await verifyPassword(oldPassword, credential.passwordHash)) throw unauthorized();
   const passwordHash = await hashPassword(newPassword);
-  const result = await binding.prepare(`UPDATE credentials SET password_hash = ?, version = version + 1
-    WHERE account_id = ? AND version = ? AND password_hash = ?
-      AND EXISTS (SELECT 1 FROM accounts WHERE id = ? AND status = 'active')
-      AND EXISTS (SELECT 1 FROM sessions WHERE token_hash = ? AND expires_at > unixepoch())`)
-    .bind(passwordHash, session.id, session.version, credential.passwordHash, session.id, session.tokenHash).run();
-  if (result.meta.changes !== 1) throw new HttpError(409, 'SESSION_CHANGED', '会话已变化，请重新登录');
+  const receipt = crypto.randomUUID();
+  const target = `SELECT target_id FROM account_audit WHERE id = '${receipt}'`;
+  const result = await binding.batch([
+    binding.prepare(`INSERT INTO account_audit (id, actor_id, target_id, action, fields)
+      SELECT ?, a.id, a.id, 'password.change', '["password"]' FROM accounts a
+      JOIN credentials c ON c.account_id = a.id
+      JOIN sessions s ON s.account_id = a.id AND s.credential_version = c.version
+      WHERE a.id = ? AND a.status = 'active' AND c.version = ? AND c.password_hash = ?
+        AND s.token_hash = ? AND s.expires_at > unixepoch()`)
+      .bind(receipt, session.id, session.version, credential.passwordHash, session.tokenHash),
+    binding.prepare(`UPDATE credentials SET password_hash = ?, version = version + 1 WHERE account_id IN (${target})`).bind(passwordHash),
+    binding.prepare(`DELETE FROM sessions WHERE account_id IN (${target})`),
+    binding.prepare(`DELETE FROM email_tokens WHERE account_id IN (${target})`),
+  ]);
+  if (result[0].meta.changes !== 1) throw new HttpError(409, 'SESSION_CHANGED', '会话已变化，请重新登录');
   // Version matching revokes every old session atomically with the password update.
 }
 
@@ -117,5 +126,6 @@ export async function initializeAdministrator(binding: D1Database, password: str
       binding.prepare("INSERT INTO account_roles (account_id, role) VALUES (?, 'admin')").bind(id),
     ] : []),
     binding.prepare('INSERT INTO credentials (account_id, school_number, password_hash) VALUES (?, NULL, ?)').bind(id, passwordHash),
+    binding.prepare('INSERT INTO account_private (account_id) VALUES (?) ON CONFLICT(account_id) DO NOTHING').bind(id),
   ]);
 }

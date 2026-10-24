@@ -3,8 +3,7 @@ import { alias } from 'drizzle-orm/sqlite-core';
 import type { Database } from './db/index.ts';
 import { accounts, accountRoles, academicSettings, enrollments, studentRecords, teachingAssignments } from './db/schema.ts';
 
-// actorId must come from a future, verified server-side session, never request input.
-// These helpers are not authentication and are intentionally not exposed as HTTP APIs.
+// actorId must come from a verified server-side session, never request input.
 export async function isAdministrator(db: Database, actorId: string | null): Promise<boolean> {
   if (!actorId) return false;
   const row = await db.select({ id: accounts.id }).from(accounts)
@@ -24,8 +23,10 @@ export async function isCurrentCourseTeacher(db: Database, actorId: string | nul
 
 /** Explicit public projection: adding private columns later cannot expose them here. */
 export async function getPublicProfile(db: Database, accountId: string) {
-  return await db.select({ id: accounts.id, publicName: accounts.publicName }).from(accounts)
+  const row = await db.select({ id: accounts.id, publicName: accounts.publicName, avatarKey: accounts.avatarKey }).from(accounts)
     .where(and(eq(accounts.id, accountId), eq(accounts.status, 'active'))).get() ?? null;
+  if (!row) return null;
+  return { id: row.id, publicName: row.publicName, avatarUrl: row.avatarKey ? `/api/profiles/${encodeURIComponent(row.id)}/avatar` : null };
 }
 
 /** Teachers can read only current students of the specified current teaching course. */

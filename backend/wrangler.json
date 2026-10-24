@@ -8,7 +8,7 @@
   "env": {
     "local": {
       "name": "coursestack-local",
-      "vars": { "APP_ENV": "local" },
+      "vars": { "APP_ENV": "local", "PUBLIC_ORIGIN": "http://127.0.0.1:8787" },
       "d1_databases": [{
         "binding": "DB",
         "database_name": "coursestack-db-local",
