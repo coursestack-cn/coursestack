@@ -71,10 +71,10 @@ async function cookie(id) {
   return `coursestack_session=${token}`;
 }
 
-const call = (path, { method = 'GET', body, cookie, headers = {}, raw } = {}) => worker.fetch(new Request(`https://local${path}`, {
+const call = (path, { method = 'GET', body, cookie, headers = {}, raw } = {}, targetEnv = env) => worker.fetch(new Request(`https://local${path}`, {
   method, headers: { Origin: 'https://local', 'Content-Type': 'application/json', ...(cookie ? { Cookie: cookie } : {}), ...headers },
   ...(raw !== undefined ? { body: raw } : body === undefined ? {} : { body: JSON.stringify(body) }),
-}), env);
+}), targetEnv);
 const patch = (id, body, auth) => call(`/api/admin/accounts/${id}`, { method: 'PATCH', body, cookie: auth });
 const data = async (response) => (await response.json()).data;
 const tokenFromMail = async () => {
@@ -83,6 +83,29 @@ const tokenFromMail = async () => {
   const message = await (await bucket.get(messages.objects[0].key)).json();
   return { ...message, token: message.text.match(/#token=([a-f0-9]{64})/)[1] };
 };
+
+function pauseIssuance(path, options) {
+  const reached = Promise.withResolvers();
+  const resume = Promise.withResolvers();
+  let firstBatch = true;
+  const response = call(path, options, { ...env, DB: {
+    prepare: binding.prepare.bind(binding),
+    async batch(statements) {
+      // Keep real D1 execution, pausing after the route reads the recipient.
+      if (firstBatch) {
+        firstBatch = false;
+        reached.resolve();
+        await resume.promise;
+      }
+      return binding.batch(statements);
+    },
+  } });
+  return {
+    response,
+    paused: Promise.race([reached.promise, response.then(() => { throw new Error('Request finished before issuance was paused'); })]),
+    resume: resume.resolve,
+  };
+}
 
 test('account listing is admin-only, paginated and filtered without credentials in responses', async () => {
   assert.equal((await call('/api/admin/accounts')).status, 401);
@@ -242,6 +265,69 @@ test('changing email invalidates previous links and requires verification again'
   assert.equal((await call('/api/auth/email/verify', { method: 'POST', body: { token } })).status, 400);
   assert.equal(await binding.prepare("SELECT email_verified_at FROM account_private WHERE account_id = 'student'").first('email_verified_at'), null);
 });
+
+test('stale recovery issuance preserves the link issued after a password change', async () => {
+  const member = await cookie('student');
+  await binding.prepare("UPDATE account_private SET email_verified_at = unixepoch() WHERE account_id = 'student'").run();
+  const request = { method: 'POST', body: { email: 'student@example.test' } };
+  const stale = pauseIssuance('/api/auth/password/forgot', request);
+  try {
+    await stale.paused;
+    assert.equal((await call('/api/auth/password', { method: 'POST', cookie: member,
+      body: { oldPassword: password, newPassword: nextPassword } })).status, 200);
+    assert.equal((await call('/api/auth/password/forgot', request)).status, 202);
+    const fresh = await tokenFromMail();
+    stale.resume();
+    assert.equal((await stale.response).status, 202);
+    assert.equal(await binding.prepare('SELECT token_hash FROM email_tokens').first('token_hash'), await digest(fresh.token));
+    assert.equal((await tokenFromMail()).token, fresh.token);
+    assert.equal((await call('/api/auth/password/reset', { method: 'POST', body: { token: fresh.token, newPassword: password } })).status, 200);
+  } finally {
+    stale.resume();
+    await stale.response;
+  }
+});
+
+test('stale verification issuance preserves the link issued after an email change', async () => {
+  const admin = await cookie('admin'), member = await cookie('student');
+  const stale = pauseIssuance('/api/auth/email/verification', { method: 'POST', cookie: member });
+  try {
+    await stale.paused;
+    assert.equal((await patch('student', { revision: 1, email: 'new@example.test' }, admin)).status, 200);
+    assert.equal((await call('/api/auth/email/verification', { method: 'POST', cookie: await cookie('student') })).status, 202);
+    const fresh = await tokenFromMail();
+    assert.equal(fresh.to, 'new@example.test');
+    stale.resume();
+    assert.equal((await stale.response).status, 202);
+    assert.equal(await binding.prepare('SELECT token_hash FROM email_tokens').first('token_hash'), await digest(fresh.token));
+    assert.equal((await tokenFromMail()).token, fresh.token);
+    assert.equal((await call('/api/auth/email/verify', { method: 'POST', body: { token: fresh.token } })).status, 200);
+  } finally {
+    stale.resume();
+    await stale.response;
+  }
+});
+
+for (const purpose of ['verify-email', 'reset-password']) {
+  test(`resending ${purpose} replaces the previous link for the same account versions`, async () => {
+    const reset = purpose === 'reset-password';
+    if (reset) await binding.prepare("UPDATE account_private SET email_verified_at = unixepoch() WHERE account_id = 'student'").run();
+    const path = reset ? '/api/auth/password/forgot' : '/api/auth/email/verification';
+    const request = reset ? { method: 'POST', body: { email: 'student@example.test' } }
+      : { method: 'POST', cookie: await cookie('student') };
+    assert.equal((await call(path, request)).status, 202);
+    const first = await tokenFromMail();
+    await bucket.delete((await bucket.list({ prefix: 'local-mail/' })).objects.map((object) => object.key));
+    assert.equal((await call(path, request)).status, 202);
+    const latest = await tokenFromMail();
+    assert.equal(await binding.prepare('SELECT count(*) AS n FROM email_tokens').first('n'), 1);
+    const confirm = (token) => call(reset ? '/api/auth/password/reset' : '/api/auth/email/verify', {
+      method: 'POST', body: { token, ...(reset ? { newPassword: nextPassword } : {}) },
+    });
+    assert.equal((await confirm(first.token)).status, 400);
+    assert.equal((await confirm(latest.token)).status, 200);
+  });
+}
 
 test('expired tokens and verification tokens cannot reset passwords; concurrent recovery succeeds once', async () => {
   await call('/api/auth/email/verification', { method: 'POST', cookie: await cookie('student') });

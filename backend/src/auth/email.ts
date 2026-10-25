@@ -14,7 +14,10 @@ async function issueToken(env: Env, recipient: Recipient, purpose: Purpose) {
   const token = randomToken();
   const tokenHash = await digest(token);
   const result = await env.DB.batch([
-    env.DB.prepare('DELETE FROM email_tokens WHERE account_id = ? AND purpose = ?').bind(recipient.id, purpose),
+    // A stale recipient snapshot must not delete links issued for newer versions.
+    env.DB.prepare(`DELETE FROM email_tokens WHERE account_id = ? AND purpose = ?
+      AND email_version = ? AND credential_version = ?`)
+      .bind(recipient.id, purpose, recipient.emailVersion, recipient.credentialVersion),
     env.DB.prepare(`INSERT INTO email_tokens (token_hash, account_id, purpose, email_version, credential_version, expires_at)
       SELECT ?, a.id, ?, p.email_version, c.version, unixepoch() + 1800
       FROM accounts a JOIN account_private p ON p.account_id = a.id JOIN credentials c ON c.account_id = a.id
