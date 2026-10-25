@@ -47,7 +47,6 @@ beforeEach(async () => {
     await binding.exec(`
 DELETE FROM sessions;
 DELETE FROM avatar_objects;
-DELETE FROM email_tokens;
 DELETE FROM account_audit;
 DELETE FROM account_private;
 DELETE FROM credentials;

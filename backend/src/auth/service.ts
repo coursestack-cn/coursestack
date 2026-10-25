@@ -105,21 +105,30 @@ export async function changePassword(binding: D1Database, request: Request, oldP
             .bind(receipt, session.id, session.version, credential.passwordHash, session.tokenHash),
         binding.prepare(`UPDATE credentials SET password_hash = ?, version = version + 1 WHERE account_id IN (${target})`).bind(passwordHash),
         binding.prepare(`DELETE FROM sessions WHERE account_id IN (${target})`),
-        binding.prepare(`DELETE FROM email_tokens WHERE account_id IN (${target})`),
     ]);
     if (result[0].meta.changes !== 1) throw new HttpError(409, 'SESSION_CHANGED', '会话已变化，请重新登录');
     // Version matching revokes every old session atomically with the password update.
 }
 
-/** Offline-only initialization; no HTTP route may call this function. */
+/** Trusted maintenance metadata; never return this from a public HTTP route. */
+export async function administratorState(binding: D1Database) {
+    return binding.prepare(`SELECT a.id, a.status, c.version, c.school_number AS schoolNumber
+        FROM accounts a JOIN account_roles r ON r.account_id = a.id AND r.role = 'admin'
+        LEFT JOIN credentials c ON c.account_id = a.id`).first<{
+        id: string; status: 'active' | 'disabled'; version: number | null; schoolNumber: string | null;
+    }>();
+}
+
+/** Trusted maintenance only; no HTTP route may call this function. */
 export async function initializeAdministrator(binding: D1Database, password: string) {
-    const db = createDatabase(binding);
-    const existing = await db.select({ id: accountRoles.accountId }).from(accountRoles).where(eq(accountRoles.role, 'admin')).get();
-    if (existing && await db.select({ id: credentials.accountId }).from(credentials).where(eq(credentials.accountId, existing.id)).get()) {
+    const existing = await administratorState(binding);
+    if (existing && existing.version !== null) {
         throw new HttpError(409, 'ADMIN_EXISTS', '管理员已初始化，不能覆盖密码');
     }
+    if (existing && existing.status !== 'active') throw new HttpError(409, 'ADMIN_UNAVAILABLE', '管理员状态异常，请先检查数据库');
     const passwordHash = await hashPassword(password);
     const id = existing?.id ?? crypto.randomUUID();
+    const receipt = crypto.randomUUID();
     await binding.batch([
         ...(!existing ? [
             binding.prepare('INSERT INTO accounts (id, public_name) VALUES (?, ?)').bind(id, '管理员'),
@@ -127,5 +136,35 @@ export async function initializeAdministrator(binding: D1Database, password: str
         ] : []),
         binding.prepare('INSERT INTO credentials (account_id, school_number, password_hash) VALUES (?, NULL, ?)').bind(id, passwordHash),
         binding.prepare('INSERT INTO account_private (account_id) VALUES (?) ON CONFLICT(account_id) DO NOTHING').bind(id),
+        binding.prepare("INSERT INTO account_audit (id, actor_id, target_id, action, fields) VALUES (?, NULL, ?, 'admin.initialize', '[\"password\"]')")
+            .bind(receipt, id),
     ]);
+    return { id, receipt };
+}
+
+/** External recovery requires database write authority, not an application session. */
+export async function resetAdministratorPassword(
+    binding: D1Database, password: string, expected: { id: string; version: number },
+) {
+    if (!expected.id || !Number.isSafeInteger(expected.version) || expected.version < 1) {
+        throw new HttpError(400, 'INVALID_REVISION', '需要有效的管理员凭据版本');
+    }
+    const passwordHash = await hashPassword(password);
+    const receipt = crypto.randomUUID();
+    const target = `SELECT target_id FROM account_audit WHERE id = '${receipt}'`;
+    const result = await binding.batch([
+        binding.prepare(`INSERT INTO account_audit (id, actor_id, target_id, action, fields)
+            SELECT ?, NULL, a.id, 'admin.password.reset', '["password"]' FROM accounts a
+            JOIN account_roles r ON r.account_id = a.id AND r.role = 'admin'
+            JOIN credentials c ON c.account_id = a.id AND c.school_number IS NULL
+            WHERE a.id = ? AND a.status = 'active' AND c.version = ?`)
+            .bind(receipt, expected.id, expected.version),
+        binding.prepare(`UPDATE credentials SET password_hash = ?, version = version + 1 WHERE account_id IN (${target})`).bind(passwordHash),
+        binding.prepare(`DELETE FROM sessions WHERE account_id IN (${target})`),
+        binding.prepare(`UPDATE accounts SET revision = revision + 1 WHERE id IN (${target})`),
+        binding.prepare(`DELETE FROM login_attempts WHERE key IN (?, ?) AND EXISTS (SELECT 1 FROM account_audit WHERE id = ?)`)
+            .bind(await digest('admin-login'), await digest(`password:${expected.id}`), receipt),
+    ]);
+    if (result[0].meta.changes !== 1) throw new HttpError(409, 'ADMIN_CHANGED', '管理员凭据或状态已变化，请重新检查后操作');
+    return { id: expected.id, receipt };
 }
