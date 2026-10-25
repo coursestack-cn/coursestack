@@ -4,8 +4,6 @@ import { readFile, readdir } from 'node:fs/promises';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 import worker from '../src/index.ts';
 import { digest, hashPassword, randomToken } from '../src/auth/crypto.ts';
-import { consumeEmailToken } from '../src/auth/email.ts';
-import { sendMail } from '../src/auth/mail.ts';
 import { cleanupAvatars } from '../src/accounts/avatar.ts';
 
 let runtime, binding, bucket, env, passwordHash;
@@ -30,7 +28,7 @@ before(async () => {
     }));
     binding = await runtime.getD1Database('DB');
     bucket = await runtime.getR2Bucket('FILES');
-    env = { DB: binding, FILES: bucket, APP_ENV: 'local', PUBLIC_ORIGIN: 'https://local' };
+    env = { DB: binding, FILES: bucket, APP_ENV: 'local' };
     for (const file of (await readdir(new URL('../migrations/', import.meta.url))).filter((f) => f.endsWith('.sql')).sort()) {
         const sql = await readFile(new URL(`../migrations/${file}`, import.meta.url), 'utf8');
         await binding.batch(sql.split('-- statement-breakpoint').filter((s) => s.trim()).map((s) => binding.prepare(s)));
@@ -41,7 +39,6 @@ after(async () => { await runtime?.dispose(); });
 
 beforeEach(async () => {
     await binding.exec(`
-DELETE FROM email_tokens;
 DELETE FROM avatar_objects;
 DELETE FROM account_audit;
 DELETE FROM account_private;
@@ -77,35 +74,8 @@ const call = (path, { method = 'GET', body, cookie, headers = {}, raw } = {}, ta
 }), targetEnv);
 const patch = (id, body, auth) => call(`/api/admin/accounts/${id}`, { method: 'PATCH', body, cookie: auth });
 const data = async (response) => (await response.json()).data;
-const tokenFromMail = async () => {
-    const messages = await bucket.list({ prefix: 'local-mail/' });
-    assert.equal(messages.objects.length, 1);
-    const message = await (await bucket.get(messages.objects[0].key)).json();
-    return { ...message, token: message.text.match(/#token=([a-f0-9]{64})/)[1] };
-};
-
-function pauseIssuance(path, options) {
-    const reached = Promise.withResolvers();
-    const resume = Promise.withResolvers();
-    let firstBatch = true;
-    const response = call(path, options, { ...env, DB: {
-        prepare: binding.prepare.bind(binding),
-        async batch(statements) {
-            // Keep real D1 execution, pausing after the route reads the recipient.
-            if (firstBatch) {
-                firstBatch = false;
-                reached.resolve();
-                await resume.promise;
-            }
-            return binding.batch(statements);
-        },
-    } });
-    return {
-        response,
-        paused: Promise.race([reached.promise, response.then(() => { throw new Error('Request finished before issuance was paused'); })]),
-        resume: resume.resolve,
-    };
-}
+const resetPassword = (id, body, auth, headers) => call(`/api/admin/accounts/${id}/password`, { method: 'POST', body, cookie: auth, headers });
+const memberLogin = (schoolNumber, secret) => call('/api/auth/login', { method: 'POST', body: { schoolNumber, password: secret } });
 
 test('account listing is admin-only, paginated and filtered without credentials in responses', async () => {
     assert.equal((await call('/api/admin/accounts')).status, 401);
@@ -139,7 +109,7 @@ test('private changes synchronize school numbers and names, revoke sessions and 
     const result = await patch('student', { revision: 1, schoolNumber: ' 0009 ', realName: '更正姓名', email: ' New@Example.Test ' }, admin);
     assert.equal(result.status, 200);
     const profile = await data(result);
-    assert.equal(profile.schoolNumber, '0009'); assert.equal(profile.email, 'new@example.test'); assert.equal(profile.emailVerifiedAt, null);
+    assert.equal(profile.schoolNumber, '0009'); assert.equal(profile.email, 'new@example.test'); assert.equal('emailVerifiedAt' in profile, false);
     assert.deepEqual(await binding.prepare("SELECT student_number, real_name FROM student_records WHERE account_id = 'student'").first(), { student_number: '0009', real_name: '更正姓名' });
     assert.equal((await call('/api/auth/me', { cookie: member })).status, 401);
     const teacherRead = await data(await call('/api/courses/course/students/student/academic-record', { cookie: await cookie('teacher') }));
@@ -221,142 +191,48 @@ test('avatar upload/read/delete uses local R2 and enforces type, size and owners
     assert.equal((await bucket.list({ prefix: 'avatars/' })).objects.length, 0);
 });
 
-test('email verification is single-use and forgot-password hides missing/unverified addresses', async () => {
-    const body = { email: 'student@example.test' };
-    const beforeVerified = await call('/api/auth/password/forgot', { method: 'POST', body });
-    const unknown = await call('/api/auth/password/forgot', { method: 'POST', body: { email: 'missing@example.test' } });
-    assert.equal(beforeVerified.status, 202); assert.deepEqual(await beforeVerified.json(), await unknown.json());
-    assert.equal((await bucket.list({ prefix: 'local-mail/' })).objects.length, 0);
-    assert.equal((await call('/api/auth/email/verification', { method: 'POST', cookie: await cookie('student') })).status, 202);
-    const mail = await tokenFromMail();
-    assert.equal(mail.to, 'student@example.test'); assert.ok(mail.text.includes('https://local/verify-email#token='));
-    assert.equal((await call('/api/auth/email/verify', { method: 'POST', body: { token: mail.token } })).status, 200);
-    assert.equal((await call('/api/auth/email/verify', { method: 'POST', body: { token: mail.token } })).status, 400);
-    assert.ok(await binding.prepare("SELECT email_verified_at FROM account_private WHERE account_id = 'student'").first('email_verified_at'));
-});
-
-test('verified email password recovery changes the password and revokes every old session', async () => {
-    const first = await cookie('student'), second = await cookie('student');
-    await binding.prepare("UPDATE account_private SET email_verified_at = unixepoch() WHERE account_id = 'student'").run();
-    assert.equal((await call('/api/auth/password/forgot', { method: 'POST', body: { email: ' Student@Example.Test ' } })).status, 202);
-    const mail = await tokenFromMail();
-    const row = await binding.prepare('SELECT token_hash FROM email_tokens').first();
-    assert.equal(row.token_hash, await digest(mail.token)); assert.notEqual(row.token_hash, mail.token);
-    assert.equal((await call('/api/auth/password/reset', { method: 'POST', body: { token: mail.token, newPassword: nextPassword } })).status, 200);
+test('administrator resets a member password, revoking sessions and clearing that member throttle', async () => {
+    const admin = await cookie('admin'), first = await cookie('student'), second = await cookie('student'), other = await cookie('other');
+    for (const key of ['member:001', 'password:student', 'member:002']) {
+        await binding.prepare('INSERT INTO login_attempts VALUES (?, 99, unixepoch() + 900)').bind(await digest(key)).run();
+    }
+    const result = await resetPassword('student', { revision: 1, newPassword: nextPassword }, admin);
+    assert.equal(result.status, 200);
+    assert.equal((await data(result)).revision, 2);
     for (const auth of [first, second]) assert.equal((await call('/api/auth/me', { cookie: auth })).status, 401);
-    assert.equal((await call('/api/auth/login', { method: 'POST', body: { schoolNumber: '001', password } })).status, 401);
-    assert.equal((await call('/api/auth/login', { method: 'POST', body: { schoolNumber: '001', password: nextPassword } })).status, 200);
-    assert.equal((await call('/api/auth/password/reset', { method: 'POST', body: { token: mail.token, newPassword: password } })).status, 400);
+    assert.equal((await call('/api/auth/me', { cookie: other })).status, 200);
+    assert.equal((await call('/api/auth/me', { cookie: admin })).status, 200);
+    assert.equal(await binding.prepare('SELECT count(*) AS n FROM login_attempts').first('n'), 1);
+    assert.equal((await memberLogin('001', password)).status, 401);
+    assert.equal((await memberLogin('001', nextPassword)).status, 200);
+    const audit = await data(await call('/api/admin/accounts/student/audit', { cookie: admin }));
+    assert.equal(audit.items[0].action, 'password.reset'); assert.deepEqual(audit.items[0].fields, ['password']);
+    assert.equal(audit.items[0].actorId, 'admin'); assert.ok(!JSON.stringify(audit).includes(nextPassword));
 });
 
-test('recovery also works for the sole administrator without an account-number login', async () => {
-    await binding.prepare("UPDATE account_private SET email_verified_at = unixepoch() WHERE account_id = 'admin'").run();
-    await call('/api/auth/password/forgot', { method: 'POST', body: { email: 'admin@example.test' } });
-    const { token } = await tokenFromMail();
-    assert.equal((await call('/api/auth/password/reset', { method: 'POST', body: { token, newPassword: nextPassword } })).status, 200);
-    assert.equal((await call('/api/auth/admin/login', { method: 'POST', body: { password: nextPassword } })).status, 200);
-});
-
-test('changing email invalidates previous links and requires verification again', async () => {
+test('member password reset is admin-only, same-origin, revision-checked and never targets the administrator', async () => {
     const admin = await cookie('admin');
-    await call('/api/auth/email/verification', { method: 'POST', cookie: await cookie('student') });
-    const { token } = await tokenFromMail();
-    assert.equal((await patch('student', { revision: 1, email: 'new@example.test' }, admin)).status, 200);
-    assert.equal((await call('/api/auth/email/verify', { method: 'POST', body: { token } })).status, 400);
-    assert.equal(await binding.prepare("SELECT email_verified_at FROM account_private WHERE account_id = 'student'").first('email_verified_at'), null);
+    const body = { revision: 1, newPassword: nextPassword };
+    assert.equal((await resetPassword('student', body)).status, 401);
+    assert.equal((await resetPassword('student', body, await cookie('teacher'))).status, 403);
+    assert.equal((await resetPassword('student', body, admin, { Origin: 'https://evil.example' })).status, 403);
+    assert.equal((await call('/api/admin/accounts/student/password', { cookie: admin })).status, 405);
+    assert.equal((await resetPassword('admin', body, admin)).status, 403);
+    assert.equal((await resetPassword('missing', body, admin)).status, 404);
+    assert.equal((await resetPassword('student', { revision: 1, newPassword: 'short' }, admin)).status, 400);
+    assert.equal((await resetPassword('student', { ...body, schoolNumber: '999' }, admin)).status, 400);
+    assert.equal((await resetPassword('student', { ...body, revision: 2 }, admin)).status, 409);
+    const results = await Promise.all([nextPassword, 'fictional-third-password-789'].map((newPassword) => resetPassword('student', { revision: 1, newPassword }, admin)));
+    assert.deepEqual(results.map((r) => r.status).sort(), [200, 409]);
+    assert.equal(await binding.prepare("SELECT version FROM credentials WHERE account_id = 'student'").first('version'), 2);
+    assert.equal(await binding.prepare("SELECT count(*) AS n FROM account_audit WHERE action = 'password.reset'").first('n'), 1);
 });
 
-test('stale recovery issuance preserves the link issued after a password change', async () => {
+test('changing only a contact email keeps member sessions valid', async () => {
     const member = await cookie('student');
-    await binding.prepare("UPDATE account_private SET email_verified_at = unixepoch() WHERE account_id = 'student'").run();
-    const request = { method: 'POST', body: { email: 'student@example.test' } };
-    const stale = pauseIssuance('/api/auth/password/forgot', request);
-    try {
-        await stale.paused;
-        assert.equal((await call('/api/auth/password', { method: 'POST', cookie: member,
-            body: { oldPassword: password, newPassword: nextPassword } })).status, 200);
-        assert.equal((await call('/api/auth/password/forgot', request)).status, 202);
-        const fresh = await tokenFromMail();
-        stale.resume();
-        assert.equal((await stale.response).status, 202);
-        assert.equal(await binding.prepare('SELECT token_hash FROM email_tokens').first('token_hash'), await digest(fresh.token));
-        assert.equal((await tokenFromMail()).token, fresh.token);
-        assert.equal((await call('/api/auth/password/reset', { method: 'POST', body: { token: fresh.token, newPassword: password } })).status, 200);
-    } finally {
-        stale.resume();
-        await stale.response;
-    }
-});
-
-test('stale verification issuance preserves the link issued after an email change', async () => {
-    const admin = await cookie('admin'), member = await cookie('student');
-    const stale = pauseIssuance('/api/auth/email/verification', { method: 'POST', cookie: member });
-    try {
-        await stale.paused;
-        assert.equal((await patch('student', { revision: 1, email: 'new@example.test' }, admin)).status, 200);
-        assert.equal((await call('/api/auth/email/verification', { method: 'POST', cookie: await cookie('student') })).status, 202);
-        const fresh = await tokenFromMail();
-        assert.equal(fresh.to, 'new@example.test');
-        stale.resume();
-        assert.equal((await stale.response).status, 202);
-        assert.equal(await binding.prepare('SELECT token_hash FROM email_tokens').first('token_hash'), await digest(fresh.token));
-        assert.equal((await tokenFromMail()).token, fresh.token);
-        assert.equal((await call('/api/auth/email/verify', { method: 'POST', body: { token: fresh.token } })).status, 200);
-    } finally {
-        stale.resume();
-        await stale.response;
-    }
-});
-
-for (const purpose of ['verify-email', 'reset-password']) {
-    test(`resending ${purpose} replaces the previous link for the same account versions`, async () => {
-        const reset = purpose === 'reset-password';
-        if (reset) await binding.prepare("UPDATE account_private SET email_verified_at = unixepoch() WHERE account_id = 'student'").run();
-        const path = reset ? '/api/auth/password/forgot' : '/api/auth/email/verification';
-        const request = reset ? { method: 'POST', body: { email: 'student@example.test' } }
-            : { method: 'POST', cookie: await cookie('student') };
-        assert.equal((await call(path, request)).status, 202);
-        const first = await tokenFromMail();
-        await bucket.delete((await bucket.list({ prefix: 'local-mail/' })).objects.map((object) => object.key));
-        assert.equal((await call(path, request)).status, 202);
-        const latest = await tokenFromMail();
-        assert.equal(await binding.prepare('SELECT count(*) AS n FROM email_tokens').first('n'), 1);
-        const confirm = (token) => call(reset ? '/api/auth/password/reset' : '/api/auth/email/verify', {
-            method: 'POST', body: { token, ...(reset ? { newPassword: nextPassword } : {}) },
-        });
-        assert.equal((await confirm(first.token)).status, 400);
-        assert.equal((await confirm(latest.token)).status, 200);
-    });
-}
-
-test('expired tokens and verification tokens cannot reset passwords; concurrent recovery succeeds once', async () => {
-    await call('/api/auth/email/verification', { method: 'POST', cookie: await cookie('student') });
-    const verify = await tokenFromMail();
-    await assert.rejects(consumeEmailToken(env, verify.token, 'reset-password', nextPassword), (e) => e.code === 'INVALID_EMAIL_TOKEN');
-    await binding.prepare('UPDATE email_tokens SET expires_at = unixepoch() - 1').run();
-    await assert.rejects(consumeEmailToken(env, verify.token, 'verify-email'), (e) => e.code === 'INVALID_EMAIL_TOKEN');
-    await bucket.delete((await bucket.list({ prefix: 'local-mail/' })).objects.map((o) => o.key));
-    await binding.prepare("UPDATE account_private SET email_verified_at = unixepoch() WHERE account_id = 'student'").run();
-    await call('/api/auth/password/forgot', { method: 'POST', body: { email: 'student@example.test' } });
-    const reset = await tokenFromMail();
-    const results = await Promise.allSettled([consumeEmailToken(env, reset.token, 'reset-password', nextPassword), consumeEmailToken(env, reset.token, 'reset-password', password)]);
-    assert.equal(results.filter((r) => r.status === 'fulfilled').length, 1);
-});
-
-test('email routes reject cross-origin requests and throttle repeated recovery requests', async () => {
-    assert.equal((await call('/api/auth/password/forgot', { method: 'POST', body: { email: 'student@example.test' }, headers: { Origin: 'https://evil.example' } })).status, 403);
-    for (let i = 0; i < 3; i++) assert.equal((await call('/api/auth/password/forgot', { method: 'POST', body: { email: 'missing@example.test' } })).status, 202);
-    assert.equal((await call('/api/auth/password/forgot', { method: 'POST', body: { email: 'missing@example.test' } })).status, 429);
-});
-
-test('cloud mail adapter handles provider errors without exposing credentials or provider bodies', async () => {
-    const originalFetch = globalThis.fetch;
-    let captured;
-    globalThis.fetch = async (url, options) => { captured = { url, body: JSON.parse(options.body) }; return new Response('private provider error', { status: 500 }); };
-    try {
-        await assert.rejects(sendMail({ ...env, APP_ENV: 'dev', RESEND_API_KEY: 'test-placeholder', EMAIL_FROM: 'noreply@example.test' }, { to: 'student@example.test', subject: 'Test', text: 'Test only' }), (error) => error.code === 'MAIL_UNAVAILABLE' && !error.message.includes('private'));
-        assert.equal(captured.url, 'https://api.resend.com/emails'); assert.equal(captured.body.from, 'noreply@example.test');
-    } finally { globalThis.fetch = originalFetch; }
+    assert.equal((await patch('student', { revision: 1, email: 'new@example.test' }, await cookie('admin'))).status, 200);
+    assert.equal((await call('/api/auth/me', { cookie: member })).status, 200);
+    for (const path of ['/api/auth/email/verification', '/api/auth/password/forgot']) assert.equal((await call(path, { method: 'POST', body: {} })).status, 404);
 });
 
 test('failed old-avatar cleanup preserves a successful update and is recoverable', async () => {
@@ -373,13 +249,10 @@ test('failed old-avatar cleanup preserves a successful update and is recoverable
     assert.equal((await call('/api/profiles/student/avatar')).status, 200);
 });
 
-test('revoked administrator sessions cannot mutate accounts and disabled accounts cannot redeem email tokens', async () => {
+test('revoked administrator sessions cannot mutate accounts or reset passwords', async () => {
     const admin = await cookie('admin');
     await binding.prepare("DELETE FROM sessions WHERE account_id = 'admin'").run();
     assert.equal((await patch('student', { revision: 1, realName: '越权修改' }, admin)).status, 401);
-    await binding.prepare("UPDATE account_private SET email_verified_at = unixepoch() WHERE account_id = 'student'").run();
-    await call('/api/auth/password/forgot', { method: 'POST', body: { email: 'student@example.test' } });
-    const { token } = await tokenFromMail();
-    assert.equal((await patch('student', { revision: 1, status: 'disabled' }, await cookie('admin'))).status, 200);
-    await assert.rejects(consumeEmailToken(env, token, 'reset-password', nextPassword), (error) => error.code === 'INVALID_EMAIL_TOKEN');
+    assert.equal((await resetPassword('student', { revision: 1, newPassword: nextPassword }, admin)).status, 401);
+    assert.equal((await memberLogin('001', password)).status, 200);
 });

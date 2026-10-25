@@ -1,3 +1,4 @@
+import { digest, hashPassword, passwordField } from '../auth/crypto.ts';
 import { HttpError, stringField } from '../http.ts';
 import { mutateAccount, type Session } from './mutations.ts';
 import { allowFields, emailField, pagination, revisionField } from './validation.ts';
@@ -5,14 +6,13 @@ import { allowFields, emailField, pagination, revisionField } from './validation
 type AccountRow = {
     id: string; publicName: string; status: 'active' | 'disabled'; revision: number;
     createdAt: number; lastLoginAt: number | null; avatarKey: string | null;
-    schoolNumber: string | null; realName: string | null; email: string | null;
-    emailVerifiedAt: number | null; roles: string;
+    schoolNumber: string | null; realName: string | null; email: string | null; roles: string;
 };
 
 const projection = `a.id, a.public_name AS publicName, a.status, a.revision,
     a.created_at AS createdAt, a.last_login_at AS lastLoginAt, a.avatar_key AS avatarKey,
     c.school_number AS schoolNumber, COALESCE(p.real_name, sr.real_name) AS realName,
-    p.email, p.email_verified_at AS emailVerifiedAt,
+    p.email,
     (SELECT json_group_array(role) FROM account_roles WHERE account_id = a.id) AS roles`;
 const tables = `accounts a LEFT JOIN credentials c ON c.account_id = a.id
     LEFT JOIN account_private p ON p.account_id = a.id LEFT JOIN student_records sr ON sr.account_id = a.id`;
@@ -76,15 +76,12 @@ export async function updateAccount(binding: D1Database, session: Session, id: s
     if (student && (!realName || !schoolNumber)) throw new HttpError(400, 'STUDENT_IDENTITY_REQUIRED', '学生需要真实姓名和学号');
     const numberChanged = schoolNumber !== current.schoolNumber;
     if (numberChanged && !current.schoolNumber) throw new HttpError(409, 'CREDENTIALS_REQUIRED', '该账号尚未建立登录凭据');
-    const emailChanged = email !== current.email;
     const statusChanged = body.status !== undefined && body.status !== current.status;
     await mutateAccount(binding, session, id, revision, 'account.update', fields, true, (gate) => [
         ...(body.status !== undefined ? [binding.prepare(`UPDATE accounts SET status = ? WHERE id = ? AND ${gate}`).bind(body.status, id)] : []),
         binding.prepare(`INSERT INTO account_private (account_id, real_name, email)
             SELECT ?, ?, ? WHERE ${gate} ON CONFLICT(account_id) DO UPDATE SET
-            real_name = excluded.real_name, email = excluded.email,
-            email_verified_at = CASE WHEN email IS excluded.email THEN email_verified_at ELSE NULL END,
-            email_version = email_version + CASE WHEN email IS excluded.email THEN 0 ELSE 1 END`).bind(id, realName, email),
+            real_name = excluded.real_name, email = excluded.email`).bind(id, realName, email),
         ...(roleChanged ? [
             binding.prepare(`DELETE FROM student_records WHERE account_id = ? AND ${gate}`).bind(id),
             binding.prepare(`DELETE FROM account_roles WHERE account_id = ? AND ${gate}`).bind(id),
@@ -93,11 +90,28 @@ export async function updateAccount(binding: D1Database, session: Session, id: s
         ...(student ? [binding.prepare(`INSERT INTO student_records (account_id, student_number, real_name)
             SELECT ?, ?, ? WHERE ${gate} ON CONFLICT(account_id) DO UPDATE SET student_number = excluded.student_number, real_name = excluded.real_name`)
             .bind(id, schoolNumber, realName)] : []),
-        ...(numberChanged || roleChanged || statusChanged || emailChanged ? [
+        ...(numberChanged || roleChanged || statusChanged ? [
             binding.prepare(`UPDATE credentials SET school_number = ?, version = version + 1 WHERE account_id = ? AND ${gate}`).bind(schoolNumber, id),
             binding.prepare(`DELETE FROM sessions WHERE account_id = ? AND ${gate}`).bind(id),
-            binding.prepare(`DELETE FROM email_tokens WHERE account_id = ? AND ${gate}`).bind(id),
         ] : []),
+    ]);
+    return accountDetail(binding, id);
+}
+
+// Members recover access by asking the administrator, who verifies identity
+// outside the system. The sole administrator uses the external reset command.
+export async function resetMemberPassword(binding: D1Database, session: Session, id: string, body: Record<string, unknown>) {
+    allowFields(body, ['revision', 'newPassword']);
+    const revision = revisionField(body.revision);
+    const passwordHash = await hashPassword(passwordField(body.newPassword));
+    const current = await accountDetail(binding, id);
+    if (current.roles.includes('admin')) throw new HttpError(403, 'ADMIN_PROTECTED', '管理员密码只能通过改密或外部重置命令修改');
+    if (!current.schoolNumber) throw new HttpError(409, 'CREDENTIALS_REQUIRED', '该账号尚未建立登录凭据');
+    const throttles = [await digest(`member:${current.schoolNumber}`), await digest(`password:${id}`)];
+    await mutateAccount(binding, session, id, revision, 'password.reset', ['password'], true, (gate) => [
+        binding.prepare(`UPDATE credentials SET password_hash = ?, version = version + 1 WHERE account_id = ? AND ${gate}`).bind(passwordHash, id),
+        binding.prepare(`DELETE FROM sessions WHERE account_id = ? AND ${gate}`).bind(id),
+        binding.prepare(`DELETE FROM login_attempts WHERE key IN (?, ?) AND ${gate}`).bind(...throttles),
     ]);
     return accountDetail(binding, id);
 }
