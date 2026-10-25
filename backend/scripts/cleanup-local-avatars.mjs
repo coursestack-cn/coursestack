@@ -1,10 +1,11 @@
+import { fileURLToPath } from 'node:url';
 import { getPlatformProxy } from 'wrangler';
 import { cleanupAvatars } from '../src/accounts/avatar.ts';
 
 const platform = await getPlatformProxy({
-  configPath: new URL('../wrangler.json', import.meta.url).pathname,
+  configPath: fileURLToPath(new URL('../wrangler.json', import.meta.url)),
   environment: 'local', envFiles: [], remoteBindings: false,
-  persist: { path: new URL('../.wrangler/state/v3', import.meta.url).pathname },
+  persist: { path: fileURLToPath(new URL('../.wrangler/state/v3', import.meta.url)) },
 });
 try {
   const count = await cleanupAvatars(platform.env);

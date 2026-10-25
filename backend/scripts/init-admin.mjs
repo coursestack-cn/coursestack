@@ -1,3 +1,4 @@
+import { fileURLToPath } from 'node:url';
 import { getPlatformProxy } from 'wrangler';
 import { initializeAdministrator } from '../src/auth/service.ts';
 import { HttpError } from '../src/http.ts';
@@ -35,11 +36,11 @@ try {
   const confirmation = await hiddenPrompt('再次输入密码：');
   if (password !== confirmation) throw new HttpError(400, 'MISMATCH', '两次密码不一致');
   platform = await getPlatformProxy({
-    configPath: new URL('../wrangler.json', import.meta.url).pathname,
+    configPath: fileURLToPath(new URL('../wrangler.json', import.meta.url)),
     environment: 'local',
     envFiles: [],
     remoteBindings: false,
-    persist: { path: new URL('../.wrangler/state/v3', import.meta.url).pathname },
+    persist: { path: fileURLToPath(new URL('../.wrangler/state/v3', import.meta.url)) },
   });
   await initializeAdministrator(platform.env.DB, password);
   console.log('本地唯一管理员初始化完成。');

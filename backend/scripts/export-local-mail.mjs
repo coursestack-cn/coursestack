@@ -1,11 +1,12 @@
 import { mkdir, writeFile } from 'node:fs/promises';
+import { fileURLToPath } from 'node:url';
 import { getPlatformProxy } from 'wrangler';
 
 const output = new URL('../.local/mail/', import.meta.url);
 const platform = await getPlatformProxy({
-  configPath: new URL('../wrangler.json', import.meta.url).pathname,
+  configPath: fileURLToPath(new URL('../wrangler.json', import.meta.url)),
   environment: 'local', envFiles: [], remoteBindings: false,
-  persist: { path: new URL('../.wrangler/state/v3', import.meta.url).pathname },
+  persist: { path: fileURLToPath(new URL('../.wrangler/state/v3', import.meta.url)) },
 });
 try {
   await mkdir(output, { recursive: true, mode: 0o700 });
