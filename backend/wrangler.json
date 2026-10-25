@@ -32,6 +32,33 @@
                     "remote": false
                 }
             ]
+        },
+        "dev": {
+            "name": "coursestack-dev",
+            "workers_dev": true,
+            "routes": [],
+            "vars": {
+                "APP_ENV": "dev"
+            },
+            "assets": {
+                "directory": "../frontend/dist",
+                "not_found_handling": "single-page-application",
+                "run_worker_first": ["/api", "/api/*"]
+            },
+            "d1_databases": [
+                {
+                    "binding": "DB",
+                    "database_name": "coursestack-db-dev",
+                    "database_id": "8ce3c6c3-826f-482e-830b-72799eba4417",
+                    "migrations_dir": "migrations"
+                }
+            ],
+            "r2_buckets": [
+                {
+                    "binding": "FILES",
+                    "bucket_name": "coursestack-files-dev"
+                }
+            ]
         }
     }
 }
