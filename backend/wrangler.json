@@ -1,0 +1,38 @@
+{
+    "$schema": "node_modules/wrangler/config-schema.json",
+    "name": "coursestack",
+    "main": "src/index.ts",
+    "compatibility_date": "2026-10-21",
+    "workers_dev": false,
+    "preview_urls": false,
+    "dev": {
+        "ip": "127.0.0.1",
+        "port": 8787,
+        "local_protocol": "http"
+    },
+    "env": {
+        "local": {
+            "name": "coursestack-local",
+            "vars": {
+                "APP_ENV": "local",
+                "PUBLIC_ORIGIN": "http://127.0.0.1:8787"
+            },
+            "d1_databases": [
+                {
+                    "binding": "DB",
+                    "database_name": "coursestack-db-local",
+                    "database_id": "00000000-0000-0000-0000-000000000001",
+                    "migrations_dir": "migrations",
+                    "remote": false
+                }
+            ],
+            "r2_buckets": [
+                {
+                    "binding": "FILES",
+                    "bucket_name": "coursestack-files-local",
+                    "remote": false
+                }
+            ]
+        }
+    }
+}
