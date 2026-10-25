@@ -1,0 +1,128 @@
+*,
+*::before,
+*::after {
+    box-sizing: border-box;
+}
+
+body {
+    margin: 0;
+    min-width: 320px;
+    background: var(--color-bg);
+    color: var(--color-text);
+    font-family: var(--font-sans);
+    font-size: var(--font-size-base);
+    font-weight: var(--font-weight-regular);
+    line-height: var(--line-height-base);
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+p,
+ul,
+ol,
+dl,
+dd,
+blockquote,
+figure,
+pre {
+    margin: 0;
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6,
+strong,
+b {
+    font-weight: var(--font-weight-bold);
+}
+
+h1,
+h2,
+h3,
+h4,
+h5,
+h6 {
+    line-height: var(--line-height-tight);
+}
+
+h1 {
+    font-size: var(--font-size-2xl);
+}
+
+h2 {
+    font-size: var(--font-size-xl);
+}
+
+h3 {
+    font-size: var(--font-size-lg);
+}
+
+h4,
+h5,
+h6 {
+    font-size: var(--font-size-base);
+}
+
+ul,
+ol {
+    padding-inline-start: var(--space-6);
+}
+
+button,
+input,
+select,
+textarea {
+    font: inherit;
+}
+
+a {
+    color: var(--color-accent);
+    text-decoration: none;
+}
+
+a:hover {
+    color: var(--color-accent-hover);
+    text-decoration: underline;
+}
+
+:focus-visible {
+    outline: 2px solid var(--color-focus-ring);
+    outline-offset: 2px;
+}
+
+::selection {
+    background: var(--color-selection);
+    color: var(--color-text);
+}
+
+code,
+pre,
+kbd {
+    background: var(--color-surface-sunken);
+    font-family: var(--font-mono);
+    font-size: var(--font-size-md);
+}
+
+code,
+kbd {
+    padding-inline: var(--space-1);
+    border-radius: var(--radius-sm);
+}
+
+pre {
+    overflow: auto;
+    padding: var(--space-4);
+    border-radius: var(--radius-md);
+}
+
+pre code {
+    padding: 0;
+    background: none;
+}
