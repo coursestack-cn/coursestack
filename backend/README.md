@@ -6,31 +6,40 @@
 
 ## 启动
 
-要求 Node.js `^22.12.0 || >=24.0.0`、`pnpm@12.5.1`。所有命令在 `backend/` 执行，各应用独立安装依赖：
+要求 Node.js `^22.12.0 || >=24.0.0`、`pnpm@12.5.1`。所有命令在 `backend/` 执行，各应用独立安装依赖。首次准备本地环境：
 
 ```sh
 pnpm install --frozen-lockfile
-pnpm db:migrate:local
-pnpm db:seed:local
+pnpm db:setup:local
 pnpm admin:init:local
+```
+
+`db:setup:local` 依次执行本地迁移和演示数据初始化，可重复运行，不重置已有数据或管理员密码。本地数据库已准备好后，日常只需启动：
+
+```sh
+pnpm dev
+```
+
+类型检查和隔离回归测试分别执行：
+
+```sh
 pnpm check
 pnpm test
-pnpm dev
 ```
 
 `admin:init:local` 在交互终端输入两次密码且不回显；初始化唯一管理员，再次执行会拒绝覆盖现有密码。至少 12 个字符且 UTF-8 不超过 72 字节。不要通过命令行参数或提交文件传入密码。没有预置密码，不需要首次登录强制改密。自动化测试使用隔离的虚构账号，不替你设置日常数据库的管理员密码。
 
 种子仅创建虚构教师、学生、课程和两个演示学期，没有登录凭据。首次种子将未配置的当前学期设为演示当前学期，重复执行不覆盖已选学期或已编辑的数据。种子不是正式账号导入工具。
 
-开发、迁移、种子和管理员初始化共用 `backend/.wrangler/state`。管理员初始化通过 Wrangler 代理访问其 `v3` 子目录，与 CLI 数据位置一致。测试通过 Miniflare 启动临时 D1，退出销毁，不连接日常数据库。所有本地命令均使用 `local`，绑定名 `DB`、`FILES`；不读取凭据 CSV、不需要云端登录、不连接远程业务资源。
+开发、迁移、种子和管理员初始化共用 `backend/.wrangler/state`。管理员初始化、邮件导出和头像清理通过 Wrangler 代理访问其 `v3` 子目录，与 CLI 数据位置一致；脚本将文件 URL 转换为操作系统路径，支持 Windows 盘符、空格和中文目录。测试通过 Miniflare 启动临时 D1，退出销毁，不连接日常数据库。所有本地命令均使用 `local`，绑定名 `DB`、`FILES`；不读取凭据 CSV、不需要云端登录、不连接远程业务资源。
 
 默认后端地址：`http://127.0.0.1:8787`。健康检查：
 
 ```sh
-curl --fail http://127.0.0.1:8787/api/health
+curl.exe --fail http://127.0.0.1:8787/api/health
 ```
 
-响应：`{"data":{"status":"ok","environment":"local","database":"ok"}}`。健康检查验证 D1 连通性，业务使用前仍必须执行迁移。
+上例适用于 Windows；macOS / Linux 使用 `curl`。响应：`{"data":{"status":"ok","environment":"local","database":"ok"}}`。健康检查验证 D1 连通性，业务使用前仍必须执行迁移。后端目前仅提供 API，直接访问根路径不会出现登录页面。
 
 ## 文件与协作入口
 
@@ -50,6 +59,25 @@ SQL 迁移与 Drizzle schema 同步修改。已共享或已应用的迁移不改
 ## 前端联调
 
 前端工程当前未包含在 main 中。组员 2 初始化后，浏览器使用相对地址 `/api/...`，开发代理保留 `/api` 路径、Cookie、Set-Cookie 和原始 Host。代理不得把 Host 改写为后端地址，否则来源检查会拒绝请求。生产需要同源反向代理，跨域部署另定配置。
+
+Vite 的 `server.proxy` 配置示例：
+
+```ts
+proxy: {
+  '^/api(?:[/?]|$)': {
+    target: 'http://127.0.0.1:8787',
+    changeOrigin: false,
+  },
+}
+```
+
+邮件链接由 `PUBLIC_ORIGIN` 决定。只测试后端时默认使用 `http://127.0.0.1:8787`；前端启动后，将它设为浏览器访问前端的实际地址。例如前端运行在 `http://127.0.0.1:5173`：
+
+```sh
+pnpm dev --var PUBLIC_ORIGIN:http://127.0.0.1:5173
+```
+
+端口变化时相应调整该值。前端使用 `/api` 代理调用接口，不直接跨域请求后端端口。
 
 所有写接口要求 `Origin` 与请求 URL 的 origin 完全一致；JSON 接口使用 `Content-Type: application/json`。Cookie 为 HttpOnly、SameSite=Strict，HTTPS 下加 Secure，前端不用读取 token 或将其保存到 localStorage。curl 等客户端测试写接口也要提供匹配的 Origin。管理员登录页与普通成员登录页使用不同接口。
 
