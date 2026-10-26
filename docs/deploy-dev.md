@@ -20,7 +20,7 @@ Both environments are defined in `backend/wrangler.json`. In each environment, o
 
 Dev is shared by the whole team. Each deployment replaces the previous one, and the dev D1 holds shared test data.
 
-Every deployment also overwrites the Worker settings that Wrangler manages, including variables, bindings, routes, and observability, with the values in `backend/wrangler.json`. Change those settings in `wrangler.json`, not in the dashboard. Both cloud environments enable Workers Logs there. Secrets are not part of the file and are kept across deployments.
+Every deployment also overwrites the Worker settings that Wrangler manages, including variables, bindings, routes, and observability, with the values in `backend/wrangler.json`. Change those settings in `wrangler.json`, not in the dashboard. Both cloud environments enable Workers Logs, Traces, and Issues there. Secrets are not part of the file and are kept across deployments.
 
 ## GitHub Actions
 

@@ -51,7 +51,13 @@
                 "APP_ENV": "dev"
             },
             "observability": {
-                "enabled": true
+                "enabled": true,
+                "traces": {
+                    "enabled": true
+                },
+                "issues": {
+                    "enabled": true
+                }
             },
             "assets": {
                 "directory": "../frontend/dist",
@@ -89,7 +95,13 @@
                 "APP_ENV": "production"
             },
             "observability": {
-                "enabled": true
+                "enabled": true,
+                "traces": {
+                    "enabled": true
+                },
+                "issues": {
+                    "enabled": true
+                }
             },
             "assets": {
                 "directory": "../frontend/dist",
