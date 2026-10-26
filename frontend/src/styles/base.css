@@ -82,12 +82,13 @@ textarea {
     font: inherit;
 }
 
-a {
+/* Zero specificity so component styles always win; disabled links have no href. */
+:where(a) {
     color: var(--color-accent);
     text-decoration: none;
 }
 
-a:hover {
+:where(a[href]:hover) {
     color: var(--color-accent-hover);
     text-decoration: underline;
 }
