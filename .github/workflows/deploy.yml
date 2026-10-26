@@ -30,6 +30,10 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 30
+    # The GitHub environment of the same name holds the Cloudflare secrets and admits only main.
+    environment:
+      name: ${{ inputs.environment || 'dev' }}
+      url: ${{ inputs.environment == 'production' && 'https://coursestack.cn' || 'https://dev.coursestack.cn' }}
     env:
       CI: 'true'
       DEPLOY_ENV: ${{ inputs.environment || 'dev' }}
@@ -54,12 +58,12 @@ jobs:
             *) echo "::error::Unsupported deployment environment"; exit 1 ;;
           esac
           if [[ -z "$CLOUDFLARE_API_TOKEN" || -z "$CLOUDFLARE_ACCOUNT_ID" ]]; then
-            echo "::error::Set CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID in the repository's Actions secrets."
+            echo "::error::Set CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID as secrets of the $DEPLOY_ENV GitHub environment."
             exit 1
           fi
 
       - name: Set up pnpm and Node.js
-        uses: pnpm/setup@v3
+        uses: pnpm/setup@fa36a5ef7dcdefc3a7cb25655c122e00cf6e636e # v3.1.2
         with:
           working-directory: backend
           runtime: node@24

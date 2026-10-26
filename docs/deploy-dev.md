@@ -20,30 +20,36 @@ Both environments are defined in `backend/wrangler.json`. In each environment, o
 
 Dev is shared by the whole team. Each deployment replaces the previous one, and the dev D1 holds shared test data.
 
+Every deployment also overwrites the Worker settings that Wrangler manages, including variables, bindings, routes, and observability, with the values in `backend/wrangler.json`. Change those settings in `wrangler.json`, not in the dashboard. Both cloud environments enable Workers Logs there. Secrets are not part of the file and are kept across deployments.
+
 ## GitHub Actions
 
 The workflow is [Deploy Workers](../.github/workflows/deploy.yml).
 
 ### One-time repository setup
 
-In **Settings > Secrets and variables > Actions**, add these **repository secrets** once. Dev and production share the same token and account; the workflow does not require GitHub Environments.
+The deploy job runs in the GitHub environment named after its target, `dev` or `production`, the same name as the Wrangler environment it deploys. Under **Settings > Environments**, create both environments and configure each one:
+
+- **Deployment branches and tags**: choose **Selected branches and tags** and add only `main`. GitHub then refuses to start the job, or to release the environment's secrets, for any other ref, even when a branch edits the workflow.
+- **Environment secrets**: add the two secrets below.
+- For `production`, also enable **Required reviewers**, so a manual production run waits for approval before it migrates or deploys anything.
 
 | Secret | Value |
 | --- | --- |
-| `CLOUDFLARE_API_TOKEN` | The shared Cloudflare token authorized to deploy both Workers, bind their resources, manage their Custom Domains, and apply D1 migrations. |
-| `CLOUDFLARE_ACCOUNT_ID` | The Cloudflare account containing both environments' Workers, D1 databases, R2 buckets, and domain. The ID is not sensitive, but the workflow reads it from Secrets too. |
+| `CLOUDFLARE_API_TOKEN` | A Cloudflare token authorized to deploy the environment's Worker, bind its resources, manage its Custom Domain, and apply D1 migrations. |
+| `CLOUDFLARE_ACCOUNT_ID` | The Cloudflare account containing the environment's Worker, D1 database, R2 bucket, and domain. The ID is not sensitive, but the workflow reads it from Secrets too. |
 
-Use the **Edit Cloudflare Workers** token template as a starting point, ensure it includes D1 write access, and restrict account and zone access to the project's resources. Never place the token in YAML or other repository files. The workflow passes credentials only to the settings check, migration, and deployment steps.
+The two environments may hold the same token or a separate token each. Use the **Edit Cloudflare Workers** token template as a starting point, ensure it includes D1 write access, and restrict account and zone access to the project's resources. Never place the token in YAML or other repository files. The workflow passes credentials only to the settings check, migration, and deployment steps.
 
-If `dev` and `production` were already created under **Settings > Environments**, add the two repository secrets above before removing those unused GitHub environments. The `environment` workflow input selects the Wrangler deployment target; it does not refer to a GitHub Environment. Production runs are started manually, without a GitHub Environment approval step.
+Once both environments hold the secrets, delete the repository-level `CLOUDFLARE_API_TOKEN` and `CLOUDFLARE_ACCOUNT_ID` under **Settings > Secrets and variables > Actions**. Workflows on any branch can read repository secrets, while environment secrets only reach runs that the environment admits. If an environment does not exist yet, the first run creates it without branch rules or secrets, so set up both environments before relying on them.
 
 The workflow must be merged into the default branch (`main`) before GitHub exposes **Run workflow**. Both apps and their lockfiles must also be present on `main`.
 
 ### Automatic and manual runs
 
 - A push to `main`, including a merged PR, deploys to `dev`.
-- To deploy manually, open **Actions > Deploy Workers > Run workflow**, select branch `main`, then choose `dev` or `production` in the `environment` dropdown. The default is `dev`.
-- Runs on other branches are skipped because remote migrations must already be merged into `main`.
+- To deploy manually, open **Actions > Deploy Workers > Run workflow**, select branch `main`, then choose `dev` or `production` in the `environment` dropdown. The default is `dev`. A production run then waits for a required reviewer.
+- Runs on other branches are skipped because remote migrations must already be merged into `main`. The environments' branch rules enforce the same limit on GitHub's side.
 
 Each run installs the locked dependencies, checks backend types, runs backend tests, and checks/builds the frontend. Only after those steps pass does it apply pending D1 migrations and deploy the Worker with the frontend assets using an explicit `--env`. It then checks `/api/health` for the expected environment and database status, requests `/`, and records the commit and URL in the run summary.
 
@@ -62,7 +68,7 @@ The ops owner maintains the following domain mappings in Cloudflare Workers & Pa
 | `coursestack` | `coursestack.cn` |
 | `coursestack-dev` | `dev.coursestack.cn` |
 
-Keep both the `workers.dev` entry and Version URLs / Preview URLs disabled. `backend/wrangler.json` records the Custom Domains and explicitly disables `workers_dev` and `preview_urls` for cloud deployments. The `local` environment overrides `routes` with an empty array so it does not inherit the production domain. Do not re-enable the old URLs during deployment.
+Keep both the `workers.dev` entry and Version URLs / Preview URLs disabled. `backend/wrangler.json` records the Custom Domains and explicitly disables `workers_dev` and `preview_urls` for cloud deployments. The top-level configuration has no routes, so no environment inherits a domain by accident. Do not re-enable the old URLs during deployment.
 
 Browser API calls continue to use `/api/...`. Session Cookies have no `Domain` attribute, and write requests require an exact match between `Origin` and the request URL origin. Do not share Cookies across the two domains or allow one environment's Origin to write to the other.
 
@@ -151,7 +157,7 @@ Set `CI=1` as well when an agent runs the commands, so Wrangler does not wait fo
     pnpm exec wrangler deploy --env dev
     ```
 
-Always pass `--env dev` for these commands. Production uses the separate `--env production` configuration. Never use a plain `wrangler deploy`: the top-level configuration still has no resource bindings or frontend assets.
+Always pass `--env dev` for these commands. Production uses the separate `--env production` configuration. Never omit `--env`. The top-level configuration only names a placeholder Worker, `coursestack-env-required`, without an entry point, bindings, or routes: a plain `wrangler deploy` fails, and commands such as `wrangler secret` or `wrangler rollback` would target that placeholder instead of a real Worker.
 
 ## Verify
 
