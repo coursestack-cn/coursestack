@@ -1,15 +1,21 @@
-<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="48 48 416 416">
+<svg xmlns="http://www.w3.org/2000/svg" width="512" height="512" viewBox="36 48 432 432" fill="none">
   <defs>
     <g id="coursestack-mask-book">
-      <path d="M 257.5 47.6 Q 263.5 44 269.5 47.6 L 439.5 149.6 Q 443.5 152 443.5 156.8 V 188 Q 443.5 192 439.5 194.4 L 269.5 296.4 Q 263.5 300 257.5 296.4 L 83.5 192 C 63.5 180 63.5 164 83.5 152 Z" fill="#fff" stroke="#000" stroke-width="16" stroke-linejoin="round" paint-order="stroke fill"/>
-      <path d="M 275.5 257.8 L 438 160.3 Q 439.5 159.4 439.5 160.9 L 439.5 187.9 Q 439.5 189.4 438 190.3 L 275.5 287.8 C 268.872583 291.77645 263.5 288.284271 263.5 280 C 263.5 271.715729 268.872583 261.77645 275.5 257.8 Z" fill="#000"/>
-      <path d="M 287.5 265.6 L 415.5 188.8" stroke="#fff" stroke-width="1.8" stroke-linecap="round"/>
+      <!-- Flattened spine edges share one profile and orthographic projection. -->
+      <path d="M 250.740893 44.844536 L 428 151.2 Q 432 153.6 432 156.6 V 159.1 L 422 165.1 V 187.1 L 428 190.7 Q 432 193.1 432 196.1 V 198.6 L 260 301.8 Q 256 304.2 252 301.8 L 74.740893 195.444536 C 69.08172 192.049032 64.080461 182.641117 62.398342 172.226849 C 60.716224 161.81258 62.74436 152.813407 67.403556 150.017889 L 243.403556 44.417889 C 245.561241 43.123278 248.120116 43.27207 250.740893 44.844536 Z" fill="#fff" stroke="#000" stroke-width="12" stroke-linejoin="round" paint-order="stroke fill"/>
+      <!-- The inner cover mixes paper with ink so its tone follows the surrounding theme. -->
+      <path d="M 74.740893 155.944536 L 250.740893 50.344536 L 422 159.1 V 187.1 L 428 190.7 Q 432 193.1 428 195.5 L 260 296.3 Q 256 298.7 252 296.3 L 74.740893 189.944536 C 69.346777 186.708066 64.973981 176.473229 64.973981 167.084389 C 64.973981 157.695548 69.346777 152.708066 74.740893 155.944536 Z" fill="#000" fill-opacity="0.32"/>
+      <!-- The text block keeps its inset contour and tucked upper shoulder. -->
+      <path d="M 91 159.7 L 252 256.3 Q 256 258.7 260 256.3 L 422 159.1 V 193.1 L 260 290.3 Q 256 292.7 252 290.3 L 85 190.1 C 76.701359 185.120815 69.973981 173.473229 69.973981 164.084389 C 69.973981 154.695548 82.701359 154.720815 91 159.7 Z" fill="#000"/>
+      <path d="M 73.032587 167.419552 L 252 274.8 Q 256 277.2 260 274.8 L 422 177.6 M 76.182706 178.309624 L 252 283.8 Q 256 286.2 260 283.8 L 422 186.6" stroke="#fff" stroke-width="1.8"/>
+      <!-- The upper cover includes the rounded spine's visible outer surface. -->
+      <path d="M 67.403556 150.017889 L 243.403556 44.417889 C 245.561241 43.123278 248.120116 43.27207 250.740893 44.844536 L 428 151.2 Q 432 153.6 432 156.6 V 159.1 L 260 262.3 Q 256 264.7 252 262.3 L 74.740893 155.944536 C 72.760751 154.75645 70.827378 154.64403 69.197127 155.62218 Z" fill="#fff"/>
     </g>
-    <mask id="coursestack-ink-mask" x="0" y="0" width="512" height="512" maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" mask-type="luminance">
+    <mask id="coursestack-ink-mask" x="0" y="0" width="512" height="512" maskUnits="userSpaceOnUse" maskContentUnits="userSpaceOnUse" mask-type="luminance" color-interpolation="sRGB">
       <rect width="512" height="512" fill="#000"/>
-      <use href="#coursestack-mask-book" y="148"/>
-      <use href="#coursestack-mask-book" y="84"/>
-      <use href="#coursestack-mask-book" y="20"/>
+      <use href="#coursestack-mask-book" x="-12" y="148"/>
+      <use href="#coursestack-mask-book" x="12" y="84"/>
+      <use href="#coursestack-mask-book" transform="translate(-6 26) scale(0.9)"/>
     </mask>
   </defs>
   <rect width="512" height="512" fill="#fff" mask="url(#coursestack-ink-mask)"/>

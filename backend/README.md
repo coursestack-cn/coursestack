@@ -76,11 +76,11 @@ proxy: {
 
 前端使用 `/api` 代理调用接口，不直接跨域请求后端端口。
 
-所有写接口要求 `Origin` 与请求 URL 的 origin 完全一致；JSON 接口使用 `Content-Type: application/json`。Cookie 为 HttpOnly、SameSite=Strict，HTTPS 下加 Secure，前端不用读取 token 或将其保存到 localStorage。curl 等客户端测试写接口也要提供匹配的 Origin。管理员登录页与普通成员登录页使用不同接口。
+所有写接口要求 `Origin` 与请求 URL 的 origin 完全一致；JSON 接口使用 `Content-Type: application/json`。Cookie 为 HttpOnly、SameSite=Strict，HTTPS 下加 Secure，不设置 `Domain`，仅发送到设置 Cookie 的主机，避免生产站点与 dev 子域名共享会话 Cookie。前端不用读取 token 或将其保存到 localStorage。curl 等客户端测试写接口也要提供匹配的 Origin。管理员登录页与普通成员登录页使用不同接口。
 
 ## 环境边界与未完成项
 
-本轮配置只包含可运行的 `local`，D1 ID 是本地占位符。云端 `dev`、生产 `coursestack.cn` 的资源绑定、部署、远程迁移、Secrets、CORS 和 CPU 配额验证分别作为后续任务处理，没有添加发布命令或连接云资源。R2 目前只用于头像，尚无课程资料上传下载接口。
+`local` 的 D1 ID 是本地占位符，路由为空，不继承生产域名。云端 `dev` 使用 `https://dev.coursestack.cn`，`production` 使用 `https://coursestack.cn`；每套环境由同一 Worker 同源提供前端与 API，并绑定各自的 D1、R2 和前端静态资源。两套 Custom Domain 的 `workers_dev` 和 `preview_urls` 均关闭。GitHub Actions 在 `main` 更新时自动部署 dev，手动运行可选 dev 或 production；检查通过后自动应用目标环境的待执行迁移。凭据设置、运行方式和回滚边界见[部署说明](../docs/deploy-dev.md)。部署始终显式选择 `--env dev` 或 `--env production`，不使用缺少绑定的顶层配置。生产实地部署、Secrets 使用和 CPU 配额仍待验证。R2 目前只通过 Worker 绑定用于头像，尚无课程资料直传、下载接口；桶 CORS 是后续浏览器直传的配置，不影响当前同源头像接口。
 
 当前后端已提供账号管理、资料维护和管理员重置成员密码接口；管理页面、名单导入和授课管理接口仍待完成。学期采用单一当前学期指针保存历史关系；尚无学期切换管理接口或自动调度。不要把底层权限查询当成完整的内容下架、采纳或文件下载授权。
 

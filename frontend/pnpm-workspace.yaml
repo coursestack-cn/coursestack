@@ -1,0 +1,4 @@
+engineStrict: true
+minimumReleaseAgeExclude:
+  - vite@8.3.5
+saveExact: true

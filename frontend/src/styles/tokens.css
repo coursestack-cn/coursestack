@@ -1,0 +1,100 @@
+/* Breakpoints: sm = 640px, lg = 1024px. Keep in sync with breakpoints.ts. */
+:root {
+    color-scheme: light dark;
+
+    --color-bg: light-dark(#FAF7F0, #1C1B18);
+    --color-surface: light-dark(#FFFDF8, #24231F);
+    --color-surface-sunken: light-dark(#F1ECE1, #2E2C27);
+    --color-border: light-dark(#E8E1D3, #3A372F);
+    --color-border-strong: light-dark(#D6CCB8, #4D493F);
+    --color-text: light-dark(#2C2C2A, #ECE7DC);
+    --color-text-secondary: light-dark(#6B655A, #B3AB9C);
+    --color-text-muted: light-dark(#857E71, #8A8376);
+    --color-accent: light-dark(#0F6E56, #5DCAA5);
+    --color-accent-hover: light-dark(#085041, #9FE1CB);
+    --color-on-accent: light-dark(#FFFFFF, #04342C);
+    --color-accent-soft: light-dark(#E1F5EE, #085041);
+    --color-accent-soft-text: light-dark(#085041, #9FE1CB);
+
+    --color-success: light-dark(#3B6D11, #97C459);
+    --color-on-success: light-dark(#FFFFFF, #173404);
+    --color-success-soft: light-dark(#EAF3DE, #27500A);
+    --color-success-soft-text: light-dark(#27500A, #C0DD97);
+
+    --color-warning: light-dark(#9A5F0F, #EF9F27);
+    --color-on-warning: light-dark(#FFFFFF, #412402);
+    --color-warning-soft: light-dark(#FAEEDA, #633806);
+    --color-warning-soft-text: light-dark(#633806, #FAC775);
+
+    --color-danger: light-dark(#A32D2D, #F09595);
+    --color-on-danger: light-dark(#FFFFFF, #501313);
+    --color-danger-soft: light-dark(#FCEBEB, #791F1F);
+    --color-danger-soft-text: light-dark(#791F1F, #F7C1C1);
+
+    --color-teacher: light-dark(#63418C, #B794E6);
+    --color-on-teacher: light-dark(#FFFFFF, #2A1A3D);
+    --color-teacher-soft: light-dark(#F0EAF8, #44305E);
+    --color-teacher-soft-text: light-dark(#63418C, #D6BCEE);
+
+    --color-focus-ring: light-dark(#0F6E56, #5DCAA5);
+    --color-overlay: light-dark(rgb(28 27 24 / 0.4), rgb(0 0 0 / 0.6));
+    --color-selection: light-dark(#9FE1CB, #085041);
+
+    --font-sans: "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei", "Noto Sans CJK SC", "Source Han Sans SC", system-ui, sans-serif;
+    --font-mono: ui-monospace, "Cascadia Mono", "SF Mono", Menlo, Consolas, monospace;
+    --font-size-xs: 12px;
+    --font-size-sm: 13px;
+    --font-size-md: 14px;
+    --font-size-base: 15px;
+    --font-size-prose: 16px;
+    --font-size-lg: 18px;
+    --font-size-xl: 20px;
+    --font-size-2xl: 24px;
+    --line-height-tight: 1.4;
+    --line-height-base: 1.6;
+    --line-height-prose: 1.75;
+    --font-weight-regular: 400;
+    --font-weight-bold: 600;
+
+    --space-1: 4px;
+    --space-2: 8px;
+    --space-3: 12px;
+    --space-4: 16px;
+    --space-5: 20px;
+    --space-6: 24px;
+    --space-8: 32px;
+    --space-10: 40px;
+    --space-12: 48px;
+
+    --radius-sm: 4px;
+    --radius-md: 6px;
+    --radius-lg: 10px;
+    --radius-full: 9999px;
+    --shadow-popover: 0 var(--space-2) var(--space-8) light-dark(rgb(28 27 24 / 0.16), rgb(0 0 0 / 0.6));
+
+    --width-prose: 720px;
+    --width-page: 1200px;
+    --z-sticky: 10;
+    --z-dropdown: 20;
+    --z-dialog: 30;
+    --z-toast: 40;
+
+    --duration-fast: 120ms;
+    --duration-base: 200ms;
+    --ease-out: cubic-bezier(0.16, 1, 0.3, 1);
+}
+
+:root[data-theme="light"] {
+    color-scheme: light;
+}
+
+:root[data-theme="dark"] {
+    color-scheme: dark;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    :root {
+        --duration-fast: 0ms;
+        --duration-base: 0ms;
+    }
+}
