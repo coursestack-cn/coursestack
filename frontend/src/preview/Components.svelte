@@ -66,6 +66,7 @@
     });
     let cursor = $state(0);
     let menuSelection = $state("尚未选择");
+    let menuSort = $state("recent");
     let dialogOpen = $state(false);
     let closeOnBackdrop = $state(false);
     let confirmOpen = $state(false);
@@ -282,6 +283,18 @@
             </Menu>
         </div>
         <Menu items={[{ label: "暂不可用", disabled: true }]}>{#snippet trigger(props)}<Button {...props} size="sm">打开全禁用菜单</Button>{/snippet}</Menu>
+        <div class="row">
+            <Menu items={[
+                { label: "最近更新", checked: menuSort === "recent", onselect: () => { menuSort = "recent"; } },
+                { label: "最多讨论", checked: menuSort === "discussed", onselect: () => { menuSort = "discussed"; } },
+                { label: "暂不可选", checked: false, disabled: true }
+            ]}>
+                {#snippet trigger(props)}<Button {...props}>打开单选菜单</Button>{/snippet}
+            </Menu>
+            <Menu items={[{ label: "组件预览", href: "/components.html#menu", current: true }, { label: "设计基础", href: "/preview.html" }]}>
+                {#snippet trigger(props)}<Button {...props}>打开当前页面菜单</Button>{/snippet}
+            </Menu>
+        </div>
         <p class="note">Enter / 空格打开；↑ ↓、Home、End 移动；Enter 选择；Esc 或外部点击关闭。</p>
     </section>
 

@@ -10,6 +10,8 @@
         href?: string;
         danger?: boolean;
         disabled?: boolean;
+        checked?: boolean;
+        current?: boolean;
     };
     export type MenuTriggerProps = {
         id: string;
@@ -27,6 +29,7 @@
 
 <script lang="ts">
     import { tick } from "svelte";
+    import { Check } from "@lucide/svelte";
     import Link from "$lib/components/ui/Link.svelte";
 
     const id = $props.id();
@@ -39,7 +42,7 @@
     let top = $state(0);
     let availableHeight = $state(0);
 
-    function controls() { return Array.from(panel.querySelectorAll<HTMLElement>('[role="menuitem"]:not([aria-disabled="true"])')); }
+    function controls() { return Array.from(panel.querySelectorAll<HTMLElement>('[role^="menuitem"]:not([aria-disabled="true"])')); }
 
     function position() {
         if (!anchor || !panel) return;
@@ -132,11 +135,14 @@
             {#if item.type === "separator"}<div class="separator" role="separator"></div>
             {:else}
                 {#snippet content()}
-                    {#if item.icon}<span class="icon" aria-hidden="true">{@render item.icon()}</span>{/if}
+                    {#if item.checked !== undefined}
+                        <span class="icon check-slot" aria-hidden="true">{#if item.checked}<Check size="1em" />{/if}</span>
+                    {:else if item.icon}<span class="icon" aria-hidden="true">{@render item.icon()}</span>{/if}
                     <span>{item.label}</span>
                 {/snippet}
                 {#if item.href !== undefined}
-                    <Link class={`cs-menu-item ${item.danger ? "danger" : ""}`} role="menuitem" tabindex={-1}
+                    <Link class={`cs-menu-item ${item.danger ? "danger" : ""}`} role={item.checked === undefined ? "menuitem" : "menuitemradio"} tabindex={-1}
+                        aria-checked={item.checked} aria-current={item.current ? "page" : undefined}
                         href={item.disabled ? undefined : item.href} aria-disabled={item.disabled || undefined}
                         onclick={(event) => {
                             if (item.disabled) { event.preventDefault(); return; }
@@ -144,7 +150,8 @@
                             item.onselect?.();
                         }}>{@render content()}</Link>
                 {:else}
-                    <button type="button" class={`cs-menu-item ${item.danger ? "danger" : ""}`} role="menuitem" tabindex="-1"
+                    <button type="button" class={`cs-menu-item ${item.danger ? "danger" : ""}`} role={item.checked === undefined ? "menuitem" : "menuitemradio"} tabindex="-1"
+                        aria-checked={item.checked} aria-current={item.current ? "page" : undefined}
                         disabled={item.disabled} aria-disabled={item.disabled || undefined}
                         onclick={() => { close(); item.onselect?.(); }}>{@render content()}</button>
                 {/if}
@@ -162,8 +169,10 @@
     :global(.cs-menu-item.danger:hover:not([aria-disabled="true"])) { background: var(--color-danger-soft); color: var(--color-danger-soft-text); }
     :global(.cs-menu-item:active:not([aria-disabled="true"])) { background: var(--color-accent-soft); }
     :global(.cs-menu-item:focus-visible) { outline: 2px solid var(--color-focus-ring); outline-offset: -2px; background: var(--color-surface-sunken); }
+    :global(.cs-menu-item[aria-current="page"]:not([aria-disabled="true"])) { color: var(--color-accent-soft-text); background: var(--color-accent-soft); }
     :global(.cs-menu-item[aria-disabled="true"]) { opacity: 0.5; cursor: not-allowed; }
     .icon { display: inline-flex; flex-shrink: 0; }
     .icon :global(svg) { width: 1em; height: 1em; }
+    .check-slot { width: 1em; height: 1em; }
     .separator { height: 1px; background: var(--color-border); margin: var(--space-1); }
 </style>
