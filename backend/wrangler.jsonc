@@ -1,0 +1,32 @@
+{
+  "$schema": "node_modules/wrangler/config-schema.json",
+  "name": "coursestack-env-required",
+  "compatibility_date": "2026-07-01",
+  "workers_dev": false,
+  "env": {
+    "local": {
+      "name": "coursestack-local",
+      "workers_dev": false,
+      "routes": [],
+      "d1_databases": [
+        {
+          "binding": "DB",
+          "database_name": "coursestack-db-local",
+          "database_id": "00000000-0000-0000-0000-000000000003",
+          "migrations_dir": "../database/migrations"
+        }
+      ],
+      "r2_buckets": [
+        {
+          "binding": "FILES",
+          "bucket_name": "coursestack-files-local"
+        }
+      ],
+      "vars": {
+        "APP_ENV": "local",
+        "ALLOWED_ORIGIN": "http://127.0.0.1:5173"
+      },
+      "main": "src/index.ts"
+    }
+  }
+}

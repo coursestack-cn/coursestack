@@ -1,0 +1,35 @@
+{
+  "name": "@coursestack/backend",
+  "version": "1.0.0",
+  "private": true,
+  "type": "module",
+  "packageManager": "pnpm@12.5.1",
+  "engines": {
+    "node": "^22.12.0 || >=24.0.0",
+    "pnpm": "12.5.1"
+  },
+  "scripts": {
+    "dev": "wrangler dev --env local --local --ip 127.0.0.1 --port 8787 --persist-to .wrangler/state",
+    "db:migrate:local": "wrangler d1 migrations apply DB --env local --local --persist-to .wrangler/state",
+    "db:seed:local": "wrangler d1 execute DB --env local --local --persist-to .wrangler/state --file ../database/seeds/local.sql",
+    "check": "tsc --noEmit",
+    "test": "node --import tsx --test --test-concurrency=1 tests/*.test.ts",
+    "demo": "node --import tsx scripts/demo.ts",
+    "openapi:check": "node --import tsx scripts/check-openapi.ts",
+    "openapi:export": "node --import tsx scripts/check-openapi.ts --export"
+  },
+  "dependencies": {
+    "drizzle-orm": "0.45.4",
+    "hono": "4.13.13",
+    "zod": "4.6.7"
+  },
+  "devDependencies": {
+    "@cloudflare/workers-types": "5.20261021.1",
+    "@types/node": "26.6.5",
+    "esbuild": "0.28.2",
+    "miniflare": "4.20260730.0",
+    "tsx": "4.23.15",
+    "typescript": "7.0.2",
+    "wrangler": "4.151.3"
+  }
+}
