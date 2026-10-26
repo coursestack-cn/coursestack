@@ -72,6 +72,39 @@
                     "bucket_name": "coursestack-files-dev"
                 }
             ]
+        },
+        "production": {
+            "name": "coursestack",
+            "workers_dev": false,
+            "preview_urls": false,
+            "routes": [
+                {
+                    "pattern": "coursestack.cn",
+                    "custom_domain": true
+                }
+            ],
+            "vars": {
+                "APP_ENV": "production"
+            },
+            "assets": {
+                "directory": "../frontend/dist",
+                "not_found_handling": "single-page-application",
+                "run_worker_first": ["/api", "/api/*"]
+            },
+            "d1_databases": [
+                {
+                    "binding": "DB",
+                    "database_name": "coursestack-db",
+                    "database_id": "9f049258-be55-48da-9626-ef12750db253",
+                    "migrations_dir": "migrations"
+                }
+            ],
+            "r2_buckets": [
+                {
+                    "binding": "FILES",
+                    "bucket_name": "coursestack-files"
+                }
+            ]
         }
     }
 }

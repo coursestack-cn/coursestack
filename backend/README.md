@@ -80,7 +80,7 @@ proxy: {
 
 ## 环境边界与未完成项
 
-`local` 的 D1 ID 是本地占位符，路由为空，不继承生产域名。云端 `dev` 使用 `https://dev.coursestack.cn`，由同一 Worker 同源提供前端与 API，部署步骤和 Cloudflare 网页端配置见[部署到 dev](../docs/deploy-dev.md)。生产入口为 `https://coursestack.cn`；两套 Custom Domain 均已记录在 Wrangler 配置中，`workers_dev` 和 `preview_urls` 均关闭。顶层生产配置尚未补齐资源绑定和前端静态资源，不可据此直接部署生产。生产部署、Secrets 使用和 CPU 配额验证仍作为后续任务处理。R2 目前只通过 Worker 绑定用于头像，尚无课程资料直传、下载接口；桶 CORS 是后续浏览器直传的配置，不影响当前同源头像接口。
+`local` 的 D1 ID 是本地占位符，路由为空，不继承生产域名。云端 `dev` 使用 `https://dev.coursestack.cn`，`production` 使用 `https://coursestack.cn`；每套环境由同一 Worker 同源提供前端与 API，并绑定各自的 D1、R2 和前端静态资源。两套 Custom Domain 的 `workers_dev` 和 `preview_urls` 均关闭。GitHub Actions 在 `main` 更新时自动部署 dev，手动运行可选 dev 或 production；检查通过后自动应用目标环境的待执行迁移。凭据设置、运行方式和回滚边界见[部署说明](../docs/deploy-dev.md)。部署始终显式选择 `--env dev` 或 `--env production`，不使用缺少绑定的顶层配置。生产实地部署、Secrets 使用和 CPU 配额仍待验证。R2 目前只通过 Worker 绑定用于头像，尚无课程资料直传、下载接口；桶 CORS 是后续浏览器直传的配置，不影响当前同源头像接口。
 
 当前后端已提供账号管理、资料维护和管理员重置成员密码接口；管理页面、名单导入和授课管理接口仍待完成。学期采用单一当前学期指针保存历史关系；尚无学期切换管理接口或自动调度。不要把底层权限查询当成完整的内容下架、采纳或文件下载授权。
 

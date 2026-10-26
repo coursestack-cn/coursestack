@@ -1,0 +1,121 @@
+name: Deploy Workers
+
+run-name: Deploy ${{ inputs.environment || 'dev' }} from ${{ github.ref_name }}
+
+on:
+  push:
+    branches:
+      - main
+  workflow_dispatch:
+    inputs:
+      environment:
+        description: Deployment environment
+        type: choice
+        required: true
+        default: dev
+        options:
+          - dev
+          - production
+
+permissions:
+  contents: read
+
+concurrency:
+  group: deploy-workers-${{ inputs.environment || 'dev' }}
+  cancel-in-progress: false
+
+jobs:
+  deploy:
+    # Remote migrations must already be merged into main.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CI: 'true'
+      DEPLOY_ENV: ${{ inputs.environment || 'dev' }}
+      DEPLOY_URL: ${{ inputs.environment == 'production' && 'https://coursestack.cn' || 'https://dev.coursestack.cn' }}
+    defaults:
+      run:
+        shell: bash
+        working-directory: backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Check deployment settings
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          case "$DEPLOY_ENV" in
+            dev|production) ;;
+            *) echo "::error::Unsupported deployment environment"; exit 1 ;;
+          esac
+          if [[ -z "$CLOUDFLARE_API_TOKEN" || -z "$CLOUDFLARE_ACCOUNT_ID" ]]; then
+            echo "::error::Set CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID in the repository's Actions secrets."
+            exit 1
+          fi
+
+      - name: Set up pnpm and Node.js
+        uses: pnpm/setup@v3
+        with:
+          working-directory: backend
+          runtime: node@24
+          install: false
+          cache: true
+          cache-dependency-path: |
+            backend/pnpm-lock.yaml
+            frontend/pnpm-lock.yaml
+
+      - name: Install backend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Check backend types
+        run: pnpm check
+
+      - name: Test backend
+        run: pnpm test
+
+      - name: Check and build frontend
+        working-directory: frontend
+        run: pnpm build
+
+      - name: Apply D1 migrations
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm exec wrangler d1 migrations apply DB --env "$DEPLOY_ENV" --remote
+
+      - name: Deploy Worker and frontend assets
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm exec wrangler deploy --env "$DEPLOY_ENV"
+
+      - name: Verify deployment
+        run: |
+          curl --fail --silent --show-error --max-time 30 \
+            --retry 5 --retry-all-errors --retry-delay 5 \
+            "$DEPLOY_URL/api/health" |
+            jq --exit-status --arg environment "$DEPLOY_ENV" \
+              '.data.status == "ok" and .data.environment == $environment and .data.database == "ok"'
+          curl --fail --silent --show-error --max-time 30 \
+            --retry 5 --retry-all-errors --retry-delay 5 \
+            --output /dev/null "$DEPLOY_URL/"
+
+      - name: Write deployment summary
+        run: |
+          {
+            echo "### Deployment"
+            echo "- Environment: $DEPLOY_ENV"
+            echo "- Commit: $GITHUB_SHA"
+            echo "- URL: $DEPLOY_URL"
+            echo "- D1: pending migrations applied"
+            echo "- Verification: API health and frontend request passed"
+          } >> "$GITHUB_STEP_SUMMARY"
