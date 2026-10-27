@@ -8,7 +8,7 @@ CREATE TABLE `acceptances` (
 	FOREIGN KEY (`question_id`) REFERENCES `contents`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`answer_id`) REFERENCES `contents`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`operator_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE no action
-);
+) STRICT;
 --> statement-breakpoint
 CREATE UNIQUE INDEX `acceptances_answer_unique` ON `acceptances` (`answer_id`);
 --> statement-breakpoint
@@ -33,7 +33,7 @@ CREATE TABLE `accounts` (
 	CONSTRAINT "accounts_status" CHECK("accounts"."status" IN ('active', 'disabled', 'deleted')),
 	CONSTRAINT "accounts_credential_version" CHECK("accounts"."credential_version" > 0),
 	CONSTRAINT "accounts_must_change_password" CHECK("accounts"."must_change_password" IN (0, 1))
-);
+) STRICT;
 --> statement-breakpoint
 CREATE UNIQUE INDEX `accounts_school_number_unique` ON `accounts` (`school_number`) WHERE "accounts"."status" <> 'deleted';
 --> statement-breakpoint
@@ -41,7 +41,6 @@ CREATE UNIQUE INDEX `accounts_single_admin` ON `accounts` (`role`) WHERE "accoun
 --> statement-breakpoint
 CREATE TABLE `bonus_ledger` (
 	`id` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-	`operation` text NOT NULL,
 	`course_id` text NOT NULL,
 	`term_id` text NOT NULL,
 	`student_id` text NOT NULL,
@@ -49,7 +48,7 @@ CREATE TABLE `bonus_ledger` (
 	`source_kind` text NOT NULL,
 	`source_id` text NOT NULL,
 	`operator_id` text NOT NULL,
-	`reason` text NOT NULL,
+	`reason` text,
 	`reverses_id` integer,
 	`request_hash` text,
 	`created_at` integer DEFAULT (unixepoch()) NOT NULL,
@@ -58,43 +57,20 @@ CREATE TABLE `bonus_ledger` (
 	FOREIGN KEY (`student_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`operator_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`reverses_id`) REFERENCES `bonus_ledger`(`id`) ON UPDATE no action ON DELETE no action,
-	CONSTRAINT "bonus_ledger_operation" CHECK("bonus_ledger"."operation" IN ('award', 'revoke', 'restore', 'manual')),
 	CONSTRAINT "bonus_ledger_source_kind" CHECK("bonus_ledger"."source_kind" IN ('question', 'answer', 'acceptance', 'comment', 'material', 'manual')),
-	CONSTRAINT "bonus_ledger_delta" CHECK(typeof("bonus_ledger"."delta_points") = 'integer' AND "bonus_ledger"."delta_points" <> 0 AND abs("bonus_ledger"."delta_points") <= 9007199254740991),
-	CONSTRAINT "bonus_ledger_shape" CHECK(("bonus_ledger"."operation" = 'manual' AND "bonus_ledger"."source_kind" = 'manual' AND "bonus_ledger"."reverses_id" IS NULL AND "bonus_ledger"."request_hash" IS NOT NULL)
-        OR ("bonus_ledger"."operation" <> 'manual' AND "bonus_ledger"."source_kind" <> 'manual' AND "bonus_ledger"."request_hash" IS NULL
-            AND (("bonus_ledger"."operation" = 'award' AND "bonus_ledger"."delta_points" > 0 AND "bonus_ledger"."reverses_id" IS NULL)
-                OR ("bonus_ledger"."operation" = 'revoke' AND "bonus_ledger"."delta_points" < 0 AND "bonus_ledger"."reverses_id" IS NOT NULL)
-                OR ("bonus_ledger"."operation" = 'restore' AND "bonus_ledger"."delta_points" > 0 AND "bonus_ledger"."reverses_id" IS NOT NULL))))
-);
+	CONSTRAINT "bonus_ledger_delta" CHECK("bonus_ledger"."delta_points" <> 0 AND abs("bonus_ledger"."delta_points") <= 9007199254740991),
+	CONSTRAINT "bonus_ledger_shape" CHECK(("bonus_ledger"."source_kind" = 'manual' AND "bonus_ledger"."reverses_id" IS NULL AND "bonus_ledger"."request_hash" IS NOT NULL)
+        OR ("bonus_ledger"."source_kind" <> 'manual' AND "bonus_ledger"."request_hash" IS NULL
+            AND ("bonus_ledger"."reverses_id" IS NOT NULL OR "bonus_ledger"."delta_points" > 0)))
+) STRICT;
 --> statement-breakpoint
-CREATE UNIQUE INDEX `bonus_original_award` ON `bonus_ledger` (`source_kind`,`source_id`) WHERE "bonus_ledger"."operation" = 'award';
+CREATE UNIQUE INDEX `bonus_original_award` ON `bonus_ledger` (`source_kind`,`source_id`) WHERE "bonus_ledger"."source_kind" <> 'manual' AND "bonus_ledger"."reverses_id" IS NULL;
 --> statement-breakpoint
 CREATE UNIQUE INDEX `bonus_reversal_once` ON `bonus_ledger` (`reverses_id`);
 --> statement-breakpoint
-CREATE UNIQUE INDEX `bonus_manual_request` ON `bonus_ledger` (`operator_id`,`source_id`) WHERE "bonus_ledger"."operation" = 'manual';
+CREATE UNIQUE INDEX `bonus_manual_request` ON `bonus_ledger` (`operator_id`,`source_id`) WHERE "bonus_ledger"."source_kind" = 'manual';
 --> statement-breakpoint
 CREATE INDEX `bonus_course_term_student` ON `bonus_ledger` (`course_id`,`term_id`,`student_id`);
---> statement-breakpoint
-CREATE TABLE `business_events` (
-	`seq` integer PRIMARY KEY AUTOINCREMENT NOT NULL,
-	`event_id` text NOT NULL,
-	`type` text NOT NULL,
-	`course_id` text NOT NULL,
-	`content_id` text,
-	`actor_id` text NOT NULL,
-	`payload` text NOT NULL,
-	`created_at` integer DEFAULT (unixepoch()) NOT NULL,
-	`acknowledged_at` integer,
-	FOREIGN KEY (`course_id`) REFERENCES `courses`(`id`) ON UPDATE no action ON DELETE no action,
-	FOREIGN KEY (`content_id`) REFERENCES `contents`(`id`) ON UPDATE no action ON DELETE no action,
-	FOREIGN KEY (`actor_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE no action,
-	CONSTRAINT "business_events_payload" CHECK(json_valid("business_events"."payload"))
-);
---> statement-breakpoint
-CREATE UNIQUE INDEX `business_events_event_unique` ON `business_events` (`event_id`);
---> statement-breakpoint
-CREATE INDEX `events_course_sequence` ON `business_events` (`course_id`,`seq`);
 --> statement-breakpoint
 CREATE TABLE `contents` (
 	`id` text PRIMARY KEY NOT NULL,
@@ -107,8 +83,8 @@ CREATE TABLE `contents` (
 	`target_kind` text,
 	`target_id` text,
 	`status` text DEFAULT 'visible' NOT NULL,
-	`revision` integer DEFAULT 1 NOT NULL,
 	`created_at` integer DEFAULT (unixepoch()) NOT NULL,
+	`edited_at` integer,
 	`updated_at` integer DEFAULT (unixepoch()) NOT NULL,
 	`updated_by` text NOT NULL,
 	`request_key` text NOT NULL,
@@ -126,7 +102,7 @@ CREATE TABLE `contents` (
 	CONSTRAINT "contents_shape" CHECK(("contents"."kind" IN ('material', 'question') AND ("contents"."title" IS NOT NULL OR "contents"."status" = 'deleted') AND "contents"."target_kind" IS NULL AND "contents"."target_id" IS NULL)
         OR ("contents"."kind" = 'answer' AND "contents"."title" IS NULL AND "contents"."target_kind" IS 'question' AND "contents"."target_id" IS NOT NULL)
         OR ("contents"."kind" = 'comment' AND "contents"."title" IS NULL AND "contents"."target_kind" IS NOT NULL AND "contents"."target_id" IS NOT NULL))
-);
+) STRICT;
 --> statement-breakpoint
 CREATE UNIQUE INDEX `contents_request_unique` ON `contents` (`author_id`,`request_key`);
 --> statement-breakpoint
@@ -136,37 +112,39 @@ CREATE INDEX `contents_target` ON `contents` (`target_kind`,`target_id`,`status`
 --> statement-breakpoint
 CREATE INDEX `contents_author` ON `contents` (`author_id`,`kind`,`created_at`,`id`);
 --> statement-breakpoint
+CREATE TABLE `course_bonus_rules` (
+	`id` text PRIMARY KEY NOT NULL,
+	`points_question` integer DEFAULT 0 NOT NULL,
+	`points_answer` integer DEFAULT 0 NOT NULL,
+	`points_acceptance` integer DEFAULT 0 NOT NULL,
+	`points_comment` integer DEFAULT 0 NOT NULL,
+	`points_material` integer DEFAULT 0 NOT NULL,
+	`points_material_version` integer DEFAULT 0 NOT NULL,
+	FOREIGN KEY (`id`) REFERENCES `courses`(`id`) ON UPDATE no action ON DELETE cascade,
+	CONSTRAINT "course_bonus_rules_points_question" CHECK("course_bonus_rules"."points_question" BETWEEN 0 AND 9007199254740991),
+	CONSTRAINT "course_bonus_rules_points_answer" CHECK("course_bonus_rules"."points_answer" BETWEEN 0 AND 9007199254740991),
+	CONSTRAINT "course_bonus_rules_points_acceptance" CHECK("course_bonus_rules"."points_acceptance" BETWEEN 0 AND 9007199254740991),
+	CONSTRAINT "course_bonus_rules_points_comment" CHECK("course_bonus_rules"."points_comment" BETWEEN 0 AND 9007199254740991),
+	CONSTRAINT "course_bonus_rules_points_material" CHECK("course_bonus_rules"."points_material" BETWEEN 0 AND 9007199254740991),
+	CONSTRAINT "course_bonus_rules_points_material_version" CHECK("course_bonus_rules"."points_material_version" BETWEEN 0 AND 9007199254740991)
+) STRICT;
+--> statement-breakpoint
 CREATE TABLE `courses` (
 	`id` text PRIMARY KEY NOT NULL,
 	`name` text NOT NULL,
 	`created_at` integer DEFAULT (unixepoch()) NOT NULL,
 	`code` text NOT NULL,
-	`department` text DEFAULT '' NOT NULL,
 	`introduction` text DEFAULT '' NOT NULL,
 	`created_by` text NOT NULL,
 	`updated_by` text NOT NULL,
-	`question_points` integer DEFAULT 0 NOT NULL,
-	`answer_points` integer DEFAULT 0 NOT NULL,
-	`acceptance_points` integer DEFAULT 0 NOT NULL,
-	`comment_points` integer DEFAULT 0 NOT NULL,
-	`material_points` integer DEFAULT 0 NOT NULL,
-	`material_per_version` integer DEFAULT false NOT NULL,
-	`revision` integer DEFAULT 1 NOT NULL,
 	`updated_at` integer DEFAULT (unixepoch()) NOT NULL,
 	`request_key` text NOT NULL,
 	`request_hash` text NOT NULL,
 	FOREIGN KEY (`created_by`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`updated_by`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE no action,
 	CONSTRAINT "courses_name" CHECK(length(trim("courses"."name")) > 0),
-	CONSTRAINT "courses_code" CHECK(length(trim("courses"."code")) > 0),
-	CONSTRAINT "courses_question_points" CHECK(typeof("courses"."question_points") = 'integer' AND "courses"."question_points" BETWEEN 0 AND 9007199254740991),
-	CONSTRAINT "courses_answer_points" CHECK(typeof("courses"."answer_points") = 'integer' AND "courses"."answer_points" BETWEEN 0 AND 9007199254740991),
-	CONSTRAINT "courses_acceptance_points" CHECK(typeof("courses"."acceptance_points") = 'integer' AND "courses"."acceptance_points" BETWEEN 0 AND 9007199254740991),
-	CONSTRAINT "courses_comment_points" CHECK(typeof("courses"."comment_points") = 'integer' AND "courses"."comment_points" BETWEEN 0 AND 9007199254740991),
-	CONSTRAINT "courses_material_points" CHECK(typeof("courses"."material_points") = 'integer' AND "courses"."material_points" BETWEEN 0 AND 9007199254740991),
-	CONSTRAINT "courses_material_per_version" CHECK("courses"."material_per_version" IN (0, 1)),
-	CONSTRAINT "courses_revision" CHECK("courses"."revision" > 0)
-);
+	CONSTRAINT "courses_code" CHECK(length(trim("courses"."code")) > 0)
+) STRICT;
 --> statement-breakpoint
 CREATE UNIQUE INDEX `courses_code_unique` ON `courses` (`code`);
 --> statement-breakpoint
@@ -180,7 +158,7 @@ CREATE TABLE `enrollments` (
 	FOREIGN KEY (`course_id`) REFERENCES `courses`(`id`) ON UPDATE no action ON DELETE restrict,
 	FOREIGN KEY (`term_id`) REFERENCES `terms`(`id`) ON UPDATE no action ON DELETE restrict,
 	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE restrict
-);
+) STRICT;
 --> statement-breakpoint
 CREATE INDEX `enrollments_account_term` ON `enrollments` (`account_id`,`term_id`,`course_id`);
 --> statement-breakpoint
@@ -196,15 +174,15 @@ CREATE TABLE `file_versions` (
 	FOREIGN KEY (`material_id`) REFERENCES `contents`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`uploaded_by`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`updated_by`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE no action,
-	CONSTRAINT "file_versions_version" CHECK(typeof("file_versions"."version") = 'integer' AND "file_versions"."version" > 0),
+	CONSTRAINT "file_versions_version" CHECK("file_versions"."version" > 0),
 	CONSTRAINT "file_versions_status" CHECK("file_versions"."status" IN ('visible', 'hidden'))
-);
+) STRICT;
 --> statement-breakpoint
 CREATE TABLE `login_attempts` (
 	`key` text PRIMARY KEY NOT NULL,
 	`attempts` integer NOT NULL,
 	`expires_at` integer NOT NULL
-);
+) STRICT;
 --> statement-breakpoint
 CREATE INDEX `login_attempts_expiry` ON `login_attempts` (`expires_at`);
 --> statement-breakpoint
@@ -220,7 +198,7 @@ CREATE TABLE `moderation_actions` (
 	FOREIGN KEY (`actor_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE no action,
 	CONSTRAINT "moderation_actions_old_status" CHECK("moderation_actions"."old_status" IN ('visible', 'hidden', 'deleted')),
 	CONSTRAINT "moderation_actions_new_status" CHECK("moderation_actions"."new_status" IN ('visible', 'hidden', 'deleted'))
-);
+) STRICT;
 --> statement-breakpoint
 CREATE TABLE `reports` (
 	`id` text PRIMARY KEY NOT NULL,
@@ -231,7 +209,6 @@ CREATE TABLE `reports` (
 	`resolution` text,
 	`handled_by` text,
 	`handled_at` integer,
-	`revision` integer DEFAULT 1 NOT NULL,
 	`created_at` integer DEFAULT (unixepoch()) NOT NULL,
 	`request_key` text NOT NULL,
 	`request_hash` text NOT NULL,
@@ -239,7 +216,7 @@ CREATE TABLE `reports` (
 	FOREIGN KEY (`reporter_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`handled_by`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE no action,
 	CONSTRAINT "reports_status" CHECK("reports"."status" IN ('pending', 'resolved', 'dismissed'))
-);
+) STRICT;
 --> statement-breakpoint
 CREATE UNIQUE INDEX `reports_request_unique` ON `reports` (`reporter_id`,`request_key`);
 --> statement-breakpoint
@@ -253,7 +230,7 @@ CREATE TABLE `sessions` (
 	`credential_version` integer NOT NULL,
 	`expires_at` integer NOT NULL,
 	FOREIGN KEY (`account_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE cascade
-);
+) STRICT;
 --> statement-breakpoint
 CREATE INDEX `sessions_account` ON `sessions` (`account_id`);
 --> statement-breakpoint
@@ -265,7 +242,7 @@ CREATE TABLE `terms` (
 	`current` integer DEFAULT 0 NOT NULL,
 	CONSTRAINT "terms_name" CHECK(length(trim("terms"."name")) > 0),
 	CONSTRAINT "terms_current" CHECK("terms"."current" IN (0, 1))
-);
+) STRICT;
 --> statement-breakpoint
 CREATE UNIQUE INDEX `terms_one_current` ON `terms` (`current`) WHERE "terms"."current" = 1;
 --> statement-breakpoint
@@ -273,12 +250,12 @@ CREATE TABLE `votes` (
 	`content_id` text NOT NULL,
 	`user_id` text NOT NULL,
 	`value` integer NOT NULL,
-	`updated_at` integer DEFAULT (unixepoch()) NOT NULL,
+	`created_at` integer DEFAULT (unixepoch()) NOT NULL,
 	PRIMARY KEY(`content_id`, `user_id`),
 	FOREIGN KEY (`content_id`) REFERENCES `contents`(`id`) ON UPDATE no action ON DELETE no action,
 	FOREIGN KEY (`user_id`) REFERENCES `accounts`(`id`) ON UPDATE no action ON DELETE no action,
 	CONSTRAINT "votes_value" CHECK("votes"."value" IN (-1, 1))
-);
+) STRICT;
 --> statement-breakpoint
 CREATE VIEW accessible_contents AS
 WITH RECURSIVE reachable(id) AS (
@@ -300,21 +277,12 @@ UNION ALL SELECT 'material',f.material_id||'@'||f.version FROM file_versions f
     JOIN public_contents m ON m.id=f.material_id WHERE f.status='visible';
 --> statement-breakpoint
 CREATE VIEW bonus_state AS
-SELECT l.* FROM bonus_ledger l WHERE l.operation<>'manual'
+SELECT l.* FROM bonus_ledger l WHERE l.source_kind<>'manual'
     AND NOT EXISTS(SELECT 1 FROM bonus_ledger next WHERE next.reverses_id=l.id);
 --> statement-breakpoint
 CREATE TRIGGER account_role_immutable BEFORE UPDATE OF role ON accounts
 WHEN NEW.role <> OLD.role
 BEGIN SELECT RAISE(ABORT, 'replace_account_identity'); END;
---> statement-breakpoint
-CREATE TRIGGER content_created_event AFTER INSERT ON contents BEGIN
-  INSERT INTO business_events(event_id,type,course_id,content_id,actor_id,payload,created_at)
-  VALUES('content:'||NEW.id||':1',NEW.kind||'.created',NEW.course_id,NEW.id,NEW.updated_by,
-    json_object('id',NEW.id,'kind',NEW.kind,'courseId',NEW.course_id,'authorId',NEW.author_id,
-      'targetKind',NEW.target_kind,'targetId',NEW.target_id,
-      'targetAuthorId',(SELECT author_id FROM contents WHERE id=NEW.target_id),
-      'revision',NEW.revision,'status',NEW.status),NEW.created_at);
-END;
 --> statement-breakpoint
 CREATE TRIGGER content_identity_immutable BEFORE UPDATE ON contents
 WHEN NEW.id<>OLD.id OR NEW.kind<>OLD.kind OR NEW.course_id<>OLD.course_id OR NEW.author_id<>OLD.author_id
@@ -327,10 +295,8 @@ WHEN NEW.target_id IS NOT NULL BEGIN
         SELECT 1 FROM public_contents p WHERE p.id=NEW.target_id AND p.kind=NEW.target_kind AND p.course_id=NEW.course_id);
 END;
 --> statement-breakpoint
-CREATE TRIGGER course_created_event AFTER INSERT ON courses BEGIN
-  INSERT INTO business_events(event_id,type,course_id,actor_id,payload,created_at)
-  VALUES('course:'||NEW.id||':1','course.created',NEW.id,NEW.created_by,
-    json_object('id',NEW.id,'revision',NEW.revision),NEW.created_at);
+CREATE TRIGGER course_bonus_rules_created AFTER INSERT ON courses BEGIN
+  INSERT INTO course_bonus_rules(id) VALUES(NEW.id);
 END;
 --> statement-breakpoint
 CREATE TRIGGER course_teacher_insert BEFORE INSERT ON courses
@@ -338,12 +304,6 @@ WHEN NOT EXISTS(SELECT 1 FROM courses WHERE id=NEW.id)
   AND NOT EXISTS(SELECT 1 FROM enrollments e JOIN accounts a ON a.id=e.account_id AND a.role='teacher' AND a.status<>'deleted'
     JOIN terms t ON t.id=e.term_id AND t.current=1 WHERE e.course_id=NEW.id)
 BEGIN SELECT RAISE(ABORT,'course_requires_teacher'); END;
---> statement-breakpoint
-CREATE TRIGGER course_updated_event AFTER UPDATE ON courses WHEN NEW.revision<>OLD.revision BEGIN
-  INSERT INTO business_events(event_id,type,course_id,actor_id,payload,created_at)
-  VALUES('course:'||NEW.id||':'||NEW.revision,'course.updated',NEW.id,NEW.updated_by,
-    json_object('id',NEW.id,'revision',NEW.revision),NEW.updated_at);
-END;
 --> statement-breakpoint
 CREATE TRIGGER enrollment_identity_insert BEFORE INSERT ON enrollments BEGIN
   SELECT RAISE(ABORT,'invalid_enrollment_identity') WHERE NOT EXISTS(
@@ -386,37 +346,25 @@ BEGIN SELECT RAISE(ABORT,'immutable_ledger'); END;
 CREATE TRIGGER ledger_no_update BEFORE UPDATE ON bonus_ledger
 BEGIN SELECT RAISE(ABORT,'immutable_ledger'); END;
 --> statement-breakpoint
-CREATE TRIGGER content_updated_event AFTER UPDATE ON contents WHEN NEW.revision<>OLD.revision BEGIN
-  INSERT INTO business_events(event_id,type,course_id,content_id,actor_id,payload,created_at)
-  VALUES('content:'||NEW.id||':'||NEW.revision,
-    CASE WHEN OLD.status<>NEW.status THEN NEW.kind||'.'||NEW.status ELSE NEW.kind||'.updated' END,
-    NEW.course_id,NEW.id,NEW.updated_by,
-    json_object('id',NEW.id,'kind',NEW.kind,'courseId',NEW.course_id,'authorId',NEW.author_id,
-      'targetKind',NEW.target_kind,'targetId',NEW.target_id,
-      'targetAuthorId',(SELECT author_id FROM contents WHERE id=NEW.target_id),
-      'revision',NEW.revision,'status',NEW.status),NEW.updated_at);
-END;
---> statement-breakpoint
 CREATE TRIGGER content_created_bonus AFTER INSERT ON contents
 WHEN NEW.kind IN ('question','answer','comment') BEGIN
-  INSERT INTO bonus_ledger(operation,course_id,term_id,student_id,delta_points,source_kind,source_id,operator_id,reason,created_at)
-  SELECT 'award',NEW.course_id,t.id,NEW.author_id,
-    CASE NEW.kind WHEN 'question' THEN c.question_points WHEN 'answer' THEN c.answer_points ELSE c.comment_points END,
-    NEW.kind,NEW.id,NEW.updated_by,NEW.kind||'.created',NEW.created_at
-  FROM courses c JOIN terms t ON t.current=1
+  INSERT INTO bonus_ledger(course_id,term_id,student_id,delta_points,source_kind,source_id,operator_id,created_at)
+  SELECT NEW.course_id,t.id,NEW.author_id,
+    CASE NEW.kind WHEN 'question' THEN r.points_question WHEN 'answer' THEN r.points_answer ELSE r.points_comment END,
+    NEW.kind,NEW.id,NEW.updated_by,NEW.created_at
+  FROM course_bonus_rules r JOIN terms t ON t.current=1
   JOIN accounts student ON student.id=NEW.author_id AND student.role='student' AND student.status<>'deleted'
-  JOIN enrollments e ON e.course_id=c.id AND e.term_id=t.id AND e.account_id=student.id
-  WHERE c.id=NEW.course_id AND NEW.id IN (SELECT id FROM public_contents)
-    AND CASE NEW.kind WHEN 'question' THEN c.question_points WHEN 'answer' THEN c.answer_points ELSE c.comment_points END>0;
+  JOIN enrollments e ON e.course_id=r.id AND e.term_id=t.id AND e.account_id=student.id
+  WHERE r.id=NEW.course_id AND NEW.id IN (SELECT id FROM public_contents)
+    AND CASE NEW.kind WHEN 'question' THEN r.points_question WHEN 'answer' THEN r.points_answer ELSE r.points_comment END>0;
 END;
 --> statement-breakpoint
 CREATE TRIGGER content_status_bonus AFTER UPDATE OF status ON contents WHEN NEW.status<>OLD.status BEGIN
   UPDATE acceptances SET operator_id=NEW.updated_by
     WHERE NEW.status='deleted' AND (question_id=NEW.id OR answer_id=NEW.id);
   DELETE FROM acceptances WHERE NEW.status='deleted' AND (question_id=NEW.id OR answer_id=NEW.id);
-  INSERT INTO bonus_ledger(operation,course_id,term_id,student_id,delta_points,source_kind,source_id,operator_id,reason,created_at,reverses_id)
-  SELECT CASE WHEN s.source_id IS NULL THEN 'revoke' ELSE 'restore' END,
-    l.course_id,l.term_id,l.student_id,-l.delta_points,l.source_kind,l.source_id,NEW.updated_by,NEW.kind||'.'||NEW.status,NEW.updated_at,l.id
+  INSERT INTO bonus_ledger(course_id,term_id,student_id,delta_points,source_kind,source_id,operator_id,created_at,reverses_id)
+  SELECT l.course_id,l.term_id,l.student_id,-l.delta_points,l.source_kind,l.source_id,NEW.updated_by,NEW.updated_at,l.id
   FROM bonus_state l LEFT JOIN bonus_sources s ON s.source_kind=l.source_kind AND s.source_id=l.source_id
   WHERE l.course_id=NEW.course_id AND ((l.delta_points>0 AND s.source_id IS NULL) OR (l.delta_points<0 AND s.source_id IS NOT NULL));
 END;
@@ -437,62 +385,38 @@ CREATE TRIGGER acceptance_update_guard BEFORE UPDATE OF question_id,answer_id ON
 END;
 --> statement-breakpoint
 CREATE TRIGGER acceptance_created AFTER INSERT ON acceptances BEGIN
-  INSERT INTO bonus_ledger(operation,course_id,term_id,student_id,delta_points,source_kind,source_id,operator_id,reason,created_at)
-  SELECT 'award',q.course_id,t.id,answer.author_id,c.acceptance_points,'acceptance',answer.id,NEW.operator_id,'acceptance.created',NEW.created_at
+  INSERT INTO bonus_ledger(course_id,term_id,student_id,delta_points,source_kind,source_id,operator_id,created_at)
+  SELECT q.course_id,t.id,answer.author_id,r.points_acceptance,'acceptance',answer.id,NEW.operator_id,NEW.created_at
   FROM public_contents q JOIN public_contents answer ON answer.id=NEW.answer_id
-  JOIN courses c ON c.id=q.course_id JOIN terms t ON t.current=1
+  JOIN course_bonus_rules r ON r.id=q.course_id JOIN terms t ON t.current=1
   JOIN accounts student ON student.id=answer.author_id AND student.role='student' AND student.status<>'deleted'
   JOIN enrollments e ON e.course_id=q.course_id AND e.term_id=t.id AND e.account_id=student.id
-  WHERE q.id=NEW.question_id AND c.acceptance_points>0 ON CONFLICT DO NOTHING;
-  INSERT INTO bonus_ledger(operation,course_id,term_id,student_id,delta_points,source_kind,source_id,operator_id,reason,created_at,reverses_id)
-  SELECT CASE WHEN s.source_id IS NULL THEN 'revoke' ELSE 'restore' END,
-    l.course_id,l.term_id,l.student_id,-l.delta_points,l.source_kind,l.source_id,NEW.operator_id,'acceptance.created',unixepoch(),l.id
+  WHERE q.id=NEW.question_id AND r.points_acceptance>0 ON CONFLICT DO NOTHING;
+  INSERT INTO bonus_ledger(course_id,term_id,student_id,delta_points,source_kind,source_id,operator_id,created_at,reverses_id)
+  SELECT l.course_id,l.term_id,l.student_id,-l.delta_points,l.source_kind,l.source_id,NEW.operator_id,unixepoch(),l.id
   FROM bonus_state l LEFT JOIN bonus_sources s ON s.source_kind=l.source_kind AND s.source_id=l.source_id
   WHERE l.course_id=(SELECT course_id FROM contents WHERE id=NEW.question_id) AND ((l.delta_points>0 AND s.source_id IS NULL) OR (l.delta_points<0 AND s.source_id IS NOT NULL));
-  INSERT INTO business_events(event_id,type,course_id,content_id,actor_id,payload,created_at)
-  SELECT lower(hex(randomblob(16))),'question.acceptance_changed',q.course_id,q.id,NEW.operator_id,
-    json_object('id',q.id,'kind','question','courseId',q.course_id,'authorId',q.author_id,
-      'acceptedAnswerId',NEW.answer_id,'previousAcceptedAnswerId',NULL,
-      'answerAuthorId',(SELECT author_id FROM contents WHERE id=NEW.answer_id),
-      'previousAnswerAuthorId',(SELECT author_id FROM contents WHERE id=NULL)),unixepoch()
-  FROM contents q WHERE q.id=NEW.question_id;
 END;
 --> statement-breakpoint
 CREATE TRIGGER acceptance_changed AFTER UPDATE OF answer_id ON acceptances WHEN NEW.answer_id<>OLD.answer_id BEGIN
-  INSERT INTO bonus_ledger(operation,course_id,term_id,student_id,delta_points,source_kind,source_id,operator_id,reason,created_at)
-  SELECT 'award',q.course_id,t.id,answer.author_id,c.acceptance_points,'acceptance',answer.id,NEW.operator_id,'acceptance.created',NEW.created_at
+  INSERT INTO bonus_ledger(course_id,term_id,student_id,delta_points,source_kind,source_id,operator_id,created_at)
+  SELECT q.course_id,t.id,answer.author_id,r.points_acceptance,'acceptance',answer.id,NEW.operator_id,NEW.created_at
   FROM public_contents q JOIN public_contents answer ON answer.id=NEW.answer_id
-  JOIN courses c ON c.id=q.course_id JOIN terms t ON t.current=1
+  JOIN course_bonus_rules r ON r.id=q.course_id JOIN terms t ON t.current=1
   JOIN accounts student ON student.id=answer.author_id AND student.role='student' AND student.status<>'deleted'
   JOIN enrollments e ON e.course_id=q.course_id AND e.term_id=t.id AND e.account_id=student.id
-  WHERE q.id=NEW.question_id AND c.acceptance_points>0 ON CONFLICT DO NOTHING;
-  INSERT INTO bonus_ledger(operation,course_id,term_id,student_id,delta_points,source_kind,source_id,operator_id,reason,created_at,reverses_id)
-  SELECT CASE WHEN s.source_id IS NULL THEN 'revoke' ELSE 'restore' END,
-    l.course_id,l.term_id,l.student_id,-l.delta_points,l.source_kind,l.source_id,NEW.operator_id,'acceptance.changed',unixepoch(),l.id
+  WHERE q.id=NEW.question_id AND r.points_acceptance>0 ON CONFLICT DO NOTHING;
+  INSERT INTO bonus_ledger(course_id,term_id,student_id,delta_points,source_kind,source_id,operator_id,created_at,reverses_id)
+  SELECT l.course_id,l.term_id,l.student_id,-l.delta_points,l.source_kind,l.source_id,NEW.operator_id,unixepoch(),l.id
   FROM bonus_state l LEFT JOIN bonus_sources s ON s.source_kind=l.source_kind AND s.source_id=l.source_id
   WHERE l.course_id=(SELECT course_id FROM contents WHERE id=NEW.question_id) AND ((l.delta_points>0 AND s.source_id IS NULL) OR (l.delta_points<0 AND s.source_id IS NOT NULL));
-  INSERT INTO business_events(event_id,type,course_id,content_id,actor_id,payload,created_at)
-  SELECT lower(hex(randomblob(16))),'question.acceptance_changed',q.course_id,q.id,NEW.operator_id,
-    json_object('id',q.id,'kind','question','courseId',q.course_id,'authorId',q.author_id,
-      'acceptedAnswerId',NEW.answer_id,'previousAcceptedAnswerId',OLD.answer_id,
-      'answerAuthorId',(SELECT author_id FROM contents WHERE id=NEW.answer_id),
-      'previousAnswerAuthorId',(SELECT author_id FROM contents WHERE id=OLD.answer_id)),unixepoch()
-  FROM contents q WHERE q.id=NEW.question_id;
 END;
 --> statement-breakpoint
 CREATE TRIGGER acceptance_removed AFTER DELETE ON acceptances BEGIN
-  INSERT INTO bonus_ledger(operation,course_id,term_id,student_id,delta_points,source_kind,source_id,operator_id,reason,created_at,reverses_id)
-  SELECT CASE WHEN s.source_id IS NULL THEN 'revoke' ELSE 'restore' END,
-    l.course_id,l.term_id,l.student_id,-l.delta_points,l.source_kind,l.source_id,OLD.operator_id,'acceptance.cancelled',unixepoch(),l.id
+  INSERT INTO bonus_ledger(course_id,term_id,student_id,delta_points,source_kind,source_id,operator_id,created_at,reverses_id)
+  SELECT l.course_id,l.term_id,l.student_id,-l.delta_points,l.source_kind,l.source_id,OLD.operator_id,unixepoch(),l.id
   FROM bonus_state l LEFT JOIN bonus_sources s ON s.source_kind=l.source_kind AND s.source_id=l.source_id
   WHERE l.course_id=(SELECT course_id FROM contents WHERE id=OLD.question_id) AND ((l.delta_points>0 AND s.source_id IS NULL) OR (l.delta_points<0 AND s.source_id IS NOT NULL));
-  INSERT INTO business_events(event_id,type,course_id,content_id,actor_id,payload,created_at)
-  SELECT lower(hex(randomblob(16))),'question.acceptance_changed',q.course_id,q.id,OLD.operator_id,
-    json_object('id',q.id,'kind','question','courseId',q.course_id,'authorId',q.author_id,
-      'acceptedAnswerId',NULL,'previousAcceptedAnswerId',OLD.answer_id,
-      'answerAuthorId',(SELECT author_id FROM contents WHERE id=NULL),
-      'previousAnswerAuthorId',(SELECT author_id FROM contents WHERE id=OLD.answer_id)),unixepoch()
-  FROM contents q WHERE q.id=OLD.question_id;
 END;
 --> statement-breakpoint
 CREATE TRIGGER file_version_insert_guard BEFORE INSERT ON file_versions BEGIN
@@ -507,33 +431,31 @@ CREATE TRIGGER file_version_identity_immutable BEFORE UPDATE ON file_versions BE
 END;
 --> statement-breakpoint
 CREATE TRIGGER file_version_created_bonus AFTER INSERT ON file_versions BEGIN
-  INSERT INTO bonus_ledger(operation,course_id,term_id,student_id,delta_points,source_kind,source_id,operator_id,reason,created_at)
-  SELECT 'award',m.course_id,t.id,NEW.uploaded_by,c.material_points,'material',NEW.material_id||'@'||NEW.version,
-    NEW.updated_by,'material.uploaded',NEW.created_at
-  FROM public_contents m JOIN courses c ON c.id=m.course_id JOIN terms t ON t.current=1
+  INSERT INTO bonus_ledger(course_id,term_id,student_id,delta_points,source_kind,source_id,operator_id,created_at)
+  SELECT m.course_id,t.id,NEW.uploaded_by,
+    CASE WHEN NEW.version=1 THEN r.points_material ELSE r.points_material_version END,'material',NEW.material_id||'@'||NEW.version,
+    NEW.updated_by,NEW.created_at
+  FROM public_contents m JOIN course_bonus_rules r ON r.id=m.course_id JOIN terms t ON t.current=1
   JOIN accounts student ON student.id=NEW.uploaded_by AND student.role='student' AND student.status<>'deleted'
   JOIN enrollments e ON e.course_id=m.course_id AND e.term_id=t.id AND e.account_id=student.id
-  WHERE m.id=NEW.material_id AND NEW.status='visible' AND c.material_points>0
-    AND (c.material_per_version=1 OR NEW.version=1) ON CONFLICT DO NOTHING;
-  INSERT INTO bonus_ledger(operation,course_id,term_id,student_id,delta_points,source_kind,source_id,operator_id,reason,created_at,reverses_id)
-  SELECT CASE WHEN s.source_id IS NULL THEN 'revoke' ELSE 'restore' END,
-    l.course_id,l.term_id,l.student_id,-l.delta_points,l.source_kind,l.source_id,NEW.updated_by,'material.uploaded',unixepoch(),l.id
+  WHERE m.id=NEW.material_id AND NEW.status='visible'
+    AND CASE WHEN NEW.version=1 THEN r.points_material ELSE r.points_material_version END>0 ON CONFLICT DO NOTHING;
+  INSERT INTO bonus_ledger(course_id,term_id,student_id,delta_points,source_kind,source_id,operator_id,created_at,reverses_id)
+  SELECT l.course_id,l.term_id,l.student_id,-l.delta_points,l.source_kind,l.source_id,NEW.updated_by,unixepoch(),l.id
   FROM bonus_state l LEFT JOIN bonus_sources s ON s.source_kind=l.source_kind AND s.source_id=l.source_id
   WHERE l.course_id=(SELECT course_id FROM contents WHERE id=NEW.material_id) AND ((l.delta_points>0 AND s.source_id IS NULL) OR (l.delta_points<0 AND s.source_id IS NOT NULL));
 END;
 --> statement-breakpoint
 CREATE TRIGGER file_version_status_bonus AFTER UPDATE OF status ON file_versions WHEN NEW.status<>OLD.status BEGIN
-  INSERT INTO bonus_ledger(operation,course_id,term_id,student_id,delta_points,source_kind,source_id,operator_id,reason,created_at,reverses_id)
-  SELECT CASE WHEN s.source_id IS NULL THEN 'revoke' ELSE 'restore' END,
-    l.course_id,l.term_id,l.student_id,-l.delta_points,l.source_kind,l.source_id,NEW.updated_by,'file_version.'||NEW.status,unixepoch(),l.id
+  INSERT INTO bonus_ledger(course_id,term_id,student_id,delta_points,source_kind,source_id,operator_id,created_at,reverses_id)
+  SELECT l.course_id,l.term_id,l.student_id,-l.delta_points,l.source_kind,l.source_id,NEW.updated_by,unixepoch(),l.id
   FROM bonus_state l LEFT JOIN bonus_sources s ON s.source_kind=l.source_kind AND s.source_id=l.source_id
   WHERE l.course_id=(SELECT course_id FROM contents WHERE id=NEW.material_id) AND ((l.delta_points>0 AND s.source_id IS NULL) OR (l.delta_points<0 AND s.source_id IS NOT NULL));
 END;
 --> statement-breakpoint
 CREATE TRIGGER file_version_deleted_bonus AFTER DELETE ON file_versions BEGIN
-  INSERT INTO bonus_ledger(operation,course_id,term_id,student_id,delta_points,source_kind,source_id,operator_id,reason,created_at,reverses_id)
-  SELECT CASE WHEN s.source_id IS NULL THEN 'revoke' ELSE 'restore' END,
-    l.course_id,l.term_id,l.student_id,-l.delta_points,l.source_kind,l.source_id,OLD.updated_by,'file_version.deleted',unixepoch(),l.id
+  INSERT INTO bonus_ledger(course_id,term_id,student_id,delta_points,source_kind,source_id,operator_id,created_at,reverses_id)
+  SELECT l.course_id,l.term_id,l.student_id,-l.delta_points,l.source_kind,l.source_id,OLD.updated_by,unixepoch(),l.id
   FROM bonus_state l LEFT JOIN bonus_sources s ON s.source_kind=l.source_kind AND s.source_id=l.source_id
   WHERE l.course_id=(SELECT course_id FROM contents WHERE id=OLD.material_id) AND ((l.delta_points>0 AND s.source_id IS NULL) OR (l.delta_points<0 AND s.source_id IS NOT NULL));
 END;
@@ -541,7 +463,7 @@ END;
 CREATE TRIGGER bonus_ledger_guard BEFORE INSERT ON bonus_ledger BEGIN
   SELECT RAISE(ABORT,'invalid_bonus_student') WHERE NOT EXISTS(SELECT 1 FROM accounts WHERE id=NEW.student_id AND role='student');
   SELECT RAISE(ABORT,'invalid_bonus_reversal') WHERE NEW.reverses_id IS NOT NULL AND NOT EXISTS(
-    SELECT 1 FROM bonus_ledger previous WHERE previous.id=NEW.reverses_id AND previous.operation<>'manual'
+    SELECT 1 FROM bonus_ledger previous WHERE previous.id=NEW.reverses_id AND previous.source_kind<>'manual'
       AND previous.course_id=NEW.course_id AND previous.term_id=NEW.term_id AND previous.student_id=NEW.student_id
       AND previous.source_kind=NEW.source_kind AND previous.source_id=NEW.source_id AND previous.delta_points=-NEW.delta_points);
 END;

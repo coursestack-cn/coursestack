@@ -34,9 +34,9 @@ test('ProseMirror nodes, marks and attributes round-trip through storage and eve
     const comment = await h.api('POST', '/comments', 'student-b', { targetKind: 'question', targetId: q, body });
     assert.equal(comment.status, 201);
     assert.deepEqual((await h.api('GET', `/comments?targetKind=question&targetId=${q}`)).data.items[0].body, body);
-    const edited = await h.api('PATCH', `/contents/${q}`, 'student-a', { revision: 1, body: doc('更新') });
+    const edited = await h.api('PATCH', `/contents/${q}`, 'student-a', { body: doc('更新') });
     assert.equal(edited.status, 200); assert.deepEqual(edited.data.body, doc('更新')); assert.equal(edited.data.format, 'prosemirror');
-    const tagsOnly = await h.api('PATCH', `/contents/${q}`, 'student-a', { revision: 2, tags: ['保留正文'] });
+    const tagsOnly = await h.api('PATCH', `/contents/${q}`, 'student-a', { tags: ['保留正文'] });
     assert.deepEqual(tagsOnly.data.body, doc('更新'));
 });
 
@@ -73,13 +73,13 @@ test('deletion clears only title, body and tags while preserving relationships, 
     const answer = await h.postAnswer(q);
     const before = await h.database.prepare('SELECT * FROM contents WHERE id=?').bind(q).first();
     await assert.rejects(h.database.prepare("UPDATE contents SET status='deleted' WHERE id=?").bind(q).run(), /contents_deleted_payload/);
-    assert.equal((await h.api('DELETE', `/contents/${q}`, 'student-a', { revision: 1 })).status, 200);
+    assert.equal((await h.api('DELETE', `/contents/${q}`, 'student-a', { })).status, 200);
     const after = await h.database.prepare('SELECT * FROM contents WHERE id=?').bind(q).first();
     for (const field of ['title', 'body', 'tags']) assert.equal(after[field], null, field);
     for (const field of ['id', 'kind', 'course_id', 'author_id', 'target_kind', 'target_id', 'created_at', 'request_key', 'request_hash']) {
         assert.equal(after[field], before[field], field);
     }
-    assert.equal(after.status, 'deleted'); assert.equal(after.revision, 2); assert.equal(after.updated_by, 'student-a');
+    assert.equal(after.status, 'deleted'); assert.equal(after.updated_by, 'student-a');
     assert.ok(after.updated_at >= before.updated_at);
     assert.equal((await h.api('GET', `/questions/${q}/answers`)).data.items[0].id, answer);
     assert.equal((await h.api('GET', `/moderation/contents/${q}`, 'teacher-a')).data.body, null);

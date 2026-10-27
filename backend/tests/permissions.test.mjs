@@ -55,7 +55,6 @@ beforeEach(async () => {
 PRAGMA defer_foreign_keys=ON;
 DELETE FROM courses;
 DELETE FROM file_versions;
-DELETE FROM business_events;
 DELETE FROM contents;
 DELETE FROM sessions;
 DELETE FROM login_attempts;

@@ -75,17 +75,12 @@ export async function start(options = {}) {
             const response = await api('POST', `/questions/${question}/answers`, as, { body });
             assert.equal(response.status, 201, JSON.stringify(response.data)); return response.data.id;
         }
-        async function revision(id) {
-            const response = await api('GET', `/contents/${id}`);
-            assert.equal(response.status, 200); return response.data.revision;
-        }
         const accept = async (question, answer, as = 'teacher-a') => api('PUT', `/questions/${question}/acceptance`, as,
             { answerId: answer });
-        async function policy(rules = { acceptancePoints: 50 }) {
-            const course = await api('GET', '/courses/course-a');
-            const response = await api('PUT', '/courses/course-a/bonus-policy', 'teacher-a', { revision: course.data.revision, questionPoints: 0, answerPoints: 0, acceptancePoints: 0, commentPoints: 0, materialPoints: 0, materialPerVersion: false, ...rules });
+        async function policy(rules = { pointsAcceptance: 50 }) {
+            const response = await api('PUT', '/courses/course-a/bonus-policy', 'teacher-a', { pointsQuestion: 0, pointsAnswer: 0, pointsAcceptance: 0, pointsComment: 0, pointsMaterial: 0, pointsMaterialVersion: 0, ...rules });
             assert.equal(response.status, 200, JSON.stringify(response.data)); return response;
         }
-        return { mf, database, env, worker: { fetch }, api, postQuestion, postAnswer, revision, accept, policy, dispose: () => mf.dispose() };
+        return { mf, database, env, worker: { fetch }, api, postQuestion, postAnswer, accept, policy, dispose: () => mf.dispose() };
     } catch (error) { await mf.dispose(); throw error; }
 }

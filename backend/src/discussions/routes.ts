@@ -1,12 +1,12 @@
 import { Hono } from 'hono';
 import { sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { HttpError, respond, assertChanged, input, listResult, page, requestIdentity, revisionSchema, idSchema, tagsSchema, parsedEnum, queryPage } from '../http.ts';
+import { HttpError, respond, assertChanged, input, listResult, page, requestIdentity, idSchema, tagsSchema, parsedEnum, queryPage } from '../http.ts';
 import { activeUser, editPermission } from '../permissions.ts';
 import { actor } from '../auth/middleware.ts';
 import type { AppEnv, Ctx, ContentRow, PublicRow } from '../discussions/types.ts';
 import { accessibleContent, contentDto, publicDetail, publicSelect, requireEditor, tombstone, visibleContent } from '../discussions/service.ts';
-import { bodySchema, type ProseMirrorDocument } from './body.ts';
+import { bodySchema, jsonChanged, type ProseMirrorDocument } from './body.ts';
 import { createDatabase } from '../db/index.ts';
 const now = () => Math.floor(Date.now() / 1000);
 const uid = () => crypto.randomUUID();
@@ -68,7 +68,7 @@ discussionRoutes.post('/courses/:id/questions', async c => {
 });
 discussionRoutes.get('/questions/:id', async c => {
     const row = await accessibleContent(c, c.req.param('id'), 'question');
-    return respond(c, row.status === 'deleted' ? tombstone(row) : await publicDetail(c, row.id));
+    return respond(c, row.status === 'deleted' ? await tombstone(c, row.id) : await publicDetail(c, row.id));
 });
 discussionRoutes.get('/questions/:id/answers', async c => {
     const question = await accessibleContent(c, c.req.param('id'), 'question'), p = page(c);
@@ -105,29 +105,33 @@ discussionRoutes.post('/comments', async c => {
 });
 discussionRoutes.get('/contents/:id', async c => {
     const row = await accessibleContent(c, c.req.param('id'));
-    if (row.status === 'deleted') return respond(c, tombstone(row));
+    if (row.status === 'deleted') return respond(c, await tombstone(c, row.id));
     return respond(c, await publicDetail(c, row.id));
 });
 discussionRoutes.patch('/contents/:id', async c => {
     const row = await visibleContent(c, c.req.param('id')), a = await requireEditor(c, row);
     const schema = row.kind === 'question' || row.kind === 'material' ? questionInput.pick({ title: true, body: true }).partial()
-        .extend({ revision: revisionSchema, tags: tagsSchema.nullable().optional() }).strict()
-        : z.object({ revision: revisionSchema, body: bodySchema }).strict();
-    const data = await input(c, schema) as { revision: number; title?: string; body?: ProseMirrorDocument; tags?: string[] | null };
-    const result = await createDatabase(c.env.DB).run(sql`UPDATE contents SET title=${data.title ?? row.title},body=${data.body === undefined ? row.body : JSON.stringify(data.body)},
-        tags=${data.tags === undefined ? row.tags : data.tags?.length ? JSON.stringify(data.tags) : null},
-        updated_at=${now()},updated_by=${a.id},revision=revision+1
-        WHERE id=${row.id} AND revision=${data.revision} AND id IN (SELECT id FROM public_contents)
+        .extend({ tags: tagsSchema.nullable().optional() }).strict() : z.object({ body: bodySchema }).strict();
+    const data = await input(c, schema) as { title?: string; body?: ProseMirrorDocument; tags?: string[] | null };
+    const body = data.body === undefined ? undefined : JSON.stringify(data.body);
+    const tags = data.tags === undefined ? undefined : data.tags?.length ? JSON.stringify(data.tags) : null;
+    const bodyChanged = body === undefined ? sql`0` : jsonChanged(sql`body`, body);
+    const tagsChanged = tags === undefined ? sql`0` : jsonChanged(sql`tags`, tags);
+    const titleChanged = data.title === undefined ? sql`0` : sql`title IS NOT ${data.title}`, at = now();
+    const result = await createDatabase(c.env.DB).run(sql`UPDATE contents SET title=${data.title ?? sql`title`},
+        body=${body === undefined ? sql`body` : sql`CASE WHEN ${bodyChanged} THEN ${body} ELSE body END`},
+        tags=${tags === undefined ? sql`tags` : sql`CASE WHEN ${tagsChanged} THEN ${tags} ELSE tags END`},
+        edited_at=CASE WHEN ${titleChanged} OR ${bodyChanged} OR ${tagsChanged} THEN ${at} ELSE edited_at END,
+        updated_at=${at},updated_by=${a.id} WHERE id=${row.id} AND id IN (SELECT id FROM public_contents)
         AND ${editPermission(a, sql`contents.course_id`, sql`contents.author_id`)}`);
     assertChanged(result); return respond(c, await publicDetail(c, row.id));
 });
 discussionRoutes.delete('/contents/:id', async c => {
     const row = await visibleContent(c, c.req.param('id')), a = await requireEditor(c, row);
-    const data = await input(c, z.object({ revision: revisionSchema }).strict());
     const result = await createDatabase(c.env.DB).run(sql`UPDATE contents SET status='deleted',body=NULL,tags=NULL,title=NULL,
-        revision=revision+1,updated_at=${now()},updated_by=${a.id} WHERE id=${row.id} AND revision=${data.revision}
+        updated_at=${now()},updated_by=${a.id} WHERE id=${row.id}
         AND id IN (SELECT id FROM public_contents) AND ${editPermission(a, sql`contents.course_id`, sql`contents.author_id`)}`);
-    assertChanged(result); return respond(c, { id: row.id, status: 'deleted', revision: data.revision + 1 });
+    assertChanged(result); return respond(c, { id: row.id, status: 'deleted' });
 });
 discussionRoutes.put('/contents/:id/vote', async c => {
     const a = actor(c), row = await visibleContent(c, c.req.param('id'));
@@ -138,9 +142,9 @@ discussionRoutes.put('/contents/:id/vote', async c => {
         await createDatabase(c.env.DB).run(sql`DELETE FROM votes WHERE content_id=${row.id} AND user_id=${a.id} AND ${activeUser(a)}
             AND EXISTS(SELECT 1 FROM public_contents p WHERE p.id=${row.id})`);
     } else {
-        const result = await createDatabase(c.env.DB).run(sql`INSERT INTO votes(content_id,user_id,value,updated_at)
+        const result = await createDatabase(c.env.DB).run(sql`INSERT INTO votes(content_id,user_id,value,created_at)
             SELECT id,${a.id},${data.value},${now()} FROM public_contents WHERE id=${row.id} AND author_id<>${a.id} AND ${activeUser(a)}
-            ON CONFLICT(content_id,user_id) DO UPDATE SET value=excluded.value,updated_at=excluded.updated_at`);
+            ON CONFLICT(content_id,user_id) DO UPDATE SET value=excluded.value`);
         assertChanged(result);
     }
     const detail = await publicDetail(c, row.id);

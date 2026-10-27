@@ -9,24 +9,46 @@ const points = async (student = 'student-b', term = 'term-active') => h.database
     'SELECT COALESCE(SUM(delta_points),0) AS points FROM bonus_ledger WHERE course_id=? AND term_id=? AND student_id=?'
 ).bind('course-a', term, student).first('points');
 const moderation = async (id, action) => h.api('PUT', `/contents/${id}/moderation`, 'teacher-a', {
-    revision: await h.database.prepare('SELECT revision FROM contents WHERE id=?').bind(id).first('revision'), action, reason: '测试上下架原因',
+    action, reason: '测试上下架原因',
 });
 const adjustment = (deltaPoints, options = {}, as = 'teacher-a') => h.api('POST', '/courses/course-a/bonus-adjustments', as,
     { studentId: 'student-b', termId: 'term-active', deltaPoints, reason: '课堂贡献调整' }, options);
 
-test('five independent nonnegative integer rules replace enabled and decimal policies', async () => {
-    const configured = await h.policy({ questionPoints: 10, answerPoints: 25, acceptancePoints: 50, commentPoints: 1, materialPoints: 40, materialPerVersion: true });
-    assert.deepEqual(configured.data.bonusPolicy, { questionPoints: 10, answerPoints: 25, acceptancePoints: 50, commentPoints: 1, materialPoints: 40, materialPerVersion: true });
+test('each course has six independent nonnegative integer rules, all initially zero', async () => {
+    const initial = await h.api('GET', '/courses/course-a');
+    assert.deepEqual(initial.data.bonusPolicy, { pointsQuestion: 0, pointsAnswer: 0, pointsAcceptance: 0, pointsComment: 0, pointsMaterial: 0, pointsMaterialVersion: 0 });
+    await assert.rejects(h.database.prepare("INSERT INTO course_bonus_rules(id) VALUES('course-a')").run(), /UNIQUE/);
+    await assert.rejects(h.database.prepare("INSERT INTO course_bonus_rules(id) VALUES('missing-course')").run(), /FOREIGN KEY/);
+    const configured = await h.policy({ pointsQuestion: 10, pointsAnswer: 25, pointsAcceptance: 50, pointsComment: 1, pointsMaterial: 40, pointsMaterialVersion: 10 });
+    assert.deepEqual(configured.data.bonusPolicy, { pointsQuestion: 10, pointsAnswer: 25, pointsAcceptance: 50, pointsComment: 1, pointsMaterial: 40, pointsMaterialVersion: 10 });
     assert.equal('bonusEnabled' in configured.data, false);
-    for (const value of [-1, 1.5]) {
-        const response = await h.api('PUT', '/courses/course-a/bonus-policy', 'teacher-a', { revision: configured.data.revision, ...configured.data.bonusPolicy, answerPoints: value });
+    for (const [field, column] of [['pointsAnswer', 'points_answer'], ['pointsMaterialVersion', 'points_material_version']]) for (const value of [-1, 1.5]) {
+        const response = await h.api('PUT', '/courses/course-a/bonus-policy', 'teacher-a', { ...configured.data.bonusPolicy, [field]: value });
         assert.equal(response.status, 400);
-        await assert.rejects(h.database.prepare('UPDATE courses SET answer_points=? WHERE id=?').bind(value, 'course-a').run(), /courses_answer_points/);
+        await assert.rejects(h.database.prepare(`UPDATE course_bonus_rules SET ${column}=? WHERE id=?`).bind(value, 'course-a').run(),
+            value < 0 ? /course_bonus_rules_points_/ : /cannot store REAL value in INTEGER column/);
     }
 });
 
+test('rule changes accept the final submitted rules, enforce authority and roll back with course metadata', async () => {
+    const configured = await h.policy({ pointsAnswer: 25, pointsMaterialVersion: 10 });
+    const body = { ...configured.data.bonusPolicy, pointsAnswer: 99 };
+    for (const as of ['student-a', 'teacher-b']) {
+        assert.equal((await h.api('PUT', '/courses/course-a/bonus-policy', as, body)).status, 403);
+    }
+    const changed = await h.api('PUT', '/courses/course-a/bonus-policy', 'teacher-a', body);
+    assert.equal(changed.status, 200); assert.equal(changed.data.bonusPolicy.pointsAnswer, 99);
+    const last = await h.api('PUT', '/courses/course-a/bonus-policy', 'teacher-a', configured.data.bonusPolicy);
+    assert.equal(last.status, 200); assert.deepEqual(last.data.bonusPolicy, configured.data.bonusPolicy);
+    const before = (await h.database.prepare('SELECT * FROM bonus_ledger ORDER BY id').all()).results;
+    await h.database.prepare("CREATE TRIGGER fail_course_update BEFORE UPDATE ON courses BEGIN SELECT RAISE(ABORT,'simulated_failure'); END").run();
+    assert.equal((await h.api('PUT', '/courses/course-a/bonus-policy', 'teacher-a', body)).status, 500);
+    assert.deepEqual((await h.api('GET', '/courses/course-a')).data, last.data);
+    assert.deepEqual((await h.database.prepare('SELECT * FROM bonus_ledger ORDER BY id').all()).results, before);
+});
+
 test('question, answer and comment rewards belong to the exact course, term and enrolled student', async () => {
-    await h.policy({ questionPoints: 10, answerPoints: 25, commentPoints: 3 });
+    await h.policy({ pointsQuestion: 10, pointsAnswer: 25, pointsComment: 3 });
     const body = { title: '计分问题', body: doc('正文') }, options = { key: 'question-points-request' };
     const first = await h.api('POST', '/courses/course-a/questions', 'student-a', body, options);
     assert.equal(first.status, 201);
@@ -45,7 +67,7 @@ test('question, answer and comment rewards belong to the exact course, term and 
 });
 
 test('hidden ancestors revoke descendant rewards; restoration uses original values and respects other hidden ancestors', async () => {
-    await h.policy({ questionPoints: 10, answerPoints: 25, acceptancePoints: 50, commentPoints: 3 });
+    await h.policy({ pointsQuestion: 10, pointsAnswer: 25, pointsAcceptance: 50, pointsComment: 3 });
     const q = await h.postQuestion(), a = await h.postAnswer(q);
     await h.accept(q, a);
     await h.api('POST', '/comments', 'student-b', { targetKind: 'answer', targetId: a, body: doc('答复') });
@@ -53,7 +75,7 @@ test('hidden ancestors revoke descendant rewards; restoration uses original valu
     assert.equal((await moderation(q, 'hide')).status, 200);
     assert.equal(await points(), 0); assert.equal(await points('student-a'), 0);
     assert.equal((await moderation(a, 'hide')).status, 200);
-    await h.policy({ questionPoints: 99, answerPoints: 99, acceptancePoints: 99, commentPoints: 99 });
+    await h.policy({ pointsQuestion: 99, pointsAnswer: 99, pointsAcceptance: 99, pointsComment: 99 });
     assert.equal((await moderation(q, 'restore')).status, 200);
     assert.equal(await points(), 0); assert.equal(await points('student-a'), 10);
     assert.equal((await moderation(a, 'restore')).status, 200);
@@ -62,31 +84,46 @@ test('hidden ancestors revoke descendant rewards; restoration uses original valu
     await moderation(a, 'restore');
     assert.equal(await h.database.prepare('SELECT count(*) AS n FROM bonus_ledger').first('n'), before);
     assert.equal((await h.api('GET', `/questions/${q}`)).data.acceptedAnswerId, a);
-    assert.equal(await h.database.prepare('SELECT count(*) AS n FROM bonus_ledger WHERE operation=\'restore\' AND term_id<>\'term-active\'').first('n'), 0);
+    assert.equal(await h.database.prepare("SELECT count(*) AS n FROM bonus_ledger WHERE reverses_id IS NOT NULL AND delta_points>0 AND term_id<>'term-active'").first('n'), 0);
+    assert.equal(await h.database.prepare("SELECT count(*) AS n FROM bonus_ledger WHERE source_kind<>'manual' AND reason IS NOT NULL").first('n'), 0);
 });
 
 test('material rewards use the uploader and composite version identity; physical deletion keeps ledger history', async () => {
-    await h.policy({ materialPoints: 40 });
+    await h.policy({ pointsMaterial: 40, pointsMaterialVersion: 10 });
     await h.database.prepare(`INSERT INTO contents(id,kind,course_id,author_id,title,body,updated_by,request_key,request_hash)
         VALUES ('new-material','material','course-a','student-a','讲义',NULL,'student-a','new-material-request','fixture')`).run();
     const version = n => h.database.prepare(`INSERT INTO file_versions(material_id,version,filename,uploaded_by,updated_by)
         VALUES ('new-material',?,'讲义.pdf','student-b','student-b')`).bind(n).run();
     await version(1); await version(2);
-    assert.equal(await points(), 40); assert.equal(await points('student-a'), 0);
+    assert.equal(await points(), 50); assert.equal(await points('student-a'), 0);
     await assert.rejects(version(2), /UNIQUE/);
-    assert.equal(await h.database.prepare("SELECT source_id FROM bonus_ledger WHERE source_kind='material'").first('source_id'), 'new-material@1');
+    assert.deepEqual((await h.database.prepare("SELECT source_id,delta_points FROM bonus_ledger WHERE source_kind='material' ORDER BY id").all()).results,
+        [{ source_id: 'new-material@1', delta_points: 40 }, { source_id: 'new-material@2', delta_points: 10 }]);
     await h.database.prepare("UPDATE file_versions SET status='hidden',updated_by='teacher-a' WHERE material_id='new-material' AND version=1").run();
-    assert.equal(await points(), 0);
+    assert.equal(await points(), 10);
+    await h.policy({ pointsMaterial: 60, pointsMaterialVersion: 20 });
     await h.database.prepare("UPDATE file_versions SET status='visible' WHERE material_id='new-material' AND version=1").run();
-    assert.equal(await points(), 40);
+    assert.equal(await points(), 50);
     await h.database.prepare("DELETE FROM file_versions WHERE material_id='new-material' AND version=1").run();
-    assert.equal(await points(), 0);
-    const last = await h.database.prepare('SELECT operation,operator_id FROM bonus_ledger ORDER BY id DESC LIMIT 1').first();
-    assert.deepEqual(last, { operation: 'revoke', operator_id: 'teacher-a' });
-    await h.policy({ materialPoints: 60, materialPerVersion: true }); await version(3); await version(4);
-    assert.equal(await points(), 120);
+    assert.equal(await points(), 10);
+    const last = await h.database.prepare('SELECT delta_points,source_kind,operator_id,reason FROM bonus_ledger ORDER BY id DESC LIMIT 1').first();
+    assert.deepEqual(last, { delta_points: -40, source_kind: 'material', operator_id: 'teacher-a', reason: null });
+    await version(3); await version(4);
+    assert.equal(await points(), 50);
+    await h.policy({ pointsMaterial: 60, pointsMaterialVersion: 0 }); await version(5);
+    assert.equal(await points(), 50);
     await assert.rejects(h.database.prepare("UPDATE file_versions SET status='deleted' WHERE material_id='new-material'").run(), /file_versions_status/);
     assert.deepEqual((await h.database.prepare('PRAGMA foreign_key_check').all()).results, []);
+});
+
+test('later material versions can earn points when the initial upload is worth zero', async () => {
+    await h.policy({ pointsMaterial: 0, pointsMaterialVersion: 10 });
+    await h.database.prepare(`INSERT INTO contents(id,kind,course_id,author_id,title,updated_by,request_key,request_hash)
+        VALUES ('version-only','material','course-a','student-a','讲义','student-a','version-only-request','fixture')`).run();
+    for (const version of [1, 2]) await h.database.prepare(`INSERT INTO file_versions(material_id,version,filename,uploaded_by,updated_by)
+        VALUES ('version-only',?,'讲义.pdf','student-b','student-b')`).bind(version).run();
+    assert.deepEqual((await h.database.prepare("SELECT source_id,delta_points FROM bonus_ledger WHERE source_kind='material' ORDER BY id").all()).results,
+        [{ source_id: 'version-only@2', delta_points: 10 }]);
 });
 
 test('manual positive and negative adjustments are idempotent and independent of content visibility', async () => {
@@ -107,32 +144,64 @@ test('manual positive and negative adjustments are idempotent and independent of
         { studentId: 'visitor', termId: 'term-active', deltaPoints: 10, reason: '未修读' })).status, 409);
 });
 
+test('optional ledger notes round-trip without an operation field; manual deductions stay separate from automatic reversals', async () => {
+    await h.policy({ pointsQuestion: 25 });
+    const q = await h.postQuestion('student-b');
+    const body = { studentId: 'student-b', termId: 'term-active', deltaPoints: -10 };
+    const options = { key: 'optional-ledger-note' };
+    const first = await h.api('POST', '/courses/course-a/bonus-adjustments', 'teacher-a', body, options);
+    assert.equal(first.status, 201); assert.equal(first.data.reason, null);
+    assert.equal(first.data.sourceKind, 'manual'); assert.equal(first.data.reversesId, null);
+    assert.equal('operation' in first.data, false);
+    const replay = await h.api('POST', '/courses/course-a/bonus-adjustments', 'teacher-a', { ...body, reason: null }, options);
+    assert.equal(replay.status, 201); assert.equal(replay.data.id, first.data.id);
+    assert.equal(replay.headers.get('Idempotency-Replayed'), 'true');
+    assert.equal((await h.api('POST', '/courses/course-a/bonus-adjustments', 'teacher-a', { ...body, reason: '补充原因' }, options)).status, 409);
+    assert.equal(await points(), 15);
+    await moderation(q, 'hide'); assert.equal(await points(), -10);
+    await moderation(q, 'restore'); assert.equal(await points(), 15);
+    const ledger = await h.api('GET', '/me/bonus-ledger', 'student-b');
+    assert.equal(ledger.status, 200); assert.equal(ledger.data.items.length, 4);
+    assert.ok(ledger.data.items.every(row => row.reason === null && !('operation' in row)));
+    const noted = await adjustment(2);
+    assert.equal(noted.status, 201); assert.equal(noted.data.reason, '课堂贡献调整');
+    const columns = (await h.database.prepare('PRAGMA table_info(bonus_ledger)').all()).results;
+    assert.equal(columns.some(column => column.name === 'operation'), false);
+    assert.equal(columns.find(column => column.name === 'reason').notnull, 0);
+});
+
 test('rule changes do not create retroactive rewards for content originally worth zero', async () => {
-    const q = await h.postQuestion(); await h.policy({ questionPoints: 100 });
+    const q = await h.postQuestion(); await h.policy({ pointsQuestion: 100 });
     await moderation(q, 'hide'); await moderation(q, 'restore');
     assert.equal(await points('student-a'), 0);
     await h.postQuestion(); assert.equal(await points('student-a'), 100);
 });
 
 test('score failures roll back publication, acceptance and manual adjustments', async () => {
-    await h.policy({ questionPoints: 10, acceptancePoints: 50 });
+    await h.policy({ pointsQuestion: 10, pointsAcceptance: 50 });
     const q = await h.postQuestion(), a = await h.postAnswer(q);
-    const before = (await h.database.prepare('SELECT * FROM business_events ORDER BY seq').all()).results;
+    const before = (await h.database.prepare('SELECT * FROM bonus_ledger ORDER BY id').all()).results;
     await h.database.prepare("CREATE TRIGGER fail_points BEFORE INSERT ON bonus_ledger BEGIN SELECT RAISE(ABORT,'simulated_failure'); END").run();
     assert.equal((await h.api('POST', '/courses/course-a/questions', 'student-a', { title: '失败', body: doc('失败') })).status, 500);
     assert.equal((await h.accept(q, a)).status, 500);
     assert.equal((await adjustment(10)).status, 500);
     assert.equal(await h.database.prepare("SELECT count(*) AS n FROM contents WHERE kind='question'").first('n'), 1);
     assert.equal(await h.database.prepare('SELECT count(*) AS n FROM acceptances').first('n'), 0);
-    assert.deepEqual((await h.database.prepare('SELECT * FROM business_events ORDER BY seq').all()).results, before);
+    assert.deepEqual((await h.database.prepare('SELECT * FROM bonus_ledger ORDER BY id').all()).results, before);
 });
 
 test('ledger reversal chains are immutable and cannot change amount, recipient or attribution', async () => {
-    await h.policy({ questionPoints: 10 }); const q = await h.postQuestion(); await moderation(q, 'hide');
+    await h.policy({ pointsQuestion: 10 }); const q = await h.postQuestion(); await moderation(q, 'hide');
     const [award, revoke] = (await h.database.prepare('SELECT * FROM bonus_ledger ORDER BY id').all()).results;
     assert.equal(revoke.reverses_id, award.id); assert.equal(revoke.delta_points, -10);
     await assert.rejects(h.database.prepare('UPDATE bonus_ledger SET delta_points=1').run(), /immutable_ledger/);
     await assert.rejects(h.database.prepare('DELETE FROM bonus_ledger').run(), /immutable_ledger/);
-    await assert.rejects(h.database.prepare(`INSERT INTO bonus_ledger(operation,course_id,term_id,student_id,delta_points,source_kind,source_id,operator_id,reason,reverses_id)
-        VALUES ('restore','course-a','term-active','student-b',10,'question',?,'teacher-a','错误收款人',?)`).bind(q,revoke.id).run(), /invalid_bonus_reversal/);
+    await assert.rejects(h.database.prepare(`INSERT INTO bonus_ledger(course_id,term_id,student_id,delta_points,source_kind,source_id,operator_id,reason,reverses_id)
+        VALUES ('course-a','term-active','student-b',10,'question',?,'teacher-a','错误收款人',?)`).bind(q,revoke.id).run(), /invalid_bonus_reversal/);
+    await assert.rejects(h.database.prepare(`INSERT INTO bonus_ledger(course_id,term_id,student_id,delta_points,source_kind,source_id,operator_id)
+        SELECT course_id,term_id,student_id,delta_points,source_kind,source_id,operator_id FROM bonus_ledger WHERE id=?`).bind(award.id).run(), /UNIQUE/);
+    await assert.rejects(h.database.prepare(`INSERT INTO bonus_ledger(course_id,term_id,student_id,delta_points,source_kind,source_id,operator_id,reverses_id)
+        SELECT course_id,term_id,student_id,-delta_points,source_kind,source_id,operator_id,id FROM bonus_ledger WHERE id=?`).bind(award.id).run(), /UNIQUE/);
+    await assert.rejects(h.database.prepare(`INSERT INTO bonus_ledger(course_id,term_id,student_id,delta_points,source_kind,source_id,operator_id)
+        VALUES ('course-a','term-active','student-a',-10,'question','unlinked-deduction','teacher-a')`).run(), /bonus_ledger_shape/);
 });

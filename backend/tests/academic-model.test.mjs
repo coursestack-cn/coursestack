@@ -65,7 +65,7 @@ test('tags are nullable and only questions/materials may store a JSON array', as
         for (const tags of ['[]', '["标签"]']) await assert.rejects(() => h.database.prepare('UPDATE contents SET tags=? WHERE id=?').bind(tags, id).run(), /contents_tags/);
     }
     for (const id of [q, 'material-a']) {
-        const changed = await h.api('PATCH', `/contents/${id}`, 'student-a', { revision: 1, tags: null });
+        const changed = await h.api('PATCH', `/contents/${id}`, 'student-a', { tags: null });
         assert.equal(changed.status, 200); assert.equal(changed.data.tags, null);
         await assert.rejects(() => h.database.prepare("UPDATE contents SET tags='{}' WHERE id=?").bind(id).run(), /contents_tags/);
     }
@@ -75,12 +75,12 @@ test('moderation explanations and score revocations roll back with failed mutati
     await h.policy(); const q = await h.postQuestion(), a = await h.postAnswer(q); await h.accept(q, a);
     const count = await h.database.prepare('SELECT count(*) AS n FROM bonus_ledger').first('n');
     await h.database.prepare("CREATE TRIGGER fail_content_update BEFORE UPDATE ON contents BEGIN SELECT RAISE(ABORT,'simulated_failure'); END").run();
-    assert.equal((await h.api('PUT', `/contents/${a}/moderation`, 'teacher-a', { revision: 1, action: 'hide', reason: '广告需要下架' })).status, 500);
+    assert.equal((await h.api('PUT', `/contents/${a}/moderation`, 'teacher-a', { action: 'hide', reason: '广告需要下架' })).status, 500);
     assert.equal(await h.database.prepare('SELECT count(*) AS n FROM moderation_actions').first('n'), 0);
     assert.equal(await h.database.prepare('SELECT count(*) AS n FROM bonus_ledger').first('n'), count);
     await h.database.prepare('DROP TRIGGER fail_content_update').run();
-    assert.equal((await h.api('PUT', `/contents/${a}/moderation`, 'teacher-a', { revision: 1, action: 'hide', reason: '广告需要下架' })).status, 200);
+    assert.equal((await h.api('PUT', `/contents/${a}/moderation`, 'teacher-a', { action: 'hide', reason: '广告需要下架' })).status, 200);
     assert.equal(await h.database.prepare('SELECT reason FROM moderation_actions').first('reason'), '广告需要下架');
-    assert.equal(await h.database.prepare('SELECT reason FROM bonus_ledger ORDER BY id DESC LIMIT 1').first('reason'), 'answer.hidden');
+    assert.equal(await h.database.prepare('SELECT reason FROM bonus_ledger ORDER BY id DESC LIMIT 1').first('reason'), null);
     assert.equal((await h.database.prepare('PRAGMA table_info(contents)').all()).results.some(c => c.name === 'change_reason'), false);
 });

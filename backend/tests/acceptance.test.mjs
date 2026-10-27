@@ -8,15 +8,13 @@ afterEach(async () => { await h?.dispose(); });
 async function balance(student = 'student-b') {
     return (await h.database.prepare('SELECT COALESCE(SUM(delta_points),0) AS total,COUNT(*) AS entries FROM bonus_ledger WHERE student_id=?').bind(student).first());
 }
-test('采纳原子地解决问题并只加分一次；重复采纳不会追加事件或流水', async () => {
-    await h.policy({ acceptancePoints: 50 }); const q = await h.postQuestion(), a = await h.postAnswer(q);
+test('采纳原子地解决问题并只加分一次；重复采纳不会追加流水', async () => {
+    await h.policy({ pointsAcceptance: 50 }); const q = await h.postQuestion(), a = await h.postAnswer(q);
     const r = await h.accept(q, a); assert.equal(r.status, 200); assert.equal(r.data.solved, true); assert.equal(r.data.acceptedAnswerId, a); assert.equal('award' in r.data, false);
     assert.deepEqual(await balance(), { total: 50, entries: 1 });
-    const eventCount = await h.database.prepare('SELECT COUNT(*) AS n FROM business_events').first('n');
     const repeat = await h.api('PUT', `/questions/${q}/acceptance`, 'teacher-a', { answerId: a });
     assert.equal(repeat.status, 200); assert.equal(repeat.data.changed, false);
     assert.deepEqual(await balance(), { total: 50, entries: 1 });
-    assert.equal(await h.database.prepare('SELECT COUNT(*) AS n FROM business_events').first('n'), eventCount);
 });
 test('更换采纳冲销旧学生并奖励新学生；取消后两人余额均为零', async () => {
     await h.policy(); const q = await h.postQuestion(), a = await h.postAnswer(q), b = await h.postAnswer(q, 'student-a');
@@ -41,7 +39,7 @@ test('教师和未正式修读者的回答可以采纳，但不加分', async ()
 });
 test('删除被采纳答案自动取消采纳并冲销加分，保留删除占位', async () => {
     await h.policy(); const q = await h.postQuestion(), a = await h.postAnswer(q); await h.accept(q, a);
-    const deleted = await h.api('DELETE', `/contents/${a}`, 'student-b', { revision: await h.revision(a) });
+    const deleted = await h.api('DELETE', `/contents/${a}`, 'student-b', { });
     assert.equal(deleted.status, 200); assert.equal((await h.api('GET', `/questions/${q}`)).data.solved, false);
     assert.equal((await balance()).total, 0);
     const tombstone = await h.api('GET', `/contents/${a}`); assert.equal(tombstone.data.body, null); assert.equal(tombstone.data.status, 'deleted');
@@ -49,27 +47,26 @@ test('删除被采纳答案自动取消采纳并冲销加分，保留删除占�
 });
 test('下架答案撤回分数；恢复可见性恢复采纳和原奖励', async () => {
     await h.policy(); const q = await h.postQuestion(), a = await h.postAnswer(q); await h.accept(q, a);
-    const hide = await h.api('PUT', `/contents/${a}/moderation`, 'teacher-a', { revision: 1, action: 'hide', reason: '内容需要修正' });
+    const hide = await h.api('PUT', `/contents/${a}/moderation`, 'teacher-a', { action: 'hide', reason: '内容需要修正' });
     assert.equal(hide.status, 200); assert.equal((await balance()).total, 0);
     assert.equal((await h.api('GET', `/contents/${a}`)).status, 404);
-    const restored = await h.api('PUT', `/contents/${a}/moderation`, 'teacher-a', { revision: 2, action: 'restore', reason: '已经核实内容' });
+    const restored = await h.api('PUT', `/contents/${a}/moderation`, 'teacher-a', { action: 'restore', reason: '已经核实内容' });
     assert.equal(restored.status, 200); assert.equal((await h.api('GET', `/questions/${q}`)).data.acceptedAnswerId, a);
     assert.equal((await balance()).total, 50);
 });
 test('下架或删除问题同时撤回采纳和加分', async () => {
     await h.policy(); const q = await h.postQuestion(), a = await h.postAnswer(q); await h.accept(q, a);
-    const hide = await h.api('PUT', `/contents/${q}/moderation`, 'teacher-a', { revision: await h.revision(q), action: 'hide', reason: '问题需要审查' });
+    const hide = await h.api('PUT', `/contents/${q}/moderation`, 'teacher-a', { action: 'hide', reason: '问题需要审查' });
     assert.equal(hide.status, 200); assert.equal((await balance()).total, 0);
     assert.equal((await h.api('GET', `/contents/${a}`)).status, 404);
 });
 test('取消后重新采纳恢复原奖励，课程配置变化不重算历史奖励', async () => {
     await h.policy(); const q = await h.postQuestion(), a = await h.postAnswer(q); await h.accept(q, a);
-    await h.policy({ acceptancePoints: 90 }); assert.equal((await balance()).total, 50);
+    await h.policy({ pointsAcceptance: 90 }); assert.equal((await balance()).total, 50);
     await h.accept(q, null); assert.equal((await balance()).total, 0);
     await h.accept(q, a); assert.deepEqual(await balance(), { total: 50, entries: 3 });
     const relation = await h.database.prepare('SELECT question_id,answer_id,operator_id FROM acceptances WHERE question_id=?').bind(q).first();
     assert.deepEqual(relation, { question_id: q, answer_id: a, operator_id: 'teacher-a' });
-    assert.equal(await h.revision(q), 1);
 });
 test('并发采纳保持一问一个答案和一笔有效奖励；同一答案并发重试无副作用', async () => {
     await h.policy(); const q = await h.postQuestion(), a = await h.postAnswer(q), b = await h.postAnswer(q, 'student-a');
@@ -99,7 +96,7 @@ test('加分流水在数据库层不可修改或删除', async () => {
     await assert.rejects(() => h.database.prepare('DELETE FROM bonus_ledger').run(), /immutable_ledger/);
 });
 
-test('下一学期重新采纳仍恢复原学期奖励，事件有独立标识且没有修改内容版本', async () => {
+test('下一学期重新采纳仍恢复原学期奖励', async () => {
     await h.policy(); const q = await h.postQuestion(), a = await h.postAnswer(q);
     await h.accept(q, a); await h.accept(q, null);
     await h.database.prepare("INSERT INTO terms(id,name) VALUES ('term-next','2027春')").run();
@@ -107,9 +104,5 @@ test('下一学期重新采纳仍恢复原学期奖励，事件有独立标识�
     assert.equal((await h.accept(q, a, 'admin')).status, 200);
     assert.equal((await balance()).total, 50);
     assert.deepEqual((await h.database.prepare('SELECT DISTINCT term_id FROM bonus_ledger').all()).results, [{ term_id: 'term-active' }]);
-    const events = (await h.database.prepare("SELECT event_id,payload FROM business_events WHERE type='question.acceptance_changed'").all()).results;
-    assert.equal(events.length, 3); assert.equal(new Set(events.map(e => e.event_id)).size, 3);
-    assert.equal(await h.revision(q), 1);
-    const payload = JSON.parse(events.at(-1).payload);
-    assert.equal(payload.answerAuthorId, 'student-b');
+    assert.equal(await h.database.prepare('SELECT answer_id FROM acceptances WHERE question_id=?').bind(q).first('answer_id'), a);
 });

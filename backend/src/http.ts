@@ -63,7 +63,6 @@ export function stringField(body: Record<string, unknown>, name: string, max = 8
 }
 
 export const idSchema = z.string().trim().min(1).max(100).regex(/^[a-zA-Z0-9_-]+$/);
-export const revisionSchema = z.number().int().positive();
 export const pointsSchema = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
 export const tagsSchema = z.array(z.string().trim().min(1).max(30)).max(8).transform(v => [...new Set(v)]);
 export async function input<T extends z.ZodType>(c: Ctx, schema: T): Promise<z.output<T>> {

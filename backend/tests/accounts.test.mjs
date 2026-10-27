@@ -42,7 +42,6 @@ after(async () => { await runtime?.dispose(); });
 beforeEach(async () => {
     await binding.batch(`
 PRAGMA defer_foreign_keys=ON;
-DELETE FROM business_events;
 DELETE FROM courses;
 DELETE FROM sessions;
 DELETE FROM login_attempts;

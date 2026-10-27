@@ -76,11 +76,11 @@ pnpm demo:prepare --remote --config .local/admin-dev.json
 | `src/courses/` | 课程创建、维护、统计与动态 |
 | `src/discussions/` | 问答、评论、投票、采纳与加分流水 |
 | `src/moderation/` | 举报队列、下架恢复、审查记录 |
-| `src/integration/` | 本人动态、内部事件及搜索文档 |
-| `src/openapi.ts` | 34个课程与讨论业务方法的 OpenAPI 规范 |
+| `src/integration/` | 本人动态、内部可见文档及内容详情 |
+| `src/openapi.ts` | 32个课程与讨论业务方法的 OpenAPI 规范 |
 | `src/permissions.ts` | 管理员、当前授课教师权限与公开资料查询 |
 | `src/db/schema.ts` | 共享 Drizzle 表定义 |
-| `src/db/rules.sql` | 当前视图、约束与事务事件触发器 |
+| `src/db/rules.sql` | 当前视图、约束与积分事务触发器 |
 | `drizzle.config.ts` | Drizzle Lab 读取 schema 的配置 |
 | `migrations/0000_schema.sql` | 从当前 schema 和规则生成的空库初始化 SQL，由 Wrangler 执行 |
 | `seed/local.sql` | 可重复执行的虚构关系数据 |
@@ -91,6 +91,8 @@ pnpm demo:prepare --remote --config .local/admin-dev.json
 ## 数据库结构与迁移
 
 当前原型只支持当前数据模型，不维护旧数据升级、新旧 Worker 共存、历史快照或回填逻辑。表、字段和索引在 `src/db/schema.ts` 定义；视图、触发器在 `src/db/rules.sql` 定义。两者生成唯一的 `migrations/0000_schema.sql`，只用于空数据库初始化。
+
+所有业务表统一使用 SQLite `STRICT`。当前 Drizzle 尚无表级 STRICT 选项，由 `scripts/lib/schema.mjs` 在生成每条建表语句时统一添加，新表也自动生效；不要绕过该生成器直接建库。列类型由数据库强制检查，无损类型转换仍允许；不再逐列写 `typeof(...)` 检查。非空、数值范围、状态枚举、JSON 格式及关联约束继续保留，隔离 D1 测试通过 `PRAGMA table_list` 检查每张表的严格模式。
 
 修改结构后，在 `backend/` 执行：
 
@@ -118,13 +120,13 @@ pnpm db:diagram
 
 打开 <http://127.0.0.1:64738>，使用 [Drizzle Lab](https://github.com/rphlmr/drizzle-lab) 查看表、字段类型、可空性、主键、外键连线、默认值和 CHECK 条件。滚轮缩放、拖动画布和表节点；字段旁的箭头可以展开约束或默认值，右上角 `Auto layout` 可以重新排列。
 
-关系图直接读取 `drizzle.config.ts` 指定的 `src/db/schema.ts`，不需要手工维护另一份结构，也不连接或修改本地、云端数据库。修改 schema 后重新启动命令并刷新页面。图中反映当前代码结构，不表示数据库已按该结构初始化；仅存在于 rules.sql 中的视图和触发器不在图中。
+关系图直接读取 `drizzle.config.ts` 指定的 `src/db/schema.ts`，不需要手工维护另一份结构，也不连接或修改本地、云端数据库。修改 schema 后重新启动命令并刷新页面。图中反映当前代码结构，不表示数据库已按该结构初始化；生成器添加的 STRICT、仅存在于 rules.sql 中的视图和触发器不在图中。
 
 工具版本固定在开发依赖中，布局保存到已被 Git 忽略的 `backend/.local/schema-diagram/`。按 `Ctrl+C` 停止。
 
 ### 当前模型的协作约定
 
-课程编号非空且唯一；创建人、修改人和更新时间必填，不再为旧课程保留空值或回退。课程和内容创建都须保存 request_key/request_hash，资料发布实现也应提供这两个字段；种子与演示脚本使用稳定的创建标识。创建课程始终产生事务事件。
+课程编号非空且唯一；创建人、修改人和更新时间必填，不再为旧课程保留空值或回退。课程和内容创建都须保存 request_key/request_hash，资料发布实现也应提供这两个字段；种子与演示脚本使用稳定的创建标识。课程和内容编辑按最终写入顺序生效，PATCH 仅更新提交字段；数据库和 HTTP 均无 revision。
 
 账户基本信息统一在 accounts，普通账号只有一个身份。删除账户或切换身份仍按业务规则保留全部非基本数据；切换生成新 ID，旧身份显示“已删除”。管理员初始化既可创建账号，也可给已有无密码的唯一管理员补设密码，不覆盖已有密码。
 
@@ -132,7 +134,7 @@ pnpm db:diagram
 
 当前学期为 terms.current，师生关系为 enrollments(course_id,term_id,account_id)。每个实例恰好一位教师，允许零学生；只能新建当前学期实例，每门课程至少有一个有教师的实例。教师建课由本人任教，管理员须传 teacherId；同一 D1 batch 先登记教师行再建课，外键延迟到事务结束检查。
 
-账户不设审计表或 data_generation，业务写入核对身份 ID 未标记删除。文件版本使用 `(material_id, version)` 复合主键，采纳存入独立 `acceptances`，五类整数积分和手工加减统一记入 `bonus_ledger`。接口与 OpenAPI 已同步；当前约定与实现边界见[账号与权限](../docs/账号与权限.md)和[课程与讨论](../docs/课程与讨论.md)。
+账户不设审计表或 data_generation，业务写入核对身份 ID 未标记删除。文件版本使用 `(material_id, version)` 复合主键，采纳存入独立 `acceptances`，六项整数积分规则存入 `course_bonus_rules`，默认均为 0，资料首次上传与后续版本分别计分；积分和手工加减统一记入 `bonus_ledger`。接口与 OpenAPI 已同步；当前约定与实现边界见[账号与权限](../docs/账号与权限.md)和[课程与讨论](../docs/课程与讨论.md)。
 
 ## 前端联调
 
@@ -157,16 +159,16 @@ proxy: {
 
 ## 内部供数与 OpenAPI
 
-`/api/internal/*` 供后端服务拉取事件、确认处理和建立搜索索引，使用独立 Bearer 凭据；普通会话 Cookie 不能访问它们。Env 的可选 `INTERNAL_API_TOKEN` 至少24字符，未配置或过短返回503。本地参考 `.dev.vars.example`，使用随机值并保留在被忽略的本地变量文件；云端通过 Secret 配置。不要使用 Cloudflare API Token 代替它，也不要放入前端。
+`/api/internal/*` 供后端服务分页读取当前可见文档及复查内容可见性，使用独立 Bearer 凭据；普通会话 Cookie 不能访问它们。Env 的可选 `INTERNAL_API_TOKEN` 至少24字符，未配置或过短返回503。本地参考 `.dev.vars.example`，使用随机值并保留在被忽略的本地变量文件；云端通过 Secret 配置。不要使用 Cloudflare API Token 代替它，也不要放入前端。
 
-内部接口不经过用户 Cookie/Origin 中间件，成功响应仍包 data，游标保留 nextCursor、hasMore 和搜索快照的 watermark。消费方记录第一页 watermark，分页结束后重放其后事件；消费者存储、去重和通知发送不属于本次实现。
+内部接口不经过用户 Cookie/Origin 中间件，成功响应仍包 data，文档分页返回 nextCursor、hasMore。业务事件表及事件拉取、确认接口已移除，不再返回 watermark，也不提供跨页一致快照或增量重放；搜索和通知的实现与同步方式仍待确定。课程动态改为查询当前可见内容，具体字段见课程与讨论文档。
 
 ```sh
 pnpm openapi:export
 pnpm openapi:check
 ```
 
-前者将 `src/openapi.ts` 导出到仓库根目录的 `openapi/openapi.json`（前后端共用的接口契约），后者检查34个业务方法与实际路由及静态规范一致。`GET /api/openapi.json` 返回标准 OpenAPI 文档，不加 data 包装；它描述课程和讨论模块，账号接口见[账号与权限](../docs/账号与权限.md)。
+前者将 `src/openapi.ts` 导出到仓库根目录的 `openapi/openapi.json`（前后端共用的接口契约），后者检查32个业务方法与实际路由及静态规范一致。`GET /api/openapi.json` 返回标准 OpenAPI 文档，不加 data 包装；它描述课程和讨论模块，账号接口见[账号与权限](../docs/账号与权限.md)。
 
 ## 环境边界与未完成项
 

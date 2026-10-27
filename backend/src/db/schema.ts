@@ -2,6 +2,7 @@ import { sql } from 'drizzle-orm';
 import { check, foreignKey, index, integer, primaryKey, sqliteTable, text, uniqueIndex } from 'drizzle-orm/sqlite-core';
 
 // All timestamps are Unix seconds. Public APIs select an explicit subset of account fields.
+// scripts/lib/schema.mjs emits all tables as STRICT; CHECKs below enforce business rules.
 export const accounts = sqliteTable('accounts', {
     id: text('id').primaryKey().notNull(),
     nickname: text('nickname'),
@@ -35,29 +36,31 @@ export const courses = sqliteTable('courses', {
     name: text('name').notNull(),
     createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
     code: text('code').notNull(),
-    department: text('department').notNull().default(''),
     introduction: text('introduction').notNull().default(''),
     createdBy: text('created_by').notNull().references(() => accounts.id),
     updatedBy: text('updated_by').notNull().references(() => accounts.id),
-    questionPoints: integer('question_points').notNull().default(0),
-    answerPoints: integer('answer_points').notNull().default(0),
-    acceptancePoints: integer('acceptance_points').notNull().default(0),
-    commentPoints: integer('comment_points').notNull().default(0),
-    materialPoints: integer('material_points').notNull().default(0),
-    materialPerVersion: integer('material_per_version', { mode: 'boolean' }).notNull().default(false),
-    revision: integer('revision').notNull().default(1),
     updatedAt: integer('updated_at').notNull().default(sql`(unixepoch())`),
     requestKey: text('request_key').notNull(),
     requestHash: text('request_hash').notNull(),
 }, (t) => [
     check('courses_name', sql`length(trim(${t.name})) > 0`),
     check('courses_code', sql`length(trim(${t.code})) > 0`),
-    ...[t.questionPoints, t.answerPoints, t.acceptancePoints, t.commentPoints, t.materialPoints].map(column =>
-        check(`courses_${column.name}`, sql`typeof(${column}) = 'integer' AND ${column} BETWEEN 0 AND 9007199254740991`)),
-    check('courses_material_per_version', sql`${t.materialPerVersion} IN (0, 1)`),
-    check('courses_revision', sql`${t.revision} > 0`),
     uniqueIndex('courses_code_unique').on(t.code),
     uniqueIndex('courses_request_unique').on(t.createdBy, t.requestKey),
+]);
+
+// Course creation initializes one rule row, with all rewards disabled by default.
+export const courseBonusRules = sqliteTable('course_bonus_rules', {
+    id: text('id').primaryKey().notNull().references(() => courses.id, { onDelete: 'cascade' }),
+    pointsQuestion: integer('points_question').notNull().default(0),
+    pointsAnswer: integer('points_answer').notNull().default(0),
+    pointsAcceptance: integer('points_acceptance').notNull().default(0),
+    pointsComment: integer('points_comment').notNull().default(0),
+    pointsMaterial: integer('points_material').notNull().default(0),
+    pointsMaterialVersion: integer('points_material_version').notNull().default(0),
+}, (t) => [
+    ...[t.pointsQuestion, t.pointsAnswer, t.pointsAcceptance, t.pointsComment, t.pointsMaterial, t.pointsMaterialVersion].map(column =>
+        check(`course_bonus_rules_${column.name}`, sql`${column} BETWEEN 0 AND 9007199254740991`)),
 ]);
 
 export const terms = sqliteTable('terms', {
@@ -104,7 +107,7 @@ export const fileVersions = sqliteTable('file_versions', {
     createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
 }, (t) => [
     primaryKey({ columns: [t.materialId, t.version] }),
-    check('file_versions_version', sql`typeof(${t.version}) = 'integer' AND ${t.version} > 0`),
+    check('file_versions_version', sql`${t.version} > 0`),
     check('file_versions_status', sql`${t.status} IN ('visible', 'hidden')`),
 ]);
 
@@ -119,8 +122,8 @@ export const contents = sqliteTable('contents', {
     targetKind: text('target_kind', { enum: ['material', 'question', 'answer', 'comment'] }),
     targetId: text('target_id'),
     status: text('status', { enum: ['visible', 'hidden', 'deleted'] }).notNull().default('visible'),
-    revision: integer('revision').notNull().default(1),
     createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
+    editedAt: integer('edited_at'),
     updatedAt: integer('updated_at').notNull().default(sql`(unixepoch())`),
     updatedBy: text('updated_by').notNull().references(() => accounts.id),
     requestKey: text('request_key').notNull(),
@@ -154,7 +157,7 @@ export const votes = sqliteTable('votes', {
     contentId: text('content_id').notNull().references(() => contents.id),
     userId: text('user_id').notNull().references(() => accounts.id),
     value: integer('value').notNull(),
-    updatedAt: integer('updated_at').notNull().default(sql`(unixepoch())`),
+    createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
 }, (t) => [
     primaryKey({ columns: [t.contentId, t.userId] }),
     check('votes_value', sql`${t.value} IN (-1, 1)`),
@@ -162,7 +165,6 @@ export const votes = sqliteTable('votes', {
 
 export const bonusLedger = sqliteTable('bonus_ledger', {
     id: integer('id').primaryKey({ autoIncrement: true }),
-    operation: text('operation', { enum: ['award', 'revoke', 'restore', 'manual'] }).notNull(),
     courseId: text('course_id').notNull().references(() => courses.id),
     termId: text('term_id').notNull().references(() => terms.id),
     studentId: text('student_id').notNull().references(() => accounts.id),
@@ -172,23 +174,20 @@ export const bonusLedger = sqliteTable('bonus_ledger', {
     // No source FK: deleting a file version must preserve its points history.
     sourceId: text('source_id').notNull(),
     operatorId: text('operator_id').notNull().references(() => accounts.id),
-    reason: text('reason').notNull(),
+    reason: text('reason'),
     reversesId: integer('reverses_id'),
     requestHash: text('request_hash'),
     createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
 }, (t) => [
     foreignKey({ columns: [t.reversesId], foreignColumns: [t.id] }),
-    check('bonus_ledger_operation', sql`${t.operation} IN ('award', 'revoke', 'restore', 'manual')`),
     check('bonus_ledger_source_kind', sql`${t.sourceKind} IN ('question', 'answer', 'acceptance', 'comment', 'material', 'manual')`),
-    check('bonus_ledger_delta', sql`typeof(${t.deltaPoints}) = 'integer' AND ${t.deltaPoints} <> 0 AND abs(${t.deltaPoints}) <= 9007199254740991`),
-    check('bonus_ledger_shape', sql`(${t.operation} = 'manual' AND ${t.sourceKind} = 'manual' AND ${t.reversesId} IS NULL AND ${t.requestHash} IS NOT NULL)
-        OR (${t.operation} <> 'manual' AND ${t.sourceKind} <> 'manual' AND ${t.requestHash} IS NULL
-            AND ((${t.operation} = 'award' AND ${t.deltaPoints} > 0 AND ${t.reversesId} IS NULL)
-                OR (${t.operation} = 'revoke' AND ${t.deltaPoints} < 0 AND ${t.reversesId} IS NOT NULL)
-                OR (${t.operation} = 'restore' AND ${t.deltaPoints} > 0 AND ${t.reversesId} IS NOT NULL)))`),
-    uniqueIndex('bonus_original_award').on(t.sourceKind, t.sourceId).where(sql`${t.operation} = 'award'`),
+    check('bonus_ledger_delta', sql`${t.deltaPoints} <> 0 AND abs(${t.deltaPoints}) <= 9007199254740991`),
+    check('bonus_ledger_shape', sql`(${t.sourceKind} = 'manual' AND ${t.reversesId} IS NULL AND ${t.requestHash} IS NOT NULL)
+        OR (${t.sourceKind} <> 'manual' AND ${t.requestHash} IS NULL
+            AND (${t.reversesId} IS NOT NULL OR ${t.deltaPoints} > 0))`),
+    uniqueIndex('bonus_original_award').on(t.sourceKind, t.sourceId).where(sql`${t.sourceKind} <> 'manual' AND ${t.reversesId} IS NULL`),
     uniqueIndex('bonus_reversal_once').on(t.reversesId),
-    uniqueIndex('bonus_manual_request').on(t.operatorId, t.sourceId).where(sql`${t.operation} = 'manual'`),
+    uniqueIndex('bonus_manual_request').on(t.operatorId, t.sourceId).where(sql`${t.sourceKind} = 'manual'`),
     index('bonus_course_term_student').on(t.courseId, t.termId, t.studentId),
 ]);
 
@@ -201,7 +200,6 @@ export const reports = sqliteTable('reports', {
     resolution: text('resolution'),
     handledBy: text('handled_by').references(() => accounts.id),
     handledAt: integer('handled_at'),
-    revision: integer('revision').notNull().default(1),
     createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
     requestKey: text('request_key').notNull(),
     requestHash: text('request_hash').notNull(),
@@ -223,20 +221,4 @@ export const moderationActions = sqliteTable('moderation_actions', {
 }, (t) => [
     check('moderation_actions_old_status', sql`${t.oldStatus} IN ('visible', 'hidden', 'deleted')`),
     check('moderation_actions_new_status', sql`${t.newStatus} IN ('visible', 'hidden', 'deleted')`),
-]);
-
-export const businessEvents = sqliteTable('business_events', {
-    seq: integer('seq').primaryKey({ autoIncrement: true }),
-    eventId: text('event_id').notNull(),
-    type: text('type').notNull(),
-    courseId: text('course_id').notNull().references(() => courses.id),
-    contentId: text('content_id').references(() => contents.id),
-    actorId: text('actor_id').notNull().references(() => accounts.id),
-    payload: text('payload').notNull(),
-    createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
-    acknowledgedAt: integer('acknowledged_at'),
-}, (t) => [
-    uniqueIndex('business_events_event_unique').on(t.eventId),
-    check('business_events_payload', sql`json_valid(${t.payload})`),
-    index('events_course_sequence').on(t.courseId, t.seq),
 ]);

@@ -27,15 +27,18 @@ test('Cookie 写入要求同源 Origin；跨站请求被拒绝', async () => {
     assert.equal((await h.api('POST', '/courses/course-a/questions', 'student-a', payload, { headers: { Origin: 'http://127.0.0.1:9999' } })).status, 403);
 });
 test('教师创建课程建立当期授课关系；学生不能创建课程', async () => {
-    const payload = { name: '算法设计', code: 'CS201', introduction: '算法课程', department: '计算机学院' };
+    const payload = { name: '算法设计', code: 'CS201', introduction: '算法课程' };
     assert.equal((await h.api('POST', '/courses', 'student-a', payload)).status, 403);
     const created = await h.api('POST', '/courses', 'teacher-a', payload, { key: 'create-course-01' });
     assert.equal(created.status, 201);
     const relationship = await h.database.prepare("SELECT * FROM enrollments WHERE course_id=? AND account_id IN (SELECT id FROM accounts WHERE role='teacher')").bind(created.data.id).all();
     assert.equal(relationship.results.length, 1);
-    assert.equal((await h.api('PATCH', `/courses/${created.data.id}`, 'teacher-a', { revision: 1, name: '算法基础' })).status, 200);
+    assert.equal((await h.api('PATCH', `/courses/${created.data.id}`, 'teacher-a', { name: '算法基础' })).status, 200);
     const saved = await h.api('GET', `/courses/${created.data.id}`);
-    assert.equal(saved.data.introduction, '算法课程'); assert.equal(saved.data.department, '计算机学院');
+    assert.equal(saved.data.introduction, '算法课程'); assert.equal('department' in saved.data, false);
+    assert.deepEqual(saved.data.bonusPolicy, { pointsQuestion: 0, pointsAnswer: 0, pointsAcceptance: 0, pointsComment: 0, pointsMaterial: 0, pointsMaterialVersion: 0 });
+    assert.equal((await h.api('POST', '/courses', 'teacher-a', { ...payload, department: '计算机学院' })).status, 400);
+    assert.equal((await h.api('PATCH', `/courses/${created.data.id}`, 'teacher-a', { department: '计算机学院' })).status, 400);
     assert.equal((await h.api('GET', `/courses/${created.data.id}/entry`, 'teacher-a')).data.permissions.canManage, true);
     assert.equal((await h.api('GET', `/courses/${created.data.id}/entry`, 'student-a')).data.permissions.canManage, false);
     const repeated = await h.api('POST', '/courses', 'teacher-a', payload, { key: 'create-course-01' });
@@ -48,7 +51,6 @@ test('问题发布重试幂等；同一幂等键不同正文返回冲突', async
     const changed = await h.api('POST', '/courses/course-a/questions', 'student-a', { ...payload, body: doc('变更正文') }, options);
     assert.equal(changed.status, 409);
     assert.equal(await h.database.prepare("SELECT COUNT(*) AS n FROM contents WHERE kind='question'").first('n'), 1);
-    assert.equal(await h.database.prepare("SELECT COUNT(*) AS n FROM business_events WHERE type='question.created'").first('n'), 1);
 });
 test('旧版 fileVersionId 参数明确拒绝，引用只通过正文链接表达', async () => {
     for (const fileVersionId of ['version-b1', 'version-a-hidden', 'missing-version']) {
@@ -65,16 +67,16 @@ test('正文中的版本链接不受文件状态影响，编辑正文不会清�
     await h.database.prepare("UPDATE file_versions SET status='hidden' WHERE material_id='material-a' AND version=1").run();
     const r = await h.api('GET', `/questions/${q}`); assert.equal(r.status, 200);
     assert.deepEqual(r.data.body, body); assert.equal(r.data.file, undefined);
-    const edited = await h.api('PATCH', `/contents/${q}`, 'student-a', { revision: 1, body: doc('修改正文') });
+    const edited = await h.api('PATCH', `/contents/${q}`, 'student-a', { body: doc('修改正文') });
     assert.equal(edited.status, 200); assert.equal(edited.data.fileVersionId, undefined); assert.deepEqual(edited.data.tags, ['极限']);
 });
-test('只能编辑本人或所管理课程内容；旧 revision 不能覆盖修改', async () => {
+test('只能编辑本人或所管理课程内容；最后提交的正文生效', async () => {
     const q = await h.postQuestion();
-    assert.equal((await h.api('PATCH', `/contents/${q}`, 'student-b', { revision: 1, body: doc('恶意覆盖') })).status, 403);
-    assert.equal((await h.api('PATCH', `/contents/${q}`, 'teacher-b', { revision: 1, body: doc('越权覆盖') })).status, 403);
-    assert.equal((await h.api('PATCH', `/contents/${q}`, 'student-a', { revision: 1, body: doc('合法修改') })).status, 200);
-    assert.equal((await h.api('PATCH', `/contents/${q}`, 'student-a', { revision: 1, body: doc('过期修改') })).status, 409);
-    assert.deepEqual((await h.api('GET', `/questions/${q}`)).data.body, doc('合法修改'));
+    assert.equal((await h.api('PATCH', `/contents/${q}`, 'student-b', { body: doc('恶意覆盖') })).status, 403);
+    assert.equal((await h.api('PATCH', `/contents/${q}`, 'teacher-b', { body: doc('越权覆盖') })).status, 403);
+    assert.equal((await h.api('PATCH', `/contents/${q}`, 'student-a', { body: doc('合法修改') })).status, 200);
+    assert.equal((await h.api('PATCH', `/contents/${q}`, 'student-a', { body: doc('旧页面最后提交') })).status, 200);
+    assert.deepEqual((await h.api('GET', `/questions/${q}`)).data.body, doc('旧页面最后提交'));
 });
 test('资料、问题和答案均可评论，回复只指向直接父评论', async () => {
     const q = await h.postQuestion(), a = await h.postAnswer(q);
@@ -98,10 +100,16 @@ test('赞踩可切换撤销且重试不累加；问题、回答和评论禁止�
     const comment = await h.api('POST', '/comments', 'student-a', { targetKind: 'question', targetId: q, body: doc('问题评论') });
     for (const id of [q, a, comment.data.id]) {
         assert.equal((await h.api('PUT', `/contents/${id}/vote`, 'student-a', { value: 1 })).status, 403);
+        assert.equal((await h.api('PUT', `/contents/${id}/vote`, 'student-b', { value: 1 })).status, 200);
+        await h.database.prepare("UPDATE votes SET created_at=1 WHERE content_id=? AND user_id='student-b'").bind(id).run();
         for (const value of [1, 1, -1, -1, 0, 0]) {
             const vote = await h.api('PUT', `/contents/${id}/vote`, 'student-b', { value });
             assert.equal(vote.status, 200); assert.equal(vote.data.score, value); assert.equal(vote.data.myVote, value);
+            const stored = await h.database.prepare("SELECT created_at FROM votes WHERE content_id=? AND user_id='student-b'").bind(id).first();
+            assert.deepEqual(stored, value === 0 ? null : { created_at: 1 });
         }
+        assert.equal((await h.api('PUT', `/contents/${id}/vote`, 'student-b', { value: 1 })).status, 200);
+        assert.ok(await h.database.prepare("SELECT created_at FROM votes WHERE content_id=? AND user_id='student-b'").bind(id).first('created_at') > 1);
     }
 });
 test('教师身份不自动置顶；净赞数排序，采纳后置顶', async () => {
@@ -118,7 +126,7 @@ test('教师身份不自动置顶；净赞数排序，采纳后置顶', async ()
 test('问题下架后，列表、答案、评论、个人空间、动态和搜索文档同步隐藏', async () => {
     const q = await h.postQuestion(), a = await h.postAnswer(q);
     const comment = await h.api('POST', '/comments', 'student-b', { targetKind: 'answer', targetId: a, body: doc('答案评论') });
-    await h.api('PUT', `/contents/${q}/moderation`, 'teacher-a', { revision: 1, action: 'hide', reason: '测试下架传播' });
+    await h.api('PUT', `/contents/${q}/moderation`, 'teacher-a', { action: 'hide', reason: '测试下架传播' });
     for (const id of [q, a, comment.data.id]) assert.equal((await h.api('GET', `/contents/${id}`)).status, 404);
     for (const path of ['/courses/course-a/questions', '/courses/course-a/activity', '/me/activity']) {
         const r = await h.api('GET', path, 'student-b'); assert.ok(r.data.items.every(item => ![q, a, comment.data.id].includes(item.id ?? item.contentId)), path);
@@ -138,12 +146,12 @@ test('删除评论清空正文并保留关联占位与回复，删除内容不�
     const q = await h.postQuestion();
     const parent = await h.api('POST', '/comments', 'student-a', { targetKind: 'question', targetId: q, body: doc('原评论') });
     const child = await h.api('POST', '/comments', 'student-b', { targetKind: 'comment', targetId: parent.data.id, body: doc('保留回复') });
-    assert.equal((await h.api('DELETE', `/contents/${parent.data.id}`, 'student-a', { revision: 1 })).status, 200);
+    assert.equal((await h.api('DELETE', `/contents/${parent.data.id}`, 'student-a', { })).status, 200);
     const list = await h.api('GET', `/comments?targetKind=question&targetId=${q}`);
     assert.deepEqual(list.data.items.map((x     ) => x.id), [child.data.id]);
     assert.equal((await h.api('GET', `/contents/${parent.data.id}`)).data.body, null);
     assert.equal(await h.database.prepare('SELECT body FROM contents WHERE id=?').bind(parent.data.id).first('body'), null);
-    assert.equal((await h.api('PUT', `/contents/${parent.data.id}/moderation`, 'teacher-a', { revision: 2, action: 'restore', reason: '尝试恢复删除' })).status, 409);
+    assert.equal((await h.api('PUT', `/contents/${parent.data.id}/moderation`, 'teacher-a', { action: 'restore', reason: '尝试恢复删除' })).status, 409);
 });
 test('举报去重、教师审查、处理结果和下架恢复审计', async () => {
     const q = await h.postQuestion(), report = await h.api('POST', `/contents/${q}/reports`, 'student-b', { reason: '内容包含错误' });
@@ -152,12 +160,12 @@ test('举报去重、教师审查、处理结果和下架恢复审计', async ()
     assert.equal((await h.api('GET', '/moderation/reports?courseId=course-a', 'teacher-b')).status, 403);
     assert.equal((await h.api('GET', '/moderation/reports', 'student-a')).status, 403);
     assert.equal((await h.api('GET', '/moderation/reports', 'teacher-a')).data.items[0].id, report.data.id);
-    await h.api('PUT', `/contents/${q}/moderation`, 'teacher-a', { revision: 1, action: 'hide', reason: '已确认需要下架' });
+    await h.api('PUT', `/contents/${q}/moderation`, 'teacher-a', { action: 'hide', reason: '已确认需要下架' });
     assert.equal((await h.api('GET', `/moderation/contents/${q}`, 'teacher-a')).data.body.content.length > 0, true);
-    const resolved = await h.api('PATCH', `/moderation/reports/${report.data.id}`, 'teacher-a', { revision: 1, status: 'resolved', resolution: '已审查并下架' });
+    const resolved = await h.api('PATCH', `/moderation/reports/${report.data.id}`, 'teacher-a', { status: 'resolved', resolution: '已审查并下架' });
     assert.equal(resolved.status, 200);
     assert.equal((await h.api('GET', '/moderation/actions', 'teacher-a')).data.items[0].newStatus, 'hidden');
-    assert.equal((await h.api('PATCH', `/moderation/reports/${report.data.id}`, 'teacher-a', { revision: 1, status: 'dismissed', resolution: '过期的处理' })).status, 409);
+    assert.equal((await h.api('PATCH', `/moderation/reports/${report.data.id}`, 'teacher-a', { status: 'dismissed', resolution: '过期的处理' })).status, 409);
 });
 test('所有公开 DTO 不包含会话、学籍或内部幂等信息', async () => {
     const q = await h.postQuestion(), a = await h.postAnswer(q);
@@ -190,7 +198,7 @@ test('带 SQL 字符的课程查询和标签保持参数化', async () => {
 test('资料统一为内容，文件外键拒绝非资料，直接父级拒绝跨课程和类型错误', async () => {
     const material = await h.api('GET', '/contents/material-a');
     assert.equal(material.data.kind, 'material'); assert.equal(material.data.targetId, null);
-    const edited = await h.api('PATCH', '/contents/material-a', 'student-a', { revision: 1, title: '新标题', body: doc('资料简介') });
+    const edited = await h.api('PATCH', '/contents/material-a', 'student-a', { title: '新标题', body: doc('资料简介') });
     assert.equal(edited.status, 200); assert.equal(edited.data.title, '新标题');
     assert.equal((await h.api('PUT', '/contents/material-a/vote', 'student-b', { value: 1 })).status, 400);
     const q = await h.postQuestion();
@@ -211,7 +219,7 @@ test('删除问题或资料清空正文与标题，保留回答、评论及文�
     for (const id of [q, 'material-a']) {
         const kind = id === q ? 'question' : 'material';
         const comment = await h.api('POST', '/comments', 'student-b', { targetKind: kind, targetId: id, body: doc('保留内容') });
-        assert.equal((await h.api('DELETE', `/contents/${id}`, 'student-a', { revision: 1 })).status, 200);
+        assert.equal((await h.api('DELETE', `/contents/${id}`, 'student-a', { })).status, 200);
         assert.deepEqual(await h.database.prepare('SELECT title,body,tags FROM contents WHERE id=?').bind(id).first(), { title: null, body: null, tags: null });
         const list = await h.api('GET', `/comments?targetKind=${kind}&targetId=${id}`);
         assert.equal(list.status, 200); assert.equal(list.data.items[0].id, comment.data.id);
@@ -236,11 +244,11 @@ test('任意层评论下架会隐藏整个分支，恢复后回复与活跃排�
     ]);
     assert.equal((await h.api('GET', '/courses/course-a/questions?sort=active')).data.items[0].id, q);
     assert.equal((await h.api('GET', `/comments?targetKind=question&targetId=${q}`)).data.total, 3);
-    assert.equal((await h.api('PUT', `/contents/${child}/moderation`, 'teacher-a', { revision: 1, action: 'hide', reason: '下架子分支' })).status, 200);
+    assert.equal((await h.api('PUT', `/contents/${child}/moderation`, 'teacher-a', { action: 'hide', reason: '下架子分支' })).status, 200);
     assert.equal((await h.api('GET', `/contents/${grandchild}`)).status, 404);
     assert.equal((await h.api('GET', `/comments?targetKind=question&targetId=${q}`)).data.total, 1);
     assert.equal((await h.api('GET', '/courses/course-a/questions?sort=active')).data.items[0].id, other);
-    assert.equal((await h.api('PUT', `/contents/${child}/moderation`, 'teacher-a', { revision: 2, action: 'restore', reason: '恢复子分支' })).status, 200);
+    assert.equal((await h.api('PUT', `/contents/${child}/moderation`, 'teacher-a', { action: 'restore', reason: '恢复子分支' })).status, 200);
     assert.equal((await h.api('GET', `/comments?targetKind=question&targetId=${q}`)).data.total, 3);
     assert.equal((await h.api('GET', '/courses/course-a/questions?sort=active')).data.items[0].id, q);
 });

@@ -3,7 +3,7 @@
   "info": {
     "title": "CourseStack 课程与讨论 API",
     "version": "4.0.0",
-    "description": "正文使用 Tiptap / ProseMirror JSON 对象，由前端按编辑器扩展配置安全渲染。公开数据不包含学工号、姓名、院系、专业或年级。写入需登录，创建需幂等键，课程和内容编辑需当前 revision；账户修改和独立采纳关系不使用 revision；积分为课程、学期、学生维度的整数。Cookie 写请求需可信 Origin。"
+    "description": "正文使用 Tiptap / ProseMirror JSON 对象，由前端按编辑器扩展配置安全渲染。公开数据不包含学工号、姓名、院系、专业或年级。写入需登录，创建需幂等键，课程和内容编辑按最终写入顺序生效，局部更新仅覆盖提交字段；积分为课程、学期、学生维度的整数。Cookie 写请求需可信 Origin。"
   },
   "servers": [
     {
@@ -212,10 +212,6 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 40
-                  },
-                  "department": {
-                    "type": "string",
-                    "maxLength": 120
                   },
                   "introduction": {
                     "type": "string",
@@ -544,22 +540,12 @@
                     "minLength": 1,
                     "maxLength": 40
                   },
-                  "department": {
-                    "type": "string",
-                    "maxLength": 120
-                  },
                   "introduction": {
                     "type": "string",
                     "maxLength": 5000
-                  },
-                  "revision": {
-                    "type": "integer",
-                    "minimum": 1
                   }
                 },
-                "required": [
-                  "revision"
-                ],
+                "required": [],
                 "additionalProperties": false
               }
             }
@@ -680,7 +666,7 @@
     },
     "/api/courses/{id}/bonus-policy": {
       "put": {
-        "summary": "配置五类整数积分及资料版本计分，历史奖励不重算",
+        "summary": "配置六项整数积分规则，资料首次上传与后续版本分别计分，历史奖励不重算",
         "operationId": "put__api_courses_id_bonus_policy",
         "security": [
           {
@@ -716,47 +702,46 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "revision": {
-                    "type": "integer",
-                    "minimum": 1
-                  },
-                  "questionPoints": {
+                  "pointsQuestion": {
                     "type": "integer",
                     "minimum": 0,
                     "maximum": 9007199254740991
                   },
-                  "answerPoints": {
+                  "pointsAnswer": {
                     "type": "integer",
                     "minimum": 0,
                     "maximum": 9007199254740991
                   },
-                  "acceptancePoints": {
+                  "pointsAcceptance": {
                     "type": "integer",
                     "minimum": 0,
                     "maximum": 9007199254740991
                   },
-                  "commentPoints": {
+                  "pointsComment": {
                     "type": "integer",
                     "minimum": 0,
                     "maximum": 9007199254740991
                   },
-                  "materialPoints": {
+                  "pointsMaterial": {
                     "type": "integer",
                     "minimum": 0,
-                    "maximum": 9007199254740991
+                    "maximum": 9007199254740991,
+                    "description": "首次上传（版本 1）的积分"
                   },
-                  "materialPerVersion": {
-                    "type": "boolean"
+                  "pointsMaterialVersion": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991,
+                    "description": "后续每个新版本的积分，与首次上传分值分别计分"
                   }
                 },
                 "required": [
-                  "revision",
-                  "questionPoints",
-                  "answerPoints",
-                  "acceptancePoints",
-                  "commentPoints",
-                  "materialPoints",
-                  "materialPerVersion"
+                  "pointsQuestion",
+                  "pointsAnswer",
+                  "pointsAcceptance",
+                  "pointsComment",
+                  "pointsMaterial",
+                  "pointsMaterialVersion"
                 ],
                 "additionalProperties": false
               }
@@ -1084,7 +1069,7 @@
     },
     "/api/courses/{id}/activity": {
       "get": {
-        "summary": "当前仍可见的课程近期动态",
+        "summary": "当前可见内容按更新时间排列，每项内容只出现一次",
         "operationId": "get__api_courses_id_activity",
         "security": [
           {},
@@ -1143,14 +1128,6 @@
                           "items": {
                             "type": "object",
                             "properties": {
-                              "seq": {
-                                "type": "integer"
-                              },
-                              "type": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 100
-                              },
                               "contentId": {
                                 "type": "string",
                                 "minLength": 1,
@@ -1171,15 +1148,18 @@
                               "createdAt": {
                                 "type": "integer",
                                 "description": "Unix 秒"
+                              },
+                              "updatedAt": {
+                                "type": "integer",
+                                "description": "Unix 秒"
                               }
                             },
                             "required": [
-                              "seq",
-                              "type",
                               "contentId",
                               "kind",
                               "title",
-                              "createdAt"
+                              "createdAt",
+                              "updatedAt"
                             ],
                             "additionalProperties": false
                           }
@@ -2704,7 +2684,7 @@
         }
       },
       "patch": {
-        "summary": "编辑内容，revision 防止覆盖并发修改",
+        "summary": "编辑内容；仅标题、正文或标签实际变化时更新 editedAt，按最终写入顺序生效，省略字段保持原值",
         "operationId": "patch__api_contents_id_",
         "security": [
           {
@@ -2742,10 +2722,6 @@
                   {
                     "type": "object",
                     "properties": {
-                      "revision": {
-                        "type": "integer",
-                        "minimum": 1
-                      },
                       "title": {
                         "type": "string",
                         "minLength": 1,
@@ -2768,24 +2744,17 @@
                         "description": "仅问题和资料允许标签；回答和评论为 null"
                       }
                     },
-                    "required": [
-                      "revision"
-                    ],
+                    "required": [],
                     "additionalProperties": false
                   },
                   {
                     "type": "object",
                     "properties": {
-                      "revision": {
-                        "type": "integer",
-                        "minimum": 1
-                      },
                       "body": {
                         "$ref": "#/components/schemas/ProseMirrorDocument"
                       }
                     },
                     "required": [
-                      "revision",
                       "body"
                     ],
                     "additionalProperties": false
@@ -2937,26 +2906,6 @@
             }
           }
         ],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "revision": {
-                    "type": "integer",
-                    "minimum": 1
-                  }
-                },
-                "required": [
-                  "revision"
-                ],
-                "additionalProperties": false
-              }
-            }
-          }
-        },
         "responses": {
           "200": {
             "description": "成功",
@@ -2976,16 +2925,11 @@
                         },
                         "status": {
                           "const": "deleted"
-                        },
-                        "revision": {
-                          "type": "integer",
-                          "minimum": 1
                         }
                       },
                       "required": [
                         "id",
-                        "status",
-                        "revision"
+                        "status"
                       ],
                       "additionalProperties": false
                     }
@@ -3542,16 +3486,23 @@
                     }
                   },
                   "reason": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 500
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 500
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ],
+                    "description": "可选补充说明；自动积分为 null"
                   }
                 },
                 "required": [
                   "studentId",
                   "termId",
-                  "deltaPoints",
-                  "reason"
+                  "deltaPoints"
                 ],
                 "additionalProperties": false
               }
@@ -3746,15 +3697,6 @@
                                 "type": "integer",
                                 "minimum": 1
                               },
-                              "operation": {
-                                "type": "string",
-                                "enum": [
-                                  "award",
-                                  "revoke",
-                                  "restore",
-                                  "manual"
-                                ]
-                              },
                               "courseId": {
                                 "type": "string",
                                 "minLength": 1,
@@ -3805,9 +3747,17 @@
                                 "pattern": "^[a-zA-Z0-9_-]+$"
                               },
                               "reason": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 1000
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 500
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "description": "可选补充说明；自动积分为 null"
                               },
                               "reversesId": {
                                 "anyOf": [
@@ -3827,7 +3777,6 @@
                             },
                             "required": [
                               "id",
-                              "operation",
                               "courseId",
                               "studentId",
                               "termId",
@@ -4266,15 +4215,6 @@
                                 "type": "integer",
                                 "minimum": 1
                               },
-                              "operation": {
-                                "type": "string",
-                                "enum": [
-                                  "award",
-                                  "revoke",
-                                  "restore",
-                                  "manual"
-                                ]
-                              },
                               "courseId": {
                                 "type": "string",
                                 "minLength": 1,
@@ -4325,9 +4265,17 @@
                                 "pattern": "^[a-zA-Z0-9_-]+$"
                               },
                               "reason": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 1000
+                                "anyOf": [
+                                  {
+                                    "type": "string",
+                                    "minLength": 1,
+                                    "maxLength": 500
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ],
+                                "description": "可选补充说明；自动积分为 null"
                               },
                               "reversesId": {
                                 "anyOf": [
@@ -4347,7 +4295,6 @@
                             },
                             "required": [
                               "id",
-                              "operation",
                               "courseId",
                               "studentId",
                               "termId",
@@ -4949,10 +4896,6 @@
                                   "dismissed"
                                 ]
                               },
-                              "revision": {
-                                "type": "integer",
-                                "minimum": 1
-                              },
                               "createdAt": {
                                 "type": "integer",
                                 "description": "Unix 秒"
@@ -4995,7 +4938,6 @@
                               "reporterId",
                               "reason",
                               "status",
-                              "revision",
                               "createdAt",
                               "resolution",
                               "handledBy",
@@ -5166,10 +5108,6 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "revision": {
-                    "type": "integer",
-                    "minimum": 1
-                  },
                   "status": {
                     "type": "string",
                     "enum": [
@@ -5184,7 +5122,6 @@
                   }
                 },
                 "required": [
-                  "revision",
                   "status",
                   "resolution"
                 ],
@@ -5214,16 +5151,11 @@
                           "type": "string",
                           "minLength": 1,
                           "maxLength": 100
-                        },
-                        "revision": {
-                          "type": "integer",
-                          "minimum": 1
                         }
                       },
                       "required": [
                         "id",
-                        "status",
-                        "revision"
+                        "status"
                       ],
                       "additionalProperties": false
                     }
@@ -5406,10 +5338,6 @@
                           "minLength": 1,
                           "maxLength": 100
                         },
-                        "revision": {
-                          "type": "integer",
-                          "minimum": 1
-                        },
                         "targetKind": {
                           "anyOf": [
                             {
@@ -5456,7 +5384,6 @@
                         "title",
                         "body",
                         "status",
-                        "revision",
                         "targetKind",
                         "targetId",
                         "createdAt",
@@ -5604,10 +5531,6 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "revision": {
-                    "type": "integer",
-                    "minimum": 1
-                  },
                   "action": {
                     "type": "string",
                     "enum": [
@@ -5622,7 +5545,6 @@
                   }
                 },
                 "required": [
-                  "revision",
                   "action",
                   "reason"
                 ],
@@ -5653,10 +5575,6 @@
                           "minLength": 1,
                           "maxLength": 100
                         },
-                        "revision": {
-                          "type": "integer",
-                          "minimum": 1
-                        },
                         "changed": {
                           "type": "boolean"
                         }
@@ -5664,7 +5582,6 @@
                       "required": [
                         "id",
                         "status",
-                        "revision",
                         "changed"
                       ],
                       "additionalProperties": false
@@ -6001,395 +5918,9 @@
         }
       }
     },
-    "/api/internal/events": {
-      "get": {
-        "summary": "内部服务拉取事务内业务事件，按 eventId 去重",
-        "operationId": "get__api_internal_events",
-        "security": [
-          {
-            "internalBearer": []
-          }
-        ],
-        "parameters": [
-          {
-            "name": "after",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 0
-            }
-          },
-          {
-            "name": "limit",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "integer",
-              "minimum": 1,
-              "maximum": 100
-            }
-          }
-        ],
-        "responses": {
-          "200": {
-            "description": "成功",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "type": "object",
-                      "properties": {
-                        "items": {
-                          "type": "array",
-                          "items": {
-                            "type": "object",
-                            "properties": {
-                              "seq": {
-                                "type": "integer"
-                              },
-                              "eventId": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 180
-                              },
-                              "type": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 100
-                              },
-                              "courseId": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 100,
-                                "pattern": "^[a-zA-Z0-9_-]+$"
-                              },
-                              "contentId": {
-                                "anyOf": [
-                                  {
-                                    "type": "string",
-                                    "minLength": 1,
-                                    "maxLength": 100,
-                                    "pattern": "^[a-zA-Z0-9_-]+$"
-                                  },
-                                  {
-                                    "type": "null"
-                                  }
-                                ]
-                              },
-                              "actorId": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 100,
-                                "pattern": "^[a-zA-Z0-9_-]+$"
-                              },
-                              "payload": {
-                                "type": "object"
-                              },
-                              "createdAt": {
-                                "type": "integer",
-                                "description": "Unix 秒"
-                              },
-                              "acknowledgedAt": {
-                                "type": [
-                                  "integer",
-                                  "null"
-                                ]
-                              }
-                            },
-                            "required": [
-                              "seq",
-                              "eventId",
-                              "type",
-                              "courseId",
-                              "contentId",
-                              "actorId",
-                              "payload",
-                              "createdAt",
-                              "acknowledgedAt"
-                            ],
-                            "additionalProperties": false
-                          }
-                        },
-                        "nextCursor": {
-                          "type": "integer"
-                        },
-                        "hasMore": {
-                          "type": "boolean"
-                        }
-                      },
-                      "required": [
-                        "items",
-                        "nextCursor",
-                        "hasMore"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "data"
-                  ],
-                  "additionalProperties": false
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "参数错误",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "登录失效",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "权限不足",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "内容不可用",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "状态冲突或重复操作",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "413": {
-            "description": "正文过大",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "415": {
-            "description": "需要JSON",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "服务错误",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "内部接口未配置",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
-    "/api/internal/events/ack": {
-      "post": {
-        "summary": "消费者成功持久化后确认事件；不删除事件",
-        "operationId": "post__api_internal_events_ack",
-        "security": [
-          {
-            "internalBearer": []
-          }
-        ],
-        "parameters": [],
-        "requestBody": {
-          "required": true,
-          "content": {
-            "application/json": {
-              "schema": {
-                "type": "object",
-                "properties": {
-                  "eventIds": {
-                    "type": "array",
-                    "minItems": 1,
-                    "maxItems": 100,
-                    "items": {
-                      "type": "string",
-                      "minLength": 1,
-                      "maxLength": 180
-                    }
-                  }
-                },
-                "required": [
-                  "eventIds"
-                ],
-                "additionalProperties": false
-              }
-            }
-          }
-        },
-        "responses": {
-          "200": {
-            "description": "成功",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "type": "object",
-                  "properties": {
-                    "data": {
-                      "type": "object",
-                      "properties": {
-                        "acknowledged": {
-                          "type": "integer"
-                        }
-                      },
-                      "required": [
-                        "acknowledged"
-                      ],
-                      "additionalProperties": false
-                    }
-                  },
-                  "required": [
-                    "data"
-                  ],
-                  "additionalProperties": false
-                }
-              }
-            }
-          },
-          "400": {
-            "description": "参数错误",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "401": {
-            "description": "登录失效",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "403": {
-            "description": "权限不足",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "404": {
-            "description": "内容不可用",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "409": {
-            "description": "状态冲突或重复操作",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "413": {
-            "description": "正文过大",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "415": {
-            "description": "需要JSON",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "500": {
-            "description": "服务错误",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          },
-          "503": {
-            "description": "内部接口未配置",
-            "content": {
-              "application/json": {
-                "schema": {
-                  "$ref": "#/components/schemas/Error"
-                }
-              }
-            }
-          }
-        }
-      }
-    },
     "/api/internal/documents": {
       "get": {
-        "summary": "课程、资料、问题、回答的可见搜索文档，分页后重放首个 watermark 之后的事件",
+        "summary": "分页读取当前可见课程、资料、问题和回答；不提供跨页快照或增量重放",
         "operationId": "get__api_internal_documents",
         "security": [
           {
@@ -6526,10 +6057,6 @@
                                   }
                                 ]
                               },
-                              "revision": {
-                                "type": "integer",
-                                "minimum": 1
-                              },
                               "updatedAt": {
                                 "type": "integer",
                                 "description": "Unix 秒"
@@ -6546,7 +6073,6 @@
                               "tags",
                               "targetKind",
                               "targetId",
-                              "revision",
                               "updatedAt"
                             ],
                             "additionalProperties": false
@@ -6557,17 +6083,12 @@
                         },
                         "hasMore": {
                           "type": "boolean"
-                        },
-                        "watermark": {
-                          "type": "integer",
-                          "description": "记录第一页的值，所有分页完成后重放大于该值的事件"
                         }
                       },
                       "required": [
                         "items",
                         "nextCursor",
-                        "hasMore",
-                        "watermark"
+                        "hasMore"
                       ],
                       "additionalProperties": false
                     }
@@ -6958,42 +6479,46 @@
       "BonusPolicy": {
         "type": "object",
         "properties": {
-          "questionPoints": {
+          "pointsQuestion": {
             "type": "integer",
             "minimum": 0,
             "maximum": 9007199254740991
           },
-          "answerPoints": {
+          "pointsAnswer": {
             "type": "integer",
             "minimum": 0,
             "maximum": 9007199254740991
           },
-          "acceptancePoints": {
+          "pointsAcceptance": {
             "type": "integer",
             "minimum": 0,
             "maximum": 9007199254740991
           },
-          "commentPoints": {
+          "pointsComment": {
             "type": "integer",
             "minimum": 0,
             "maximum": 9007199254740991
           },
-          "materialPoints": {
+          "pointsMaterial": {
             "type": "integer",
             "minimum": 0,
-            "maximum": 9007199254740991
+            "maximum": 9007199254740991,
+            "description": "首次上传（版本 1）的积分"
           },
-          "materialPerVersion": {
-            "type": "boolean"
+          "pointsMaterialVersion": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991,
+            "description": "后续每个新版本的积分，与首次上传分值分别计分"
           }
         },
         "required": [
-          "questionPoints",
-          "answerPoints",
-          "acceptancePoints",
-          "commentPoints",
-          "materialPoints",
-          "materialPerVersion"
+          "pointsQuestion",
+          "pointsAnswer",
+          "pointsAcceptance",
+          "pointsComment",
+          "pointsMaterial",
+          "pointsMaterialVersion"
         ],
         "additionalProperties": false
       },
@@ -7003,15 +6528,6 @@
           "id": {
             "type": "integer",
             "minimum": 1
-          },
-          "operation": {
-            "type": "string",
-            "enum": [
-              "award",
-              "revoke",
-              "restore",
-              "manual"
-            ]
           },
           "courseId": {
             "type": "string",
@@ -7063,9 +6579,17 @@
             "pattern": "^[a-zA-Z0-9_-]+$"
           },
           "reason": {
-            "type": "string",
-            "minLength": 1,
-            "maxLength": 1000
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 500
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "可选补充说明；自动积分为 null"
           },
           "reversesId": {
             "anyOf": [
@@ -7085,7 +6609,6 @@
         },
         "required": [
           "id",
-          "operation",
           "courseId",
           "studentId",
           "termId",
@@ -7117,20 +6640,12 @@
             "type": "string",
             "maxLength": 40
           },
-          "department": {
-            "type": "string",
-            "maxLength": 120
-          },
           "introduction": {
             "type": "string",
             "maxLength": 5000
           },
           "bonusPolicy": {
             "$ref": "#/components/schemas/BonusPolicy"
-          },
-          "revision": {
-            "type": "integer",
-            "minimum": 1
           },
           "createdAt": {
             "type": "integer"
@@ -7143,12 +6658,50 @@
           "id",
           "name",
           "code",
-          "department",
           "introduction",
           "bonusPolicy",
-          "revision",
           "createdAt",
           "updatedAt"
+        ],
+        "additionalProperties": false
+      },
+      "ReplyTo": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "pattern": "^[a-zA-Z0-9_-]+$"
+          },
+          "author": {
+            "type": "object",
+            "properties": {
+              "nickname": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 80
+              },
+              "isDeleted": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "nickname",
+              "isDeleted"
+            ],
+            "additionalProperties": false
+          },
+          "isDeleted": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "author",
+          "isDeleted"
         ],
         "additionalProperties": false
       },
@@ -7160,10 +6713,31 @@
           "courseId",
           "author",
           "body",
-          "revision",
           "score",
           "targetKind",
-          "targetId"
+          "targetId",
+          "editedAt",
+          "replyTo",
+          "commentCount"
+        ],
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "question"
+                }
+              },
+              "required": [
+                "kind"
+              ]
+            },
+            "then": {
+              "required": [
+                "answerCount"
+              ]
+            }
+          }
         ],
         "properties": {
           "id": {
@@ -7283,6 +6857,34 @@
               }
             ]
           },
+          "editedAt": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Unix 秒；null 表示从未编辑。仅内容 PATCH 实际改变标题、正文或标签时更新；前端仅以是否为 null 判断已编辑。"
+          },
+          "replyTo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReplyTo"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "回答和评论的直接父内容摘要；问题和资料为 null。删除父内容后仍保留摘要。"
+          },
+          "commentCount": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "与该内容的评论列表 total 一致，包含各层可见评论和回复；不含回答下另设的评论区，不计已删除占位和下架分支。"
+          },
+          "answerCount": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "仅问题返回；与问题的公开回答列表 total 一致。"
+          },
           "acceptedAnswerId": {
             "type": [
               "string",
@@ -7294,10 +6896,6 @@
           },
           "isAccepted": {
             "type": "boolean"
-          },
-          "revision": {
-            "type": "integer",
-            "minimum": 1
           },
           "score": {
             "type": "integer"
@@ -7377,9 +6975,33 @@
           "body": {
             "type": "null"
           },
-          "revision": {
+          "editedAt": {
+            "type": [
+              "integer",
+              "null"
+            ],
+            "description": "Unix 秒；null 表示从未编辑。仅内容 PATCH 实际改变标题、正文或标签时更新；前端仅以是否为 null 判断已编辑。"
+          },
+          "replyTo": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ReplyTo"
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "回答和评论的直接父内容摘要；问题和资料为 null。删除父内容后仍保留摘要。"
+          },
+          "commentCount": {
             "type": "integer",
-            "minimum": 1
+            "minimum": 0,
+            "description": "与该内容的评论列表 total 一致，包含各层可见评论和回复；不含回答下另设的评论区，不计已删除占位和下架分支。"
+          },
+          "answerCount": {
+            "type": "integer",
+            "minimum": 0,
+            "description": "仅问题返回；与问题的公开回答列表 total 一致。"
           }
         },
         "required": [
@@ -7390,9 +7012,30 @@
           "targetId",
           "status",
           "body",
-          "revision"
+          "editedAt",
+          "replyTo",
+          "commentCount"
         ],
-        "additionalProperties": false
+        "additionalProperties": false,
+        "allOf": [
+          {
+            "if": {
+              "properties": {
+                "kind": {
+                  "const": "question"
+                }
+              },
+              "required": [
+                "kind"
+              ]
+            },
+            "then": {
+              "required": [
+                "answerCount"
+              ]
+            }
+          }
+        ]
       },
       "ContentPage": {
         "type": "object",
