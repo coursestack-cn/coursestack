@@ -108,9 +108,9 @@
                 <Button href="/notifications" variant="ghost" iconOnly aria-label="查看通知"><Bell size="1em" /></Button>
                 <Menu items={userItems}>
                     {#snippet trigger(props)}
-                        <Button {...props} variant="ghost" class="shell-user-trigger" aria-label={`${session.user?.publicName}的用户菜单`}>
-                            <Avatar name={session.user?.publicName ?? ""} src={`/api/profiles/${encodeURIComponent(session.user?.id ?? "")}/avatar`} size="sm" />
-                            <span class="user-name">{session.user?.publicName}</span><span class="user-chevron"><ChevronDown size="1em" /></span>
+                        <Button {...props} variant="ghost" class="shell-user-trigger" aria-label={`${session.user?.nickname}的用户菜单`}>
+                            <Avatar name={session.user?.nickname ?? ""} src={`/api/profiles/${encodeURIComponent(session.user?.id ?? "")}/avatar`} size="sm" />
+                            <span class="user-name">{session.user?.nickname}</span><span class="user-chevron"><ChevronDown size="1em" /></span>
                         </Button>
                     {/snippet}
                 </Menu>

@@ -35,7 +35,7 @@
         try {
             if (admin) await session.adminLogin(String(password), controller.signal);
             else await session.login(String(schoolNumber).trim(), String(password), controller.signal);
-            if (!controller.signal.aborted && session.status === "authenticated") await navigate(destination, { replace: true });
+            if (!controller.signal.aborted && session.status === "authenticated") await navigate(session.user?.mustChangePassword ? "/settings/password" : destination, { replace: true });
         } catch (cause) {
             if (!controller.signal.aborted && !isAborted(cause)) {
                 const invalid = admin ? "密码不正确。" : "学工号或密码不正确。";

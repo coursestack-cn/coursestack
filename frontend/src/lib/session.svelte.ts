@@ -2,7 +2,7 @@ import { api, onUnauthorized, toApiError, type ApiError } from "$lib/api/client"
 import { toast } from "$lib/components/ui/toast.svelte.js";
 
 export type Role = "student" | "teacher" | "admin";
-export type User = { id: string; publicName: string; roles: Role[] };
+export type User = { id: string; nickname: string; role: Role; mustChangePassword: boolean };
 export type SessionStatus = "loading" | "authenticated" | "anonymous";
 
 let status = $state<SessionStatus>("loading");
@@ -60,6 +60,14 @@ export const session = {
         authenticate("/api/auth/login", { schoolNumber, password }, signal),
     adminLogin: (password: string, signal?: AbortSignal) =>
         authenticate("/api/auth/admin/login", { password }, signal),
+    async changePassword(oldPassword: string, newPassword: string): Promise<void> {
+        const requestRevision = ++revision;
+        await api.post("/api/auth/password", { oldPassword, newPassword });
+        if (requestRevision !== revision) return;
+        user = null;
+        error = null;
+        status = "anonymous";
+    },
     async logout(): Promise<void> {
         const requestRevision = ++revision;
         await api.post("/api/auth/logout");
@@ -68,5 +76,5 @@ export const session = {
         error = null;
         status = "anonymous";
     },
-    hasRole: (role: Role) => user?.roles.includes(role) ?? false
+    hasRole: (role: Role) => user?.role === role
 };

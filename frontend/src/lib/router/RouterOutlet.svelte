@@ -17,12 +17,15 @@
     const loginRoute = $derived(route.path === "/login" || route.path === "/admin/login");
     const checksSession = $derived(route.requiresAuth || loginRoute);
     const waitingSession = $derived(checksSession && session.status === "loading");
-    const redirecting = $derived(!router.authRedirectDeferred && ((router.route.requiresAuth && session.status === "anonymous")
+    const passwordChangeRequired = $derived(session.status === "authenticated" && session.user?.mustChangePassword && route.path !== "/settings/password");
+    const redirecting = $derived(!router.authRedirectDeferred && (passwordChangeRequired || (router.route.requiresAuth && session.status === "anonymous")
         || (loginRoute && session.status === "authenticated")));
 
     $effect(() => {
         if (router.authRedirectDeferred) return;
-        if (router.route.requiresAuth && session.status === "anonymous") {
+        if (passwordChangeRequired) {
+            redirect("/settings/password");
+        } else if (router.route.requiresAuth && session.status === "anonymous") {
             redirect(loginHref(router.href));
         } else if (loginRoute && session.status === "authenticated") {
             redirect(loginDestination(router.query.get("next")));
