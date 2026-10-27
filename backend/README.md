@@ -166,7 +166,7 @@ pnpm openapi:export
 pnpm openapi:check
 ```
 
-前者将 `src/openapi.ts` 导出到 `docs/api/openapi.json`，后者检查34个业务方法与实际路由及静态规范一致。`GET /api/openapi.json` 返回标准 OpenAPI 文档，不加 data 包装；它描述课程和讨论模块，账号接口见[账号与权限](../docs/账号与权限.md)。
+前者将 `src/openapi.ts` 导出到仓库根目录的 `openapi/openapi.json`（前后端共用的接口契约），后者检查34个业务方法与实际路由及静态规范一致。`GET /api/openapi.json` 返回标准 OpenAPI 文档，不加 data 包装；它描述课程和讨论模块，账号接口见[账号与权限](../docs/账号与权限.md)。
 
 ## 环境边界与未完成项
 

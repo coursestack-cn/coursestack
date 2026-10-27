@@ -8,8 +8,8 @@ const actual = new Set(app.routes.filter(r => r.method !== 'ALL' && !['/', '/ope
 const documented = new Set(Object.entries(openapi.paths).flatMap(([path, methods]) => Object.keys(methods).map(method => `${method} ${path}`)));
 assert.deepEqual([...actual].sort(), [...documented].sort(), 'OpenAPI 必须覆盖所有业务接口');
 const exported = JSON.stringify(openapi, null, 2);
-const target = '../docs/api/openapi.json';
+const target = '../openapi/openapi.json';
 if (process.argv.includes('--export')) {
-  mkdirSync('../docs/api', { recursive: true }); writeFileSync(target, exported, 'utf8');
+  mkdirSync('../openapi', { recursive: true }); writeFileSync(target, exported, 'utf8');
 } else assert.equal(readFileSync(target, 'utf8'), exported, '规范有变化，请运行 pnpm openapi:export');
 console.log(`OpenAPI ${openapi.openapi}: ${actual.size} 个业务方法，路由与静态规范一致。`);
