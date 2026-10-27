@@ -1,0 +1,217 @@
+{
+    "format": 1,
+    "fixtures": [
+        {
+            "file": "valid-empty.json",
+            "description": "空文档仍有一个段落。",
+            "ok": true,
+            "chars": 0
+        },
+        {
+            "file": "valid-unicode.json",
+            "description": "A=1，😀=1，e+组合重音=2，共4个Unicode码点。",
+            "ok": true,
+            "chars": 4
+        },
+        {
+            "file": "valid-all-nodes.json",
+            "description": "全部节点、全部标记、内外链、嵌套列表和公式。",
+            "ok": true,
+            "chars": 153
+        },
+        {
+            "file": "valid-depth-16.json",
+            "description": "16层引用是允许的上限。",
+            "ok": true,
+            "chars": 4
+        },
+        {
+            "file": "valid-max-chars.json",
+            "description": "30000个emoji，计30000码点；UTF-16长度是60000。",
+            "ok": true,
+            "chars": 30000
+        },
+        {
+            "file": "invalid-unknown-node.json",
+            "description": "未知节点仅在只读渲染当前位置显示占位。",
+            "ok": false,
+            "reason": "unknown-node",
+            "path": "content[1].type"
+        },
+        {
+            "file": "invalid-unknown-mark.json",
+            "description": "白名单外标记；只读渲染忽略标记而保留文字。",
+            "ok": false,
+            "reason": "unknown-mark",
+            "path": "content[0].content[0].marks[0].type"
+        },
+        {
+            "file": "invalid-extra-node-property.json",
+            "description": "无属性节点不得保存attrs。",
+            "ok": false,
+            "reason": "unexpected-field",
+            "path": "content[0].attrs"
+        },
+        {
+            "file": "invalid-extra-attribute.json",
+            "description": "image只允许src和alt。",
+            "ok": false,
+            "reason": "unexpected-field",
+            "path": "content[0].attrs.title"
+        },
+        {
+            "file": "invalid-missing-attribute.json",
+            "description": "image.alt必须显式给出字符串或null。",
+            "ok": false,
+            "reason": "missing-field",
+            "path": "content[0].attrs.alt"
+        },
+        {
+            "file": "invalid-h1.json",
+            "description": "标题只允许2、3、4。",
+            "ok": false,
+            "reason": "invalid-attribute",
+            "path": "content[0].attrs.level"
+        },
+        {
+            "file": "invalid-javascript-link.json",
+            "description": "拒绝javascript协议。",
+            "ok": false,
+            "reason": "invalid-href",
+            "path": "content[0].content[0].marks[0].attrs.href"
+        },
+        {
+            "file": "invalid-protocol-relative-link.json",
+            "description": "站内链接必须以单个/开头。",
+            "ok": false,
+            "reason": "invalid-href",
+            "path": "content[0].content[0].marks[0].attrs.href"
+        },
+        {
+            "file": "invalid-backslash-link.json",
+            "description": "拒绝反斜杠，避免路径被浏览器解析为站外地址。",
+            "ok": false,
+            "reason": "invalid-href",
+            "path": "content[0].content[0].marks[0].attrs.href"
+        },
+        {
+            "file": "invalid-link-extra-attribute.json",
+            "description": "target/rel由渲染器决定，不能保存。",
+            "ok": false,
+            "reason": "unexpected-field",
+            "path": "content[0].content[0].marks[0].attrs.target"
+        },
+        {
+            "file": "invalid-external-image.json",
+            "description": "不允许外部图片URL。",
+            "ok": false,
+            "reason": "invalid-image-src",
+            "path": "content[0].attrs.src"
+        },
+        {
+            "file": "invalid-data-image.json",
+            "description": "不允许data图片URL。",
+            "ok": false,
+            "reason": "invalid-image-src",
+            "path": "content[0].attrs.src"
+        },
+        {
+            "file": "invalid-empty-text.json",
+            "description": "空文本节点无效，空段落省略content即可。",
+            "ok": false,
+            "reason": "empty-text",
+            "path": "content[0].content[0].text"
+        },
+        {
+            "file": "invalid-code-marks.json",
+            "description": "代码块内部只能是无标记文本。",
+            "ok": false,
+            "reason": "invalid-code-content",
+            "path": "content[0].content[0].marks"
+        },
+        {
+            "file": "invalid-code-language.json",
+            "description": "HTML使用xml，不能保存语言别名。",
+            "ok": false,
+            "reason": "invalid-attribute",
+            "path": "content[0].attrs.language"
+        },
+        {
+            "file": "invalid-code-with-other-mark.json",
+            "description": "行内code不能与其他标记共存。",
+            "ok": false,
+            "reason": "exclusive-code-mark",
+            "path": "content[0].content[0].marks"
+        },
+        {
+            "file": "invalid-duplicate-mark.json",
+            "description": "同一内联节点的同类标记不能重复。",
+            "ok": false,
+            "reason": "duplicate-mark",
+            "path": "content[0].content[0].marks[1]"
+        },
+        {
+            "file": "invalid-list-first-child.json",
+            "description": "listItem的第一项必须是paragraph。",
+            "ok": false,
+            "reason": "invalid-content",
+            "path": "content[0].content[0].content[0].type"
+        },
+        {
+            "file": "invalid-empty-doc.json",
+            "description": "doc至少包含一个块。",
+            "ok": false,
+            "reason": "invalid-content",
+            "path": "content"
+        },
+        {
+            "file": "invalid-empty-list.json",
+            "description": "列表至少包含一个listItem。",
+            "ok": false,
+            "reason": "invalid-content",
+            "path": "content[0].content"
+        },
+        {
+            "file": "invalid-ordered-start.json",
+            "description": "序号必须为正的安全整数。",
+            "ok": false,
+            "reason": "invalid-attribute",
+            "path": "content[0].attrs.start"
+        },
+        {
+            "file": "invalid-latex-limit.json",
+            "description": "每个latex至多4000码点。",
+            "ok": false,
+            "reason": "invalid-attribute",
+            "path": "content[0].attrs.latex"
+        },
+        {
+            "file": "invalid-image-alt-limit.json",
+            "description": "alt至多300码点。",
+            "ok": false,
+            "reason": "invalid-attribute",
+            "path": "content[0].attrs.alt"
+        },
+        {
+            "file": "invalid-depth-17.json",
+            "description": "17层引用超出列表/引用累计深度上限。",
+            "ok": false,
+            "reason": "nesting-limit",
+            "path": "content[0].content[0].content[0].content[0].content[0].content[0].content[0].content[0].content[0].content[0].content[0].content[0].content[0].content[0].content[0].content[0].content[0]"
+        },
+        {
+            "file": "invalid-character-limit.json",
+            "description": "30001码点超出语义字符上限。",
+            "ok": false,
+            "reason": "character-limit",
+            "path": "content[0].content[0]"
+        },
+        {
+            "file": "invalid-byte-limit.json",
+            "description": "紧凑JSON UTF-8恰好376833字节；字符数仍小于30000，独立触发字节上限。",
+            "ok": false,
+            "reason": "byte-limit",
+            "path": ""
+        }
+    ]
+}

@@ -1,67 +1,52 @@
-import { and, eq, exists } from 'drizzle-orm';
-import { alias } from 'drizzle-orm/sqlite-core';
+import { and, eq, ne, sql, type SQL } from 'drizzle-orm';
 import type { Database } from './db/index.ts';
-import { accounts, accountRoles, academicSettings, enrollments, studentRecords, teachingAssignments } from './db/schema.ts';
+import { accounts, enrollments, terms } from './db/schema.ts';
+import { createDatabase } from './db/index.ts';
+import { HttpError } from './http.ts';
+import { actor } from './auth/middleware.ts';
+import type { Actor, Ctx } from './discussions/types.ts';
 
-// actorId must come from a verified server-side session, never request input.
+// A request's entry authentication survives logout/disable/reset. Deleting its
+// identity is the sole exception; the check and business write share one SQL transaction.
+export function activeUser(a: Actor): SQL {
+    return sql`EXISTS(SELECT 1 FROM accounts account WHERE account.id=${a.id}
+        AND account.status<>'deleted')`;
+}
+export function management(a: Actor, course: SQL): SQL {
+    return sql`(${activeUser(a)} AND (${a.role}='admin' OR (${a.role}='teacher' AND EXISTS(
+        SELECT 1 FROM enrollments assignment
+        JOIN terms term ON term.id=assignment.term_id AND term.current=1
+        WHERE assignment.account_id=${a.id} AND assignment.course_id=${course}))))`;
+}
+export function editPermission(a: Actor, course: SQL, author: SQL): SQL {
+    return sql`((${author}=${a.id} AND ${activeUser(a)}) OR ${management(a, course)})`;
+}
+export async function requireManagement(c: Ctx, courseId: string) {
+    const a = actor(c);
+    if (!await createDatabase(c.env.DB).get(sql`SELECT 1 WHERE ${management(a, sql`${courseId}`)}`)) {
+        throw new HttpError(403, 'COURSE_PERMISSION_DENIED', '需要本学期课程教师或管理员权限');
+    }
+    return a;
+}
 export async function isAdministrator(db: Database, actorId: string | null): Promise<boolean> {
     if (!actorId) return false;
-    const row = await db.select({ id: accounts.id }).from(accounts)
-        .innerJoin(accountRoles, eq(accountRoles.accountId, accounts.id))
-        .where(and(eq(accounts.id, actorId), eq(accounts.status, 'active'), eq(accountRoles.role, 'admin'))).get();
-    return !!row;
+    return !!await db.select({ id: accounts.id }).from(accounts)
+        .where(and(eq(accounts.id, actorId), eq(accounts.status, 'active'), eq(accounts.role, 'admin'))).get();
 }
-
 export async function isCurrentCourseTeacher(db: Database, actorId: string | null, courseId: string): Promise<boolean> {
     if (!actorId) return false;
-    const row = await db.select({ id: accounts.id }).from(accounts)
-        .innerJoin(teachingAssignments, eq(teachingAssignments.teacherId, accounts.id))
-        .innerJoin(academicSettings, and(eq(academicSettings.id, 1), eq(academicSettings.currentTermId, teachingAssignments.termId)))
-        .where(and(eq(accounts.id, actorId), eq(accounts.status, 'active'), eq(teachingAssignments.courseId, courseId))).get();
-    return !!row;
+    return !!await db.select({ id: accounts.id }).from(accounts)
+        .innerJoin(enrollments, eq(enrollments.accountId, accounts.id))
+        .innerJoin(terms, and(eq(terms.id, enrollments.termId), eq(terms.current, 1)))
+        .where(and(eq(accounts.id, actorId), eq(accounts.role, 'teacher'), eq(accounts.status, 'active'), eq(enrollments.courseId, courseId))).get();
 }
 
-/** Explicit public projection: adding private columns later cannot expose them here. */
+/** Whitelist public fields; a deleted identity exposes only its placeholder. */
 export async function getPublicProfile(db: Database, accountId: string) {
-    const row = await db.select({ id: accounts.id, publicName: accounts.publicName, avatarKey: accounts.avatarKey }).from(accounts)
-        .where(and(eq(accounts.id, accountId), eq(accounts.status, 'active'))).get() ?? null;
+    const row = await db.select({ id: accounts.id, nickname: accounts.nickname, avatarKey: accounts.avatarKey, status: accounts.status })
+        .from(accounts).where(and(eq(accounts.id, accountId), ne(accounts.status, 'disabled'))).get();
     if (!row) return null;
-    return { id: row.id, publicName: row.publicName, avatarUrl: row.avatarKey ? `/api/profiles/${encodeURIComponent(row.id)}/avatar` : null };
-}
-
-/** Teachers can read only current students of the specified current teaching course. */
-export async function getStudentRecordForTeacher(
-    db: Database, actorId: string | null, courseId: string, studentId: string,
-) {
-    if (!actorId) return null;
-    const teacher = alias(accounts, 'teacher');
-    // Authorization and private projection are one SQL statement, so a precheck
-    // cannot become stale between checking the term and retrieving personal data.
-    return await db.select({
-        accountId: studentRecords.accountId,
-        studentNumber: studentRecords.studentNumber,
-        realName: studentRecords.realName,
-    }).from(studentRecords)
-        .innerJoin(enrollments, eq(enrollments.studentId, studentRecords.accountId))
-        .innerJoin(academicSettings, and(eq(academicSettings.id, 1), eq(academicSettings.currentTermId, enrollments.termId)))
-        .innerJoin(teachingAssignments, and(
-            eq(teachingAssignments.courseId, enrollments.courseId),
-            eq(teachingAssignments.termId, enrollments.termId),
-            eq(teachingAssignments.teacherId, actorId),
-        ))
-        .innerJoin(teacher, and(eq(teacher.id, teachingAssignments.teacherId), eq(teacher.status, 'active')))
-        .where(and(eq(enrollments.courseId, courseId), eq(studentRecords.accountId, studentId))).get() ?? null;
-}
-
-/** Separate administrator scope: a global management role is not a teaching role. */
-export async function getStudentRecordForAdministrator(db: Database, actorId: string | null, studentId: string) {
-    if (!actorId) return null;
-    const authorized = db.select({ id: accounts.id }).from(accounts)
-        .innerJoin(accountRoles, eq(accountRoles.accountId, accounts.id))
-        .where(and(eq(accounts.id, actorId), eq(accounts.status, 'active'), eq(accountRoles.role, 'admin')));
-    return await db.select({
-        accountId: studentRecords.accountId,
-        studentNumber: studentRecords.studentNumber,
-        realName: studentRecords.realName,
-    }).from(studentRecords).where(and(eq(studentRecords.accountId, studentId), exists(authorized))).get() ?? null;
+    const isDeleted = row.status === 'deleted';
+    return { id: row.id, nickname: isDeleted ? '已删除' : row.nickname, isDeleted,
+        avatarUrl: !isDeleted && row.avatarKey ? `/api/profiles/${encodeURIComponent(row.id)}/avatar` : null };
 }

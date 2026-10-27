@@ -1,135 +1,140 @@
-import { digest, hashPassword, passwordField } from '../auth/crypto.ts';
+import { digest, hashPassword, passwordField, randomToken } from '../auth/crypto.ts';
 import { HttpError, stringField } from '../http.ts';
 import { mutateAccount, type Session } from './mutations.ts';
-import { allowFields, emailField, pagination, revisionField } from './validation.ts';
+import { allowFields, optionalProfileField, pagination } from './validation.ts';
 
 type AccountRow = {
-    id: string; publicName: string; status: 'active' | 'disabled'; revision: number;
-    createdAt: number; lastLoginAt: number | null; avatarKey: string | null;
-    schoolNumber: string | null; realName: string | null; email: string | null; roles: string;
+    id: string; nickname: string | null; role: 'student' | 'teacher' | 'admin'; status: 'active' | 'disabled';
+    createdAt: number; lastLoginAt: number | null; avatarKey: string | null; mustChangePassword: number;
+    schoolNumber: string | null; name: string | null; department: string | null; major: string | null; grade: string | null;
 };
-
-const projection = `a.id, a.public_name AS publicName, a.status, a.revision,
-    a.created_at AS createdAt, a.last_login_at AS lastLoginAt, a.avatar_key AS avatarKey,
-    c.school_number AS schoolNumber, COALESCE(p.real_name, sr.real_name) AS realName,
-    p.email,
-    (SELECT json_group_array(role) FROM account_roles WHERE account_id = a.id) AS roles`;
-const tables = `accounts a LEFT JOIN credentials c ON c.account_id = a.id
-    LEFT JOIN account_private p ON p.account_id = a.id LEFT JOIN student_records sr ON sr.account_id = a.id`;
-
-function accountDto(row: AccountRow) {
-    const { avatarKey, roles, ...rest } = row;
-    return { ...rest, avatarUrl: avatarKey ? `/api/profiles/${encodeURIComponent(row.id)}/avatar` : null, roles: JSON.parse(roles) as string[] };
+const projection = `id, nickname, role, status, created_at AS createdAt, last_login_at AS lastLoginAt,
+    avatar_key AS avatarKey, must_change_password AS mustChangePassword, school_number AS schoolNumber,
+    name, department, major, grade`;
+function accountDto({ avatarKey, mustChangePassword, ...row }: AccountRow) {
+    return { ...row, mustChangePassword: Boolean(mustChangePassword),
+        avatarUrl: avatarKey ? `/api/profiles/${encodeURIComponent(row.id)}/avatar` : null };
 }
-
 export async function accountDetail(binding: D1Database, id: string) {
-    const row = await binding.prepare(`SELECT ${projection} FROM ${tables} WHERE a.id = ?`).bind(id).first<AccountRow>();
+    const row = await binding.prepare(`SELECT ${projection} FROM accounts WHERE id = ? AND status <> 'deleted'`).bind(id).first<AccountRow>();
     if (!row) throw new HttpError(404, 'ACCOUNT_NOT_FOUND', '账号不存在');
     return accountDto(row);
 }
-
 export async function listAccounts(binding: D1Database, url: URL) {
     const { page, pageSize, offset } = pagination(url);
-    const role = url.searchParams.get('role');
-    const status = url.searchParams.get('status');
-    const q = url.searchParams.get('q')?.trim() ?? '';
+    const role = url.searchParams.get('role'), status = url.searchParams.get('status'), q = url.searchParams.get('q')?.trim();
     if (role && !['student', 'teacher', 'admin'].includes(role)) throw new HttpError(400, 'INVALID_ROLE', '身份筛选不正确');
     if (status && !['active', 'disabled'].includes(status)) throw new HttpError(400, 'INVALID_STATUS', '状态筛选不正确');
-    if (q.length > 100) throw new HttpError(400, 'INVALID_QUERY', '查询文字过长');
-    const conditions: string[] = [];
-    const values: string[] = [];
-    if (role) { conditions.push('EXISTS (SELECT 1 FROM account_roles WHERE account_id = a.id AND role = ?)'); values.push(role); }
-    if (status) { conditions.push('a.status = ?'); values.push(status); }
+    if (q && q.length > 100) throw new HttpError(400, 'INVALID_QUERY', '查询文字过长');
+    const conditions = ["status <> 'deleted'"], values: string[] = [];
+    if (role) { conditions.push('role = ?'); values.push(role); }
+    if (status) { conditions.push('status = ?'); values.push(status); }
     if (q) {
-        conditions.push("instr(lower(a.public_name || ' ' || coalesce(c.school_number, '') || ' ' || coalesce(p.real_name, sr.real_name, '') || ' ' || coalesce(p.email, '')), lower(?)) > 0");
+        conditions.push("instr(lower(coalesce(nickname, '') || ' ' || coalesce(school_number, '') || ' ' || coalesce(name, '') || ' ' || coalesce(department, '') || ' ' || coalesce(major, '') || ' ' || coalesce(grade, '')), lower(?)) > 0");
         values.push(q);
     }
-    const where = conditions.length ? `WHERE ${conditions.join(' AND ')}` : '';
-    const result = await binding.prepare(`SELECT ${projection} FROM ${tables} ${where} ORDER BY a.created_at DESC, a.id LIMIT ? OFFSET ?`)
+    const where = conditions.join(' AND ');
+    const result = await binding.prepare(`SELECT ${projection} FROM accounts WHERE ${where} ORDER BY created_at DESC, id LIMIT ? OFFSET ?`)
         .bind(...values, pageSize, offset).all<AccountRow>();
-    const total = await binding.prepare(`SELECT count(*) AS total FROM ${tables} ${where}`).bind(...values).first<number>('total');
+    const total = await binding.prepare(`SELECT count(*) AS total FROM accounts WHERE ${where}`).bind(...values).first<number>('total');
     return { items: result.results.map(accountDto), page, pageSize, total };
 }
 
+const columns: Record<string, string> = { nickname: 'nickname', schoolNumber: 'school_number', name: 'name',
+    department: 'department', major: 'major', grade: 'grade', status: 'status' };
+export function profileValues(body: Record<string, unknown>) {
+    const values: Record<string, string | null> = {};
+    if (body.nickname !== undefined) values.nickname = optionalProfileField(body.nickname, '昵称', 80);
+    if (body.schoolNumber !== undefined) values.schoolNumber = stringField(body, 'schoolNumber', 64);
+    for (const [key, label, max] of [['name', '姓名', 80], ['department', '院系', 120], ['major', '专业', 120], ['grade', '年级', 40]] as const) {
+        if (body[key] !== undefined) values[key] = optionalProfileField(body[key], label, max);
+    }
+    if (body.status !== undefined) {
+        if (body.status !== 'active' && body.status !== 'disabled') throw new HttpError(400, 'INVALID_STATUS', '状态不正确');
+        values.status = body.status;
+    }
+    return values;
+}
+const eraseIdentity = `nickname = NULL, school_number = NULL, password = NULL, must_change_password = 0,
+    name = NULL, department = NULL, major = NULL, grade = NULL, avatar_key = NULL, last_login_at = NULL, status = 'deleted'`;
+
 export async function updateAccount(binding: D1Database, session: Session, id: string, body: Record<string, unknown>) {
-    allowFields(body, ['revision', 'status', 'role', 'schoolNumber', 'realName', 'email']);
-    const revision = revisionField(body.revision);
-    const fields = Object.keys(body).filter((key) => key !== 'revision');
-    if (!fields.length) throw new HttpError(400, 'EMPTY_UPDATE', '没有需要修改的字段');
-    const current = await accountDetail(binding, id);
-    if (current.roles.includes('admin') && fields.some((key) => ['status', 'role', 'schoolNumber'].includes(key))) {
+    allowFields(body, ['nickname', 'status', 'role', 'schoolNumber', 'name', 'department', 'major', 'grade']);
+    if (!Object.keys(body).length) throw new HttpError(400, 'EMPTY_UPDATE', '没有需要修改的字段');
+    if (body.role !== undefined && body.role !== 'student' && body.role !== 'teacher') throw new HttpError(400, 'INVALID_ROLE', '只能设置学生或教师身份');
+    const current = await accountDetail(binding, id), values = profileValues(body);
+    if (current.role === 'admin' && ['status', 'role', 'schoolNumber'].some(key => body[key] !== undefined)) {
         throw new HttpError(403, 'ADMIN_PROTECTED', '不能禁用、变更唯一管理员身份或设置管理员学工号');
     }
-    if (body.status !== undefined && body.status !== 'active' && body.status !== 'disabled') throw new HttpError(400, 'INVALID_STATUS', '状态不正确');
-    if (body.role !== undefined && body.role !== 'student' && body.role !== 'teacher') throw new HttpError(400, 'INVALID_ROLE', '只能设置学生或教师身份');
-    const role = body.role as 'student' | 'teacher' | undefined;
-    const roleChanged = role !== undefined && !current.roles.includes(role);
-    if (roleChanged) {
-        const related = await binding.prepare(`SELECT 1 FROM enrollments WHERE student_id = ?
-            UNION ALL SELECT 1 FROM teaching_assignments WHERE teacher_id = ? LIMIT 1`).bind(id, id).first();
-        if (related || current.roles.length !== 1) throw new HttpError(409, 'RELATED_RECORDS_EXIST', '账号存在授课、修读或多重身份记录，不能直接切换身份');
+    if ((body.role ?? current.role) === 'student' && (values.name === null || !(values.name ?? current.name) || !(values.schoolNumber ?? current.schoolNumber))) {
+        throw new HttpError(400, 'STUDENT_IDENTITY_REQUIRED', '学生需要姓名和学号');
     }
-    const schoolNumber = body.schoolNumber === undefined ? current.schoolNumber : stringField(body, 'schoolNumber', 64);
-    const realName = body.realName === undefined ? current.realName : stringField(body, 'realName');
-    const email = body.email === undefined ? current.email : emailField(body.email);
-    const student = role === 'student' || (!role && current.roles.includes('student'));
-    if (student && (!realName || !schoolNumber)) throw new HttpError(400, 'STUDENT_IDENTITY_REQUIRED', '学生需要真实姓名和学号');
-    const numberChanged = schoolNumber !== current.schoolNumber;
-    if (numberChanged && !current.schoolNumber) throw new HttpError(409, 'CREDENTIALS_REQUIRED', '该账号尚未建立登录凭据');
-    const statusChanged = body.status !== undefined && body.status !== current.status;
-    await mutateAccount(binding, session, id, revision, 'account.update', fields, true, (gate) => [
-        ...(body.status !== undefined ? [binding.prepare(`UPDATE accounts SET status = ? WHERE id = ? AND ${gate}`).bind(body.status, id)] : []),
-        binding.prepare(`INSERT INTO account_private (account_id, real_name, email)
-            SELECT ?, ?, ? WHERE ${gate} ON CONFLICT(account_id) DO UPDATE SET
-            real_name = excluded.real_name, email = excluded.email`).bind(id, realName, email),
-        ...(roleChanged ? [
-            binding.prepare(`DELETE FROM student_records WHERE account_id = ? AND ${gate}`).bind(id),
-            binding.prepare(`DELETE FROM account_roles WHERE account_id = ? AND ${gate}`).bind(id),
-            binding.prepare(`INSERT INTO account_roles (account_id, role) SELECT ?, ? WHERE ${gate}`).bind(id, role!),
-        ] : []),
-        ...(student ? [binding.prepare(`INSERT INTO student_records (account_id, student_number, real_name)
-            SELECT ?, ?, ? WHERE ${gate} ON CONFLICT(account_id) DO UPDATE SET student_number = excluded.student_number, real_name = excluded.real_name`)
-            .bind(id, schoolNumber, realName)] : []),
-        ...(numberChanged || roleChanged || statusChanged ? [
-            binding.prepare(`UPDATE credentials SET school_number = ?, version = version + 1 WHERE account_id = ? AND ${gate}`).bind(schoolNumber, id),
-            binding.prepare(`DELETE FROM sessions WHERE account_id = ? AND ${gate}`).bind(id),
-        ] : []),
+    if (body.role && body.role !== current.role) {
+        const replacementId = crypto.randomUUID();
+        // Copy basic information to a new identity; business rows retain the deleted ID.
+        const copy = (key: string) => Object.hasOwn(values, key) ? '?' : columns[key];
+        const copyKeys = ['nickname', 'status', 'name', 'department', 'major', 'grade'];
+        const copied = `EXISTS (SELECT 1 FROM accounts WHERE id = '${replacementId}')`;
+        await mutateAccount(binding, session, id, true, gate => [
+            binding.prepare(`INSERT INTO accounts (id, nickname, role, status, school_number, password, must_change_password,
+                credential_version, name, department, major, grade, created_at, last_login_at, avatar_key)
+                SELECT ?, ${copy('nickname')}, ?, ${copy('status')}, NULL, password, must_change_password,
+                    credential_version + 1, ${copy('name')}, ${copy('department')}, ${copy('major')}, ${copy('grade')},
+                    created_at, last_login_at, avatar_key FROM accounts WHERE id = ? AND ${gate}`)
+                .bind(replacementId, ...(Object.hasOwn(values, 'nickname') ? [values.nickname] : []), body.role as string,
+                    ...copyKeys.filter(key => key !== 'nickname' && Object.hasOwn(values, key)).map(key => values[key]), id),
+            binding.prepare(`UPDATE accounts SET status = 'deleted', credential_version = credential_version + 1 WHERE id = ? AND ${gate}`).bind(id),
+            binding.prepare(`DELETE FROM sessions WHERE account_id = ? AND ${copied}`).bind(id),
+            binding.prepare(`UPDATE accounts SET school_number = ${Object.hasOwn(values, 'schoolNumber') ? '?' : '(SELECT school_number FROM accounts WHERE id = ?)'}
+                WHERE id = ? AND ${copied}`).bind(Object.hasOwn(values, 'schoolNumber') ? values.schoolNumber : id, replacementId),
+            binding.prepare(`UPDATE accounts SET ${eraseIdentity} WHERE id = ? AND ${copied}`).bind(id),
+        ]);
+        return { ...await accountDetail(binding, replacementId), previousId: id };
+    }
+    const entries = Object.entries(values);
+    const revoke = body.schoolNumber !== undefined || body.status !== undefined;
+    await mutateAccount(binding, session, id, true, gate => [
+        ...(entries.length ? [binding.prepare(`UPDATE accounts SET ${entries.map(([key]) => `${columns[key]} = ?`).join(', ')} WHERE id = ? AND ${gate}`)
+            .bind(...entries.map(([, value]) => value), id)] : []),
+        ...(revoke ? [binding.prepare(`UPDATE accounts SET credential_version = credential_version + 1 WHERE id = ? AND ${gate}`).bind(id),
+            binding.prepare(`DELETE FROM sessions WHERE account_id = ? AND ${gate}`).bind(id)] : []),
     ]);
     return accountDetail(binding, id);
 }
 
-// Members recover access by asking the administrator, who verifies identity
-// outside the system. The sole administrator uses the external reset command.
-export async function resetMemberPassword(binding: D1Database, session: Session, id: string, body: Record<string, unknown>) {
-    allowFields(body, ['revision', 'newPassword']);
-    const revision = revisionField(body.revision);
-    const passwordHash = await hashPassword(passwordField(body.newPassword));
+export async function deleteAccount(binding: D1Database, session: Session, id: string) {
     const current = await accountDetail(binding, id);
-    if (current.roles.includes('admin')) throw new HttpError(403, 'ADMIN_PROTECTED', '管理员密码只能通过改密或外部重置命令修改');
-    if (!current.schoolNumber) throw new HttpError(409, 'CREDENTIALS_REQUIRED', '该账号尚未建立登录凭据');
+    if (current.role === 'admin') throw new HttpError(403, 'ADMIN_PROTECTED', '不能删除唯一管理员');
+    const result = await mutateAccount(binding, session, id, true, gate => [
+        binding.prepare(`SELECT avatar_key FROM accounts WHERE id = ? AND ${gate}`).bind(id),
+        binding.prepare(`DELETE FROM sessions WHERE account_id = ? AND ${gate}`).bind(id),
+        binding.prepare(`UPDATE accounts SET ${eraseIdentity}, credential_version = credential_version + 1 WHERE id = ? AND ${gate}`).bind(id),
+    ]);
+    return { id, deleted: true, avatarKey: (result[1].results[0] as { avatar_key: string | null } | undefined)?.avatar_key ?? null };
+}
+
+export async function resetMemberPassword(binding: D1Database, session: Session, id: string, body: Record<string, unknown>) {
+    allowFields(body, ['newPassword', 'mustChangePassword']);
+    if (body.mustChangePassword !== undefined && typeof body.mustChangePassword !== 'boolean') throw new HttpError(400, 'INVALID_FIELD', 'mustChangePassword 必须是布尔值');
+    const generatedPassword = body.newPassword === undefined || body.newPassword === '' ? randomToken().slice(0, 24) : undefined;
+    const passwordHash = await hashPassword(passwordField(generatedPassword ?? body.newPassword));
+    const current = await accountDetail(binding, id);
+    if (current.role === 'admin') throw new HttpError(403, 'ADMIN_PROTECTED', '管理员密码只能通过改密或外部重置命令修改');
+    if (!current.schoolNumber) throw new HttpError(409, 'CREDENTIALS_REQUIRED', '该账号尚未设置学工号');
     const throttles = [await digest(`member:${current.schoolNumber}`), await digest(`password:${id}`)];
-    await mutateAccount(binding, session, id, revision, 'password.reset', ['password'], true, (gate) => [
-        binding.prepare(`UPDATE credentials SET password_hash = ?, version = version + 1 WHERE account_id = ? AND ${gate}`).bind(passwordHash, id),
+    await mutateAccount(binding, session, id, true, gate => [
+        binding.prepare(`UPDATE accounts SET password = ?, credential_version = credential_version + 1, must_change_password = ? WHERE id = ? AND ${gate}`)
+            .bind(passwordHash, body.mustChangePassword ? 1 : 0, id),
         binding.prepare(`DELETE FROM sessions WHERE account_id = ? AND ${gate}`).bind(id),
         binding.prepare(`DELETE FROM login_attempts WHERE key IN (?, ?) AND ${gate}`).bind(...throttles),
     ]);
-    return accountDetail(binding, id);
+    return { ...await accountDetail(binding, id), ...(generatedPassword ? { generatedPassword } : {}) };
 }
 
-export async function updatePublicName(binding: D1Database, session: Session, body: Record<string, unknown>) {
-    allowFields(body, ['revision', 'publicName']);
-    const revision = revisionField(body.revision);
-    const name = stringField(body, 'publicName');
-    await mutateAccount(binding, session, session.id, revision, 'profile.update', ['publicName'], false,
-        (gate) => [binding.prepare(`UPDATE accounts SET public_name = ? WHERE id = ? AND ${gate}`).bind(name, session.id)]);
+export async function updateNickname(binding: D1Database, session: Session, body: Record<string, unknown>) {
+    allowFields(body, ['nickname']);
+    const nickname = optionalProfileField(body.nickname, '昵称', 80);
+    await mutateAccount(binding, session, session.id, false,
+        gate => [binding.prepare(`UPDATE accounts SET nickname = ? WHERE id = ? AND ${gate}`).bind(nickname, session.id)]);
     return accountDetail(binding, session.id);
-}
-
-export async function accountHistory(binding: D1Database, id: string, url: URL) {
-    await accountDetail(binding, id);
-    const { page, pageSize, offset } = pagination(url);
-    const rows = await binding.prepare(`SELECT id, actor_id AS actorId, target_id AS targetId, action, fields, created_at AS createdAt
-        FROM account_audit WHERE target_id = ? ORDER BY created_at DESC, id DESC LIMIT ? OFFSET ?`).bind(id, pageSize, offset).all();
-    const total = await binding.prepare('SELECT count(*) AS total FROM account_audit WHERE target_id = ?').bind(id).first<number>('total');
-    return { items: rows.results.map((row) => ({ ...row, fields: JSON.parse(row.fields as string) })), total, page, pageSize };
 }

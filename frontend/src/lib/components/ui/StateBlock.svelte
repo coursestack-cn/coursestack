@@ -24,7 +24,7 @@
         error: { title: "加载失败", description: "网络或服务出现问题，稍后重试。", icon: CircleAlert },
         "login-required": { title: "登录后继续", description: "浏览无需登录，发布、互动和下载需要登录。", icon: LogIn },
         forbidden: { title: "没有权限", description: "你的账号无法查看或操作这里的内容。", icon: ShieldX },
-        unavailable: { title: "内容已不可用", description: "该内容已被下架或删除，相关讨论仍可阅读。", icon: FileX }
+        unavailable: { title: "内容已不可用", description: "该内容已被下架或删除。", icon: FileX }
     };
     const state = $derived(defaults[kind]);
     const Icon = $derived(state.icon);

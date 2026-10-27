@@ -1,11 +1,13 @@
 import assert from 'node:assert/strict';
-import { readFile, readdir } from 'node:fs/promises';
+import { setCurrentTerm } from './discussions-helpers.mjs';
+import { readFile } from 'node:fs/promises';
+import { readMigrations } from '../scripts/lib/migrations.mjs';
 import { after, before, beforeEach, test } from 'node:test';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 import { eq } from 'drizzle-orm';
 import { createDatabase } from '../src/db/index.ts';
-import { accounts, academicSettings, teachingAssignments } from '../src/db/schema.ts';
-import { getPublicProfile, getStudentRecordForAdministrator, getStudentRecordForTeacher, isAdministrator, isCurrentCourseTeacher } from '../src/permissions.ts';
+import { accounts, terms, enrollments } from '../src/db/schema.ts';
+import { getPublicProfile, isAdministrator, isCurrentCourseTeacher } from '../src/permissions.ts';
 import worker from '../src/index.ts';
 import { initializeAdministrator } from '../src/auth/service.ts';
 import { digest, passwordField } from '../src/auth/crypto.ts';
@@ -14,14 +16,21 @@ let runtime;
 let binding;
 let db;
 const fixture = `
-INSERT INTO accounts (id, public_name) VALUES ('admin', '管理用户'), ('teacher', '公开教师'), ('other-teacher', '其他教师'), ('student', '公开同学'), ('history', '历年同学'), ('outsider', '其他同学');
-INSERT INTO account_roles (account_id, role) VALUES ('admin', 'admin'), ('teacher', 'teacher'), ('other-teacher', 'teacher'), ('student', 'student'), ('history', 'student'), ('outsider', 'student');
-INSERT INTO student_records (account_id, student_number, real_name) VALUES ('student', 'TEST-001', '虚构甲'), ('history', 'TEST-002', '虚构乙'), ('outsider', 'TEST-003', '虚构丙');
-INSERT INTO courses (id, name) VALUES ('course', '课程甲'), ('other-course', '课程乙');
+PRAGMA defer_foreign_keys=ON;
+INSERT INTO accounts (id, nickname, role, school_number, name) VALUES
+('admin', '管理用户', 'admin', NULL, NULL), ('teacher', '公开教师', 'teacher', NULL, NULL),
+('other-teacher', '其他教师', 'teacher', NULL, NULL), ('student', '公开同学', 'student', 'TEST-001', '虚构甲'),
+('history', '历年同学', 'student', 'TEST-002', '虚构乙'), ('outsider', '其他同学', 'student', 'TEST-003', '虚构丙');
 INSERT INTO terms (id, name) VALUES ('current', '当前学期'), ('previous', '历年学期'), ('next', '下个学期');
-UPDATE academic_settings SET current_term_id = 'current' WHERE id = 1;
-INSERT INTO teaching_assignments (course_id, term_id, teacher_id) VALUES ('course', 'current', 'teacher'), ('course', 'previous', 'other-teacher'), ('other-course', 'current', 'other-teacher');
-INSERT INTO enrollments (course_id, term_id, student_id) VALUES ('course', 'current', 'student'), ('course', 'previous', 'history'), ('other-course', 'current', 'outsider');
+UPDATE terms SET current=1 WHERE id='previous';
+INSERT INTO enrollments(course_id,term_id,account_id) VALUES ('course','previous','other-teacher');
+UPDATE terms SET current=0;
+UPDATE terms SET current=1 WHERE id='current';
+INSERT INTO enrollments(course_id,term_id,account_id) VALUES ('course','current','teacher'),('other-course','current','other-teacher');
+INSERT INTO courses (id, name, code, created_by, updated_by, request_key, request_hash) VALUES
+('course', '课程甲', 'COURSE', 'teacher', 'teacher', 'fixture-course', 'fixture'),
+('other-course', '课程乙', 'OTHER', 'other-teacher', 'other-teacher', 'fixture-other', 'fixture');
+INSERT INTO enrollments (course_id, term_id, account_id) VALUES ('course', 'current', 'student'), ('course', 'previous', 'history'), ('other-course', 'current', 'outsider');
 `;
 
 before(async () => {
@@ -32,10 +41,8 @@ before(async () => {
         d1Databases: ['DB'],
     }));
     binding = await runtime.getD1Database('DB');
-    const migrations = await readdir(new URL('../migrations/', import.meta.url));
-    for (const name of migrations.filter((name) => name.endsWith('.sql')).sort()) {
-        const source = await readFile(new URL(`../migrations/${name}`, import.meta.url), 'utf8');
-        await binding.batch(source.split('-- statement-breakpoint').filter((s) => s.trim()).map((s) => binding.prepare(s)));
+    for (const { statements } of await readMigrations()) {
+        await binding.batch(statements.map((sql) => binding.prepare(sql)));
     }
     db = createDatabase(binding);
 });
@@ -44,115 +51,92 @@ after(async () => { await runtime?.dispose(); });
 
 beforeEach(async () => {
     // Delete only isolated in-memory test data, in foreign-key dependency order.
-    await binding.exec(`
-DELETE FROM sessions;
-DELETE FROM avatar_objects;
-DELETE FROM account_audit;
-DELETE FROM account_private;
-DELETE FROM credentials;
-DELETE FROM login_attempts;
-DELETE FROM enrollments;
-DELETE FROM teaching_assignments;
-DELETE FROM student_records;
-DELETE FROM account_roles;
-DELETE FROM accounts;
-UPDATE academic_settings SET current_term_id = NULL;
-DELETE FROM terms;
+    await binding.batch(`
+PRAGMA defer_foreign_keys=ON;
 DELETE FROM courses;
-`);
-    await binding.exec(fixture);
+DELETE FROM file_versions;
+DELETE FROM contents;
+DELETE FROM sessions;
+DELETE FROM login_attempts;
+DELETE FROM enrollments WHERE account_id IN (SELECT id FROM accounts WHERE role='student');
+DELETE FROM enrollments;
+DELETE FROM accounts;
+DELETE FROM terms;
+`.split(';').filter(s => s.trim()).map(s => binding.prepare(s)));
+    await binding.batch(fixture.split(';').filter(sql => sql.trim()).map(sql => binding.prepare(sql)));
 });
 
 test('public profile is a field allowlist and never includes academic identity', async () => {
-    assert.deepEqual(await getPublicProfile(db, 'student'), { id: 'student', publicName: '公开同学', avatarUrl: null });
+    assert.deepEqual(await getPublicProfile(db, 'student'), { id: 'student', nickname: '公开同学', avatarUrl: null, isDeleted: false });
     assert.equal(await getPublicProfile(db, 'missing'), null);
     await db.update(accounts).set({ status: 'disabled' }).where(eq(accounts.id, 'student'));
     assert.equal(await getPublicProfile(db, 'student'), null);
 });
 
-test('only active administrator accounts have global academic access', async () => {
+test('only active administrator accounts have administrator permission', async () => {
     assert.equal(await isAdministrator(db, 'admin'), true);
-    assert.deepEqual(await getStudentRecordForAdministrator(db, 'admin', 'outsider'), {
-        accountId: 'outsider', studentNumber: 'TEST-003', realName: '虚构丙',
-    });
     for (const actor of [null, 'missing', 'teacher', 'student']) {
         assert.equal(await isAdministrator(db, actor), false);
-        assert.equal(await getStudentRecordForAdministrator(db, actor, 'student'), null);
     }
     await db.update(accounts).set({ status: 'disabled' }).where(eq(accounts.id, 'admin'));
     assert.equal(await isAdministrator(db, 'admin'), false);
-    assert.equal(await getStudentRecordForAdministrator(db, 'admin', 'student'), null);
 });
 
-test('academic access requires both current teaching and current enrollment in the same course', async () => {
+test('course teacher permission requires a current teaching assignment', async () => {
     assert.equal(await isCurrentCourseTeacher(db, 'teacher', 'course'), true);
-    assert.deepEqual(await getStudentRecordForTeacher(db, 'teacher', 'course', 'student'), {
-        accountId: 'student', studentNumber: 'TEST-001', realName: '虚构甲',
-    });
     for (const actor of [null, 'missing', 'student', 'history', 'other-teacher', 'admin']) {
         assert.equal(await isCurrentCourseTeacher(db, actor, 'course'), false);
-        assert.equal(await getStudentRecordForTeacher(db, actor, 'course', 'student'), null);
     }
-    for (const student of ['history', 'outsider', 'missing']) {
-        assert.equal(await getStudentRecordForTeacher(db, 'teacher', 'course', student), null);
-    }
-    assert.equal(await getStudentRecordForTeacher(db, 'teacher', 'other-course', 'outsider'), null);
 });
 
 test('disabling a teacher or revoking teaching immediately removes access', async () => {
     await db.update(accounts).set({ status: 'disabled' }).where(eq(accounts.id, 'teacher'));
     assert.equal(await isCurrentCourseTeacher(db, 'teacher', 'course'), false);
-    assert.equal(await getStudentRecordForTeacher(db, 'teacher', 'course', 'student'), null);
     await db.update(accounts).set({ status: 'active' }).where(eq(accounts.id, 'teacher'));
-    await db.delete(teachingAssignments).where(eq(teachingAssignments.teacherId, 'teacher'));
-    assert.equal(await getStudentRecordForTeacher(db, 'teacher', 'course', 'student'), null);
+    await db.update(enrollments).set({ accountId: 'other-teacher' }).where(eq(enrollments.accountId, 'teacher'));
+    assert.equal(await isCurrentCourseTeacher(db, 'teacher', 'course'), false);
+    assert.equal(await isCurrentCourseTeacher(db, 'other-teacher', 'course'), true);
 });
 
 test('term changes remove old access without deleting history; no term grants nothing', async () => {
-    await db.update(academicSettings).set({ currentTermId: 'next' }).where(eq(academicSettings.id, 1));
+    await setCurrentTerm(binding, 'next');
     assert.equal(await isCurrentCourseTeacher(db, 'teacher', 'course'), false);
-    assert.equal(await getStudentRecordForTeacher(db, 'teacher', 'course', 'student'), null);
-    const count = await binding.prepare('SELECT COUNT(*) AS count FROM enrollments').first('count');
+    const count = await binding.prepare("SELECT COUNT(*) AS count FROM enrollments WHERE account_id IN (SELECT id FROM accounts WHERE role='student')").first('count');
     assert.equal(count, 3);
-    await binding.prepare("INSERT INTO teaching_assignments (course_id, term_id, teacher_id) VALUES ('course', 'next', 'teacher')").run();
+    await binding.prepare("INSERT INTO enrollments (course_id, term_id, account_id) VALUES ('course', 'next', 'teacher')").run();
     assert.equal(await isCurrentCourseTeacher(db, 'teacher', 'course'), true);
-    assert.equal(await getStudentRecordForTeacher(db, 'teacher', 'course', 'student'), null);
-    await binding.prepare("INSERT INTO enrollments (course_id, term_id, student_id) VALUES ('course', 'next', 'student')").run();
-    assert.ok(await getStudentRecordForTeacher(db, 'teacher', 'course', 'student'));
-    await db.update(academicSettings).set({ currentTermId: null }).where(eq(academicSettings.id, 1));
-    assert.equal(await getStudentRecordForTeacher(db, 'teacher', 'course', 'student'), null);
+    await binding.prepare("INSERT INTO enrollments (course_id, term_id, account_id) VALUES ('course', 'next', 'student')").run();
+    await setCurrentTerm(binding, null);
+    assert.equal(await isCurrentCourseTeacher(db, 'teacher', 'course'), false);
 });
 
 test('foreign keys and checks reject wrong identities, orphan relations and duplicate enrollment', async () => {
     const invalid = [
-        "INSERT INTO account_roles VALUES ('missing', 'teacher')",
-        "INSERT INTO account_roles VALUES ('teacher', 'root')",
-        "INSERT INTO student_records (account_id, student_number, real_name) VALUES ('teacher', 'TEST-004', '虚构丁')",
-        "INSERT INTO teaching_assignments (course_id, term_id, teacher_id) VALUES ('course', 'current', 'student')",
-        "INSERT INTO enrollments (course_id, term_id, student_id) VALUES ('course', 'current', 'teacher')",
-        "INSERT INTO enrollments (course_id, term_id, student_id, role) VALUES ('course', 'current', 'teacher', 'teacher')",
-        "INSERT INTO enrollments (course_id, term_id, student_id) VALUES ('missing', 'current', 'student')",
-        "INSERT INTO enrollments (course_id, term_id, student_id) VALUES ('course', 'missing', 'student')",
-        "INSERT INTO enrollments (course_id, term_id, student_id) VALUES ('course', 'current', 'student')",
-        "UPDATE student_records SET student_number = 'TEST-001' WHERE account_id = 'history'",
+        "INSERT INTO enrollments (course_id, term_id, account_id) VALUES ('course', 'current', 'missing')",
+        "INSERT INTO accounts (id, nickname, role) VALUES ('invalid', '错误', 'root')",
+        "UPDATE accounts SET role = 'student' WHERE id = 'teacher'",
+        "INSERT INTO enrollments (course_id, term_id, account_id) VALUES ('course', 'current', 'student')",
+        "INSERT INTO enrollments (course_id, term_id, account_id) VALUES ('course', 'current', 'teacher')",
+        "INSERT INTO enrollments (course_id, term_id, account_id) VALUES ('missing', 'current', 'student')",
+        "INSERT INTO enrollments (course_id, term_id, account_id) VALUES ('course', 'missing', 'student')",
+        "INSERT INTO enrollments (course_id, term_id, account_id) VALUES ('course', 'current', 'student')",
+        "UPDATE accounts SET school_number = 'TEST-001' WHERE id = 'history'",
         "UPDATE accounts SET status = 'unknown' WHERE id = 'student'",
-        "UPDATE accounts SET public_name = '   ' WHERE id = 'student'",
-        "INSERT INTO academic_settings (id) VALUES (2)",
-        "DELETE FROM account_roles WHERE account_id = 'teacher'",
+        "UPDATE accounts SET nickname = '   ' WHERE id = 'student'",
+        "INSERT INTO terms (id,name,current) VALUES ('invalid-term','错误学期',2)",
+        "DELETE FROM accounts WHERE id = 'teacher'",
         "DELETE FROM courses WHERE id = 'course'",
     ];
     for (const sql of invalid) {
-        await assert.rejects(binding.prepare(sql).run(), /constraint/i, sql);
+        await assert.rejects(binding.prepare(sql).run(), /constraint|replace_account_identity|invalid_.*identity|enrollment_teacher_required|enrollment_teacher_unique|current_term_required/i, sql);
     }
-    // Multiple teachers for one course are valid.
-    await binding.prepare("INSERT INTO teaching_assignments (course_id, term_id, teacher_id) VALUES ('course', 'current', 'other-teacher')").run();
-    assert.ok(await getStudentRecordForTeacher(db, 'other-teacher', 'course', 'student'));
+    await assert.rejects(() => binding.prepare("INSERT INTO enrollments (course_id, term_id, account_id) VALUES ('course', 'current', 'other-teacher')").run(), /enrollment_teacher_unique/);
 });
 
 test('D1 batches roll back all writes when a membership constraint fails', async () => {
     await assert.rejects(binding.batch([
-        binding.prepare("INSERT INTO accounts (id, public_name) VALUES ('rollback', '回滚用户')"),
-        binding.prepare("INSERT INTO enrollments (course_id, term_id, student_id) VALUES ('course', 'current', 'rollback')"),
+        binding.prepare("INSERT INTO accounts (id, nickname, role) VALUES ('rollback', '回滚用户', 'teacher')"),
+        binding.prepare("INSERT INTO enrollments (course_id, term_id, account_id) VALUES ('course', 'current', 'rollback')"),
     ]));
     assert.equal(await binding.prepare("SELECT id FROM accounts WHERE id = 'rollback'").first(), null);
 });
@@ -161,11 +145,11 @@ test('local seeds are repeatable and preserve later edits and term selection', a
     const seed = await readFile(new URL('../seed/local.sql', import.meta.url), 'utf8');
     const apply = () => binding.batch(seed.split(';').filter((s) => s.trim()).map((s) => binding.prepare(s)));
     await apply();
-    await binding.prepare("UPDATE accounts SET public_name = '修改后的名称' WHERE id = 'demo-student'").run();
+    await binding.prepare("UPDATE accounts SET nickname = '修改后的名称' WHERE id = 'demo-student'").run();
     await apply();
-    assert.equal((await getPublicProfile(db, 'demo-student')).publicName, '修改后的名称');
-    assert.equal(await binding.prepare('SELECT current_term_id FROM academic_settings').first('current_term_id'), 'current');
-    assert.equal(await binding.prepare("SELECT COUNT(*) AS n FROM enrollments WHERE student_id = 'demo-student'").first('n'), 1);
+    assert.equal((await getPublicProfile(db, 'demo-student')).nickname, '修改后的名称');
+    assert.equal(await binding.prepare('SELECT id FROM terms WHERE current=1').first('id'), 'current');
+    assert.equal(await binding.prepare("SELECT COUNT(*) AS n FROM enrollments WHERE account_id = 'demo-student'").first('n'), 1);
 });
 
 test('HTTP handles health, unknown routes, methods and database errors', async () => {
@@ -177,7 +161,7 @@ test('HTTP handles health, unknown routes, methods and database errors', async (
     const post = await worker.fetch(new Request('http://local/api/health', { method: 'POST' }), env);
     assert.equal(post.status, 405);
     assert.equal(post.headers.get('Allow'), 'GET');
-    for (const path of ['/api/register', '/api/login', '/api/students/student']) {
+    for (const path of ['/api/register', '/api/login', '/api/students/student', '/api/courses/course/students/student/academic-record']) {
         assert.equal((await worker.fetch(new Request(`http://local${path}`), env)).status, 404);
     }
     const unavailable = await worker.fetch(new Request('http://local/api/health'), {
@@ -208,12 +192,12 @@ test('administrator is unique, password-only, and initialization never overwrite
     const cookie = await adminCookie();
     assert.ok(cookie);
     await assert.rejects(initializeAdministrator(binding, nextPassword), (error) => error.code === 'ADMIN_EXISTS');
-    await assert.rejects(binding.prepare("INSERT INTO account_roles VALUES ('teacher', 'admin')").run(), /UNIQUE/);
-    const adminCredential = await binding.prepare("SELECT * FROM credentials WHERE account_id = 'admin'").first();
+    await assert.rejects(binding.prepare("INSERT INTO accounts (id, nickname, role) VALUES ('extra-admin', '多余管理员', 'admin')").run(), /UNIQUE/);
+    const adminCredential = await binding.prepare("SELECT * FROM accounts WHERE id = 'admin'").first();
     assert.equal(adminCredential.school_number, null);
-    assert.notEqual(adminCredential.password_hash, testPassword);
+    assert.notEqual(adminCredential.password, testPassword);
     const profile = await call('/api/auth/me', undefined, cookie, 'GET');
-    assert.deepEqual(await profile.json(), { data: { id: 'admin', publicName: '管理用户', roles: ['admin'] } });
+    assert.deepEqual(await profile.json(), { data: { id: 'admin', nickname: '管理用户', role: 'admin', mustChangePassword: false } });
     const wrong = await call('/api/auth/admin/login', { password: nextPassword });
     assert.equal(wrong.status, 401);
     assert.equal((await call('/api/auth/login', { schoolNumber: 'admin', password: testPassword })).status, 401);
@@ -221,18 +205,18 @@ test('administrator is unique, password-only, and initialization never overwrite
 
 test('administrator can create students and teachers; duplicate school numbers roll back the entire account', async () => {
     const cookie = await adminCookie();
-    const body = { role: 'student', schoolNumber: 'NEW-001', publicName: '新同学', realName: '虚构新同学', password: testPassword };
+    const body = { role: 'student', schoolNumber: 'NEW-001', nickname: '新同学', name: '虚构新同学', password: testPassword };
     const created = await call('/api/admin/accounts', body, cookie);
     assert.equal(created.status, 201);
     const { data } = await created.json();
-    assert.deepEqual(await getPublicProfile(db, data.id), { id: data.id, publicName: '新同学', avatarUrl: null });
+    assert.deepEqual(await getPublicProfile(db, data.id), { id: data.id, nickname: '新同学', avatarUrl: null, isDeleted: false });
     assert.equal((await call('/api/admin/accounts', body, cookie)).status, 409);
-    assert.equal(await binding.prepare("SELECT COUNT(*) AS n FROM accounts WHERE public_name = '新同学'").first('n'), 1);
+    assert.equal(await binding.prepare("SELECT COUNT(*) AS n FROM accounts WHERE nickname = '新同学'").first('n'), 1);
     assert.equal((await call('/api/admin/accounts', { ...body, role: 'admin' }, cookie)).status, 400);
     assert.equal((await call('/api/admin/accounts', { ...body, role: 'teacher', schoolNumber: 'NEW-002' }, cookie)).status, 201);
     const member = await call('/api/auth/login', { schoolNumber: 'NEW-001', password: testPassword });
     assert.equal(member.status, 200);
-    assert.deepEqual((await member.json()).data, { id: data.id, publicName: '新同学', roles: ['student'] });
+    assert.deepEqual((await member.json()).data, { id: data.id, nickname: '新同学', role: 'student', mustChangePassword: false });
     // No first-login password gate: the initial credential immediately yields a working session.
     assert.equal((await call('/api/auth/me', undefined, cookieOf(member), 'GET')).status, 200);
     assert.equal((await call('/api/admin/accounts', { ...body, schoolNumber: 'NEW-003' }, cookieOf(member))).status, 403);
@@ -260,7 +244,7 @@ test('password changes require the old password and invalidate all prior session
     const first = await adminCookie();
     const second = cookieOf(await call('/api/auth/admin/login', { password: testPassword }));
     const wrong = await call('/api/auth/password', { oldPassword: nextPassword, newPassword: nextPassword }, first);
-    assert.equal(wrong.status, 401);
+    assert.equal(wrong.status, 400);
     const changed = await call('/api/auth/password', { oldPassword: testPassword, newPassword: nextPassword }, first);
     assert.equal(changed.status, 200);
     for (const cookie of [first, second]) assert.equal((await call('/api/auth/me', undefined, cookie, 'GET')).status, 401);
@@ -281,7 +265,7 @@ test('expired sessions and disabled accounts cannot access authenticated APIs', 
 test('CSRF, forged identities, malformed and oversized requests are rejected', async () => {
     assert.equal((await call('/api/auth/admin/login', { password: testPassword }, undefined, 'POST', 'https://evil.example')).status, 403);
     assert.equal((await call('/api/admin/accounts', { actorId: 'admin' })).status, 401);
-    assert.equal((await call('/api/auth/admin/login', { password: 'short' })).status, 400);
+    assert.equal((await call('/api/auth/admin/login', { password: '' })).status, 400);
     assert.equal((await call('/api/auth/admin/login', { password: '密'.repeat(25) })).status, 400);
     assert.equal((await call('/api/auth/admin/login', { password: 'x'.repeat(9000) })).status, 413);
     assert.equal((await call('/api/auth/admin/login', [], undefined)).status, 400);
@@ -303,25 +287,24 @@ test('login attempts are limited atomically, including nonexistent members', asy
 });
 
 test('concurrent first initialization creates exactly one administrator without orphan accounts', async () => {
-    await binding.prepare("DELETE FROM account_roles WHERE account_id = 'admin'").run();
     await binding.prepare("DELETE FROM accounts WHERE id = 'admin'").run();
     const outcomes = await Promise.allSettled([
         initializeAdministrator(binding, testPassword),
         initializeAdministrator(binding, nextPassword),
     ]);
     assert.equal(outcomes.filter((r) => r.status === 'fulfilled').length, 1);
-    assert.equal(await binding.prepare("SELECT COUNT(*) AS n FROM account_roles WHERE role = 'admin'").first('n'), 1);
-    assert.equal(await binding.prepare('SELECT COUNT(*) AS n FROM credentials').first('n'), 1);
+    assert.equal(await binding.prepare("SELECT COUNT(*) AS n FROM accounts WHERE role = 'admin'").first('n'), 1);
+    assert.equal(await binding.prepare('SELECT COUNT(*) AS n FROM accounts WHERE password IS NOT NULL').first('n'), 1);
     assert.equal(await binding.prepare('SELECT COUNT(*) AS n FROM accounts').first('n'), 6);
 });
 
-test('concurrent password changes cannot overwrite each other using the same old session', async () => {
+test('concurrent admitted password changes may both complete and revoke the old session', async () => {
     const cookie = await adminCookie();
     const responses = await Promise.all([
         call('/api/auth/password', { oldPassword: testPassword, newPassword: nextPassword }, cookie),
         call('/api/auth/password', { oldPassword: testPassword, newPassword: 'test-third-password-789' }, cookie),
     ]);
-    assert.equal(responses.filter((r) => r.status === 200).length, 1);
-    assert.ok(responses.every((r) => [200, 401, 409].includes(r.status)));
+    assert.ok(responses.some((r) => r.status === 200));
+    assert.ok(responses.every((r) => [200, 400, 401, 409].includes(r.status)));
     assert.equal((await call('/api/auth/me', undefined, cookie, 'GET')).status, 401);
 });

@@ -1,0 +1,3 @@
+# Optional internal service credential (at least 24 random characters).
+# Leave empty to disable internal APIs. Never commit real secrets.
+INTERNAL_API_TOKEN=""

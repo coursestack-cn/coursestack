@@ -83,6 +83,9 @@ jobs:
       - name: Check backend types
         run: pnpm check
 
+      - name: Check database migrations
+        run: pnpm db:check
+
       - name: Test backend
         run: pnpm test
 

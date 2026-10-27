@@ -1,0 +1,29 @@
+{
+    "type": "doc",
+    "content": [
+        {
+            "type": "paragraph",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "前文"
+                }
+            ]
+        },
+        {
+            "type": "iframe",
+            "attrs": {
+                "src": "https://example.com"
+            }
+        },
+        {
+            "type": "paragraph",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "后文"
+                }
+            ]
+        }
+    ]
+}

@@ -24,6 +24,7 @@
     let element: HTMLDialogElement;
     let previousFocus: HTMLElement | null = null;
     let startedOnBackdrop = false;
+    let destroyed = false;
 
     function restoreFocus() {
         if (previousFocus?.isConnected) previousFocus.focus({ preventScroll: true });
@@ -45,7 +46,14 @@
         }
     });
 
-    $effect(() => () => { if (element?.open) { element.close(); restoreFocus(); } });
+    // close() fires its event in a later task, after the binding is cleared and the owner may be gone.
+    $effect(() => {
+        const dialog = element;
+        return () => {
+            destroyed = true;
+            if (dialog?.open) { dialog.close(); restoreFocus(); }
+        };
+    });
 </script>
 
 <dialog {...rest} bind:this={element} class={`dialog ${className}`} aria-labelledby={`${id}-title`}
@@ -56,6 +64,7 @@
         event.preventDefault();
         if (!prevented && dismissible) open = false;
     }} onclose={(event) => {
+        if (destroyed) return;
         if (!element.open) { open = false; restoreFocus(); }
         onclose?.(event);
     }} onpointerdown={(event) => { startedOnBackdrop = outside(event); onpointerdown?.(event); }}

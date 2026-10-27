@@ -98,3 +98,12 @@
         --duration-base: 0ms;
     }
 }
+/* Rich-text syntax highlighting: contrast measured against --color-surface-sunken. */
+:root {
+    --color-code-comment: light-dark(#625D53, #B8B0A1);
+    --color-code-keyword: light-dark(#703E94, #D3AFF4);
+    --color-code-string: light-dark(#176447, #98D7AC);
+    --color-code-number: light-dark(#8B4B12, #F2BD7A);
+    --color-code-function: light-dark(#235D96, #97C9F2);
+    --color-code-meta: light-dark(#983838, #F3ABAA);
+}

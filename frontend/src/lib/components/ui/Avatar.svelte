@@ -10,6 +10,8 @@
 </script>
 
 <script lang="ts">
+    import { UserRound } from "@lucide/svelte";
+
     let { name, src, alt, size = "md", class: className = "", ...rest }: Props = $props();
     let failedSrc = $state<string>();
     const palette = $derived(Array.from(name).reduce((hash, character) => (hash * 31 + character.codePointAt(0)!) >>> 0, 0) % 5);
@@ -19,6 +21,7 @@
 <span {...rest} class={`avatar ${size} palette-${palette} ${className}`}>
     {#if src && src !== failedSrc}
         <img {src} alt={alt ?? name} onerror={() => { failedSrc = src; }} />
+    {:else if !name.trim()}<span role="img" aria-label={alt ?? name}><UserRound size="1.25em" aria-hidden="true" /></span>
     {:else}<span role="img" aria-label={alt ?? name}>{initial}</span>{/if}
 </span>
 
