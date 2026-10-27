@@ -1,5 +1,6 @@
 import assert from 'node:assert/strict';
-import { readFile, readdir, mkdir, writeFile, unlink } from 'node:fs/promises';
+import { mkdir, writeFile, unlink } from 'node:fs/promises';
+import { readMigrations } from '../scripts/lib/migrations.mjs';
 import { PassThrough } from 'node:stream';
 import { after, before, beforeEach, test } from 'node:test';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
@@ -24,9 +25,8 @@ before(async () => {
         compatibilityDate: '2026-10-21', d1Databases: ['DB'],
     }));
     binding = await runtime.getD1Database('DB');
-    for (const name of (await readdir(new URL('../migrations/', import.meta.url))).filter((name) => name.endsWith('.sql')).sort()) {
-        const source = await readFile(new URL(`../migrations/${name}`, import.meta.url), 'utf8');
-        await binding.batch(source.split('-- statement-breakpoint').filter((sql) => sql.trim()).map((sql) => binding.prepare(sql)));
+    for (const { statements } of await readMigrations()) {
+        await binding.batch(statements.map((sql) => binding.prepare(sql)));
     }
     originalHash = await hashPassword(password);
     await mkdir(new URL('../.local/', import.meta.url), { recursive: true });
@@ -40,23 +40,20 @@ after(async () => {
 });
 
 beforeEach(async () => {
-    await binding.batch(['sessions', 'account_audit', 'account_private', 'credentials', 'login_attempts', 'account_roles', 'accounts']
+    await binding.batch(['sessions', 'account_audit', 'login_attempts', 'accounts']
         .map((table) => binding.prepare(`DELETE FROM ${table}`)));
 });
 
 async function fixture() {
     await binding.batch([
-        binding.prepare("INSERT INTO accounts (id, public_name) VALUES ('admin', '测试管理员'), ('member', '测试教师')"),
-        binding.prepare("INSERT INTO account_roles VALUES ('admin', 'admin'), ('member', 'teacher')"),
-        binding.prepare("INSERT INTO credentials (account_id, school_number, password_hash) VALUES ('admin', NULL, ?), ('member', 'T-001', ?)").bind(originalHash, originalHash),
-        binding.prepare("INSERT INTO account_private (account_id, real_name, email) VALUES ('admin', '测试姓名', 'admin@example.test'), ('member', NULL, NULL)"),
+        binding.prepare("INSERT INTO accounts (id, nickname, role, school_number, password, name) VALUES ('admin', '测试管理员', 'admin', NULL, ?, '测试姓名'), ('member', '测试教师', 'teacher', 'T-001', ?, NULL)").bind(originalHash, originalHash),
     ]);
     return administratorState(binding);
 }
 
 async function addSession(id) {
     const token = randomToken();
-    await binding.prepare('INSERT INTO sessions SELECT ?, account_id, version, unixepoch() + 3600 FROM credentials WHERE account_id = ?')
+    await binding.prepare('INSERT INTO sessions SELECT ?, id, credential_version, unixepoch() + 3600 FROM accounts WHERE id = ?')
         .bind(await digest(token), id).run();
     return new Request('https://local/api/auth/me', { headers: { Cookie: `coursestack_session=${token}` } });
 }
@@ -80,17 +77,17 @@ test('initialization creates one administrator and a non-secret external audit r
     assert.equal((await login(binding, password, null)).profile.id, state.id);
 });
 
-test('external reset revokes only administrator sessions and retains identity and email', async () => {
+test('external reset revokes only administrator sessions and retains profile and data generation', async () => {
     const state = await fixture();
-    const privateBefore = await binding.prepare("SELECT * FROM account_private WHERE account_id = 'admin'").first();
+    const privateBefore = await binding.prepare("SELECT id, nickname, name, department, major, grade FROM accounts WHERE id = 'admin'").first();
     const first = await addSession('admin'), second = await addSession('admin'), member = await addSession('member');
     for (const key of ['admin-login', 'password:admin', 'member:T-001', 'ip:local']) {
         await binding.prepare('INSERT INTO login_attempts VALUES (?, 99, unixepoch() + 900)').bind(await digest(key)).run();
     }
     const result = await resetAdministratorPassword(binding, nextPassword, state);
     assert.equal((await administratorState(binding)).version, 2);
-    assert.equal(await binding.prepare("SELECT revision FROM accounts WHERE id = 'admin'").first('revision'), 2);
-    assert.deepEqual(await binding.prepare("SELECT * FROM account_private WHERE account_id = 'admin'").first(), privateBefore);
+    assert.equal(await binding.prepare("SELECT data_generation FROM accounts WHERE id = 'admin'").first('data_generation'), 1);
+    assert.deepEqual(await binding.prepare("SELECT id, nickname, name, department, major, grade FROM accounts WHERE id = 'admin'").first(), privateBefore);
     assert.equal(await count('sessions', 'admin'), 0);
     for (const request of [first, second]) assert.equal((await authenticated(request)).status, 401);
     assert.equal((await authenticated(member)).status, 200);
@@ -138,10 +135,10 @@ test('an old-password login paused before session insertion cannot survive exter
     assert.equal(await count('sessions', 'admin'), 0);
 });
 
-test('failed password write rolls back the audit, revocation and revision together', async () => {
+test('failed password write rolls back the audit, revocation and credential version together', async () => {
     const state = await fixture();
     const session = await addSession('admin');
-    await binding.exec("CREATE TRIGGER reject_maintenance BEFORE UPDATE ON credentials BEGIN SELECT RAISE(ABORT, 'test failure'); END;");
+    await binding.exec("CREATE TRIGGER reject_maintenance BEFORE UPDATE ON accounts BEGIN SELECT RAISE(ABORT, 'test failure'); END;");
     try { await assert.rejects(resetAdministratorPassword(binding, nextPassword, state), /test failure/); }
     finally { await binding.exec('DROP TRIGGER reject_maintenance;'); }
     assert.equal((await administratorState(binding)).version, 1);
@@ -152,7 +149,7 @@ test('failed password write rolls back the audit, revocation and revision togeth
 test('external reset rejects missing, disabled and non-administrator targets and invalid passwords', async () => {
     await assert.rejects(resetAdministratorPassword(binding, nextPassword, { id: 'missing', version: 1 }), (error) => error.code === 'ADMIN_CHANGED');
     const state = await fixture();
-    await assert.rejects(resetAdministratorPassword(binding, 'short', state), (error) => error.code === 'INVALID_PASSWORD');
+    await assert.rejects(resetAdministratorPassword(binding, '', state), (error) => error.code === 'INVALID_PASSWORD');
     await assert.rejects(resetAdministratorPassword(binding, nextPassword, { id: 'member', version: 1 }), (error) => error.code === 'ADMIN_CHANGED');
     await binding.prepare("UPDATE accounts SET status = 'disabled' WHERE id = 'admin'").run();
     await assert.rejects(resetAdministratorPassword(binding, nextPassword, state), (error) => error.code === 'ADMIN_CHANGED');
@@ -220,12 +217,12 @@ test('remote CLI sends parameterized transactions to the exact configured D1 and
     const { fileURLToPath } = await import('node:url');
     const args = ['--remote', '--config', fileURLToPath(targetPath)];
     await runAdministratorCommand(['init', ...args], console.options);
-    assert.ok(requests.some(({ batch }) => batch.length >= 4));
+    assert.ok(requests.some(({ batch }) => batch.length >= 3));
     assert.ok(!console.text.includes(password)); assert.ok(!console.text.includes('fictional-cloudflare-token'));
     const reset = consoleFixture([nextPassword, nextPassword, `RESET ${remoteTarget.databaseId}`]);
     await runAdministratorCommand(['reset', ...args], { ...console.options, prompt: reset.options.prompt, environment: { CLOUDFLARE_API_TOKEN: 'fictional-cloudflare-token' } });
     assert.equal((await administratorState(binding)).version, 2);
-    const saved = await binding.prepare('SELECT password_hash FROM credentials').first('password_hash');
+    const saved = await binding.prepare("SELECT password FROM accounts WHERE role = 'admin'").first('password');
     assert.equal(await verifyPassword(nextPassword, saved), true);
 });
 

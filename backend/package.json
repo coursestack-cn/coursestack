@@ -10,22 +10,31 @@
         "dev": "wrangler dev --env local --local --persist-to .wrangler/state",
         "check": "tsc --noEmit",
         "test": "node --experimental-strip-types --test tests/*.test.mjs",
+        "demo:prepare": "node --experimental-strip-types scripts/prepare-demo.mjs",
         "admin:init:local": "node --experimental-strip-types scripts/init-admin.mjs",
         "admin:init": "node --experimental-strip-types scripts/admin.mjs init",
         "admin:reset": "node --experimental-strip-types scripts/admin.mjs reset",
         "admin:status": "node --experimental-strip-types scripts/admin.mjs status",
         "admin:reset:local": "node --experimental-strip-types scripts/admin.mjs reset --local",
-        "avatars:cleanup:local": "node --experimental-strip-types scripts/cleanup-local-avatars.mjs",
+        "db:generate": "drizzle-kit generate",
+        "db:diagram": "drizzle-lab visualizer --config ./drizzle.config.ts --save-dir ./.local/schema-diagram --project-id coursestack --port 64738",
+        "db:check": "drizzle-kit check && node --experimental-strip-types scripts/check-migrations.mjs",
         "db:setup:local": "pnpm db:migrate:local && pnpm db:seed:local",
         "db:migrate:local": "wrangler d1 migrations apply DB --env local --local --persist-to .wrangler/state",
-        "db:seed:local": "wrangler d1 execute DB --env local --local --persist-to .wrangler/state --file seed/local.sql"
+        "db:seed:local": "wrangler d1 execute DB --env local --local --persist-to .wrangler/state --file seed/local.sql",
+        "openapi:check": "node --experimental-strip-types scripts/check-openapi.mjs",
+        "openapi:export": "node --experimental-strip-types scripts/check-openapi.mjs --export"
     },
     "dependencies": {
         "bcryptjs": "3.0.3",
-        "drizzle-orm": "0.45.4"
+        "drizzle-orm": "0.45.4",
+        "hono": "4.13.13",
+        "zod": "4.6.7"
     },
     "devDependencies": {
         "@cloudflare/workers-types": "5.20261021.1",
+        "drizzle-kit": "0.31.11",
+        "drizzle-lab": "0.11.0",
         "miniflare": "5.20261019.1-beta",
         "typescript": "7.0.2",
         "wrangler": "4.151.3"

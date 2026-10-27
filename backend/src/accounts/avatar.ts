@@ -4,19 +4,16 @@ import { requireSession } from '../auth/service.ts';
 import { mutateAccount } from './mutations.ts';
 import { accountDetail } from './service.ts';
 
-async function removeUnusedAvatar(env: Env, key: string) {
-    if (await env.DB.prepare('SELECT 1 FROM accounts WHERE avatar_key = ?').bind(key).first()) return;
-    await env.FILES.delete(key);
-    await env.DB.prepare('DELETE FROM avatar_objects WHERE object_key = ?').bind(key).run();
-}
-
-/** Delayed reconciliation also covers interrupted uploads and failed R2 deletes. */
-export async function cleanupAvatars(env: Env) {
-    const rows = await env.DB.prepare(`SELECT object_key FROM avatar_objects
-        WHERE created_at < unixepoch() - 3600 AND NOT EXISTS (SELECT 1 FROM accounts WHERE avatar_key = object_key)
-        LIMIT 100`).all<{ object_key: string }>();
-    for (const row of rows.results) await removeUnusedAvatar(env, row.object_key);
-    return rows.results.length;
+export async function removeUnusedAvatar(env: Env, key: string) {
+    for (let attempt = 0; attempt < 3; attempt++) {
+        try {
+            if (await env.DB.prepare('SELECT 1 FROM accounts WHERE avatar_key = ?').bind(key).first()) return;
+            await env.FILES.delete(key);
+            return;
+        } catch {
+            if (attempt === 2) console.warn('Avatar cleanup failed after three attempts.');
+        }
+    }
 }
 
 function imageType(bytes: Uint8Array): string {
@@ -45,7 +42,7 @@ async function imageBody(request: Request) {
     return bytes;
 }
 
-export async function avatarRoutes(request: Request, env: Env): Promise<Response | null> {
+export async function avatarRoutes(request: Request, env: Env, waitUntil?: (work: Promise<unknown>) => void): Promise<Response | null> {
     const path = new URL(request.url).pathname;
     const publicAvatar = path.match(/^\/api\/profiles\/([^/]+)\/avatar$/);
     if (!publicAvatar && path !== '/api/me/avatar') return null;
@@ -63,31 +60,29 @@ export async function avatarRoutes(request: Request, env: Env): Promise<Response
     }
     requireSameOrigin(request);
     const session = await requireSession(env.DB, request);
-    const rawRevision = request.headers.get('if-match')?.match(/^"([1-9][0-9]*)"$/)?.[1];
-    if (!rawRevision || !Number.isSafeInteger(Number(rawRevision))) throw new HttpError(428, 'REVISION_REQUIRED', 'If-Match 需要带引号的账号 revision');
-    const current = await env.DB.prepare('SELECT avatar_key, revision FROM accounts WHERE id = ?').bind(session.id).first<{ avatar_key: string | null; revision: number }>();
-    if (!current || current.revision !== Number(rawRevision)) throw new HttpError(409, 'ACCOUNT_CHANGED', '账号已变化，请刷新后重试');
-    let key: string | null = null;
-    if (request.method === 'PUT') {
-        const bytes = await imageBody(request);
-        const contentType = imageType(bytes);
-        if (request.headers.get('content-type')?.split(';')[0] !== contentType) throw new HttpError(415, 'AVATAR_TYPE_MISMATCH', '头像内容与类型不符');
-        key = `avatars/${session.id}/${crypto.randomUUID()}`;
-        await env.DB.prepare('INSERT INTO avatar_objects (object_key) VALUES (?)').bind(key).run();
-        await env.FILES.put(key, bytes, { httpMetadata: { contentType } });
-    }
-    try {
-        await mutateAccount(env.DB, session, session.id, Number(rawRevision), 'profile.avatar', ['avatar'], false,
-            (gate) => [env.DB.prepare(`UPDATE accounts SET avatar_key = ? WHERE id = ? AND ${gate}`).bind(key, session.id)]);
-    } catch (error) {
-        if (key) {
-            try { await removeUnusedAvatar(env, key); } catch { /* Durable registry retains cleanup work. */ }
+    const work = (async () => {
+        let key: string | null = null;
+        try {
+            if (request.method === 'PUT') {
+                const bytes = await imageBody(request), contentType = imageType(bytes);
+                if (request.headers.get('content-type')?.split(';')[0] !== contentType) throw new HttpError(415, 'AVATAR_TYPE_MISMATCH', '头像内容与类型不符');
+                key = `avatars/${session.id}/${crypto.randomUUID()}`;
+                await env.FILES.put(key, bytes, { httpMetadata: { contentType } });
+            }
+            const result = await mutateAccount(env.DB, session, session.id, 'profile.avatar', ['avatar'], false, gate => [
+                env.DB.prepare(`SELECT avatar_key FROM accounts WHERE id = ? AND ${gate}`).bind(session.id),
+                env.DB.prepare(`UPDATE accounts SET avatar_key = ? WHERE id = ? AND ${gate}`).bind(key, session.id),
+            ]);
+            // Read the displaced key in the same transaction as the replacement:
+            // concurrent uploads clean up the actual preceding avatar, not a stale one.
+            const previous = (result[1].results[0] as { avatar_key: string | null } | undefined)?.avatar_key;
+            if (previous) await removeUnusedAvatar(env, previous);
+        } catch (error) {
+            if (key) await removeUnusedAvatar(env, key);
+            throw error;
         }
-        throw error;
-    }
-    // The public route resolves only the current database key; old objects are never public.
-    if (current.avatar_key) {
-        try { await removeUnusedAvatar(env, current.avatar_key); } catch { /* Cleanup failure must not misreport a committed profile update. */ }
-    }
-    return json({ data: await accountDetail(env.DB, session.id) });
+        return json({ data: await accountDetail(env.DB, session.id) });
+    })();
+    waitUntil?.(work.then(() => undefined, () => undefined));
+    return work;
 }

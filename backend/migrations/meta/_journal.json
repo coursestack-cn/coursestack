@@ -1,0 +1,90 @@
+{
+  "version": "7",
+  "dialect": "sqlite",
+  "entries": [
+    {
+      "idx": 1,
+      "version": "6",
+      "when": 1793018520297,
+      "tag": "0001_identity_and_membership",
+      "breakpoints": true
+    },
+    {
+      "idx": 2,
+      "version": "6",
+      "when": 1793018520298,
+      "tag": "0002_credentials_and_sessions",
+      "breakpoints": true
+    },
+    {
+      "idx": 3,
+      "version": "6",
+      "when": 1793018520299,
+      "tag": "0003_account_management",
+      "breakpoints": true
+    },
+    {
+      "idx": 4,
+      "version": "6",
+      "when": 1793018520300,
+      "tag": "0004_remove_email_recovery",
+      "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1793018688201,
+      "tag": "0005_align_unique_indexes",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1793036614225,
+      "tag": "0006_single_account_role",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1793036701277,
+      "tag": "0007_discussions",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1793036712666,
+      "tag": "0008_discussion_rules",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1793039722930,
+      "tag": "0009_password_change_requirement",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1793079593350,
+      "tag": "0010_consolidate_accounts",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1793107103035,
+      "tag": "0011_merge_material_contents",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1793109317020,
+      "tag": "0012_simplify_academics_and_content_metadata",
+      "breakpoints": true
+    }
+  ]
+}

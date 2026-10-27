@@ -51,7 +51,7 @@ The workflow must be merged into the default branch (`main`) before GitHub expos
 - To deploy manually, open **Actions > Deploy Workers > Run workflow**, select branch `main`, then choose `dev` or `production` in the `environment` dropdown. The default is `dev`. A production run then waits for a required reviewer.
 - Runs on other branches are skipped because remote migrations must already be merged into `main`. The environments' branch rules enforce the same limit on GitHub's side.
 
-Each run installs the locked dependencies, checks backend types, runs backend tests, and checks/builds the frontend. Only after those steps pass does it apply pending D1 migrations and deploy the Worker with the frontend assets using an explicit `--env`. It then checks `/api/health` for the expected environment and database status, requests `/`, and records the commit and URL in the run summary.
+Each run installs the locked dependencies, checks backend types and schema/migration consistency (`pnpm db:check`), runs backend tests, and checks/builds the frontend. Migration generation and review happen before merge; see the [backend migration workflow](../backend/README.md#数据库结构与迁移). Only after those steps pass does it apply pending D1 migrations and deploy the Worker with the frontend assets using an explicit `--env`. It then checks `/api/health` for the expected environment and database status, requests `/`, and records the commit and URL in the run summary.
 
 Migration and deployment jobs are serialized per environment. A new push does not cancel an active deployment; GitHub keeps at most one pending run per concurrency group and replaces an older pending run with a newer one. Dev and production have separate groups.
 

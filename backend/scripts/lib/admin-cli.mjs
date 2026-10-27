@@ -84,7 +84,7 @@ export async function runAdministratorCommand(args, {
         if (options.action === 'reset' && state?.version == null) throw new HttpError(409, 'ADMIN_NOT_INITIALIZED', '管理员尚未初始化，请使用 admin:init');
         const password = passwordField(await prompt('新管理员密码（不回显）：', true));
         if (password !== await prompt('再次输入密码（不回显）：', true)) throw new HttpError(400, 'MISMATCH', '两次密码不一致，未执行写入');
-        if (options.action === 'reset') output.write('重置将撤销该管理员所有会话，保留账号、邮箱及其他资料。\n');
+        if (options.action === 'reset') output.write('重置将撤销该管理员所有会话，保留账号、个人资料及业务数据。\n');
         const confirmation = `${options.action.toUpperCase()} ${target?.databaseId ?? 'local'}`;
         if (await prompt(`输入 ${confirmation} 确认：`, false) !== confirmation) throw new HttpError(400, 'CANCELLED', '确认不匹配，未执行写入');
         const result = options.action === 'init'
