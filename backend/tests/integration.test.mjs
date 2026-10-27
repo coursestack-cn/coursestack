@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { start, internalToken, tokenFor, doc, linkDoc } from './discussions-helpers.mjs';
+import { start, internalToken, doc, linkDoc } from './discussions-helpers.mjs';
 let h;
 beforeEach(async () => { h = await start(); });
 afterEach(async () => { await h?.dispose(); });

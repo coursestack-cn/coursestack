@@ -71,7 +71,7 @@
 ```ts
 if (!isAborted(error)) {
     toast.error(userMessage(error, {
-        CONTENT_CHANGED: "内容已被修改，刷新后重试。",
+        STATE_CONFLICT: "内容状态已变化，刷新后重试。",
         429: "尝试次数过多，稍后再试。",
         default: "保存失败，稍后重试。"
     }));
