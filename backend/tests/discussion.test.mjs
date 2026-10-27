@@ -147,6 +147,8 @@ test('删除评论清空正文并保留关联占位与回复，删除内容不�
     const parent = await h.api('POST', '/comments', 'student-a', { targetKind: 'question', targetId: q, body: doc('原评论') });
     const child = await h.api('POST', '/comments', 'student-b', { targetKind: 'comment', targetId: parent.data.id, body: doc('保留回复') });
     const lonely = await h.api('POST', '/comments', 'student-a', { targetKind: 'question', targetId: q, body: doc('无回复评论') });
+    // Comments created in the same second would otherwise fall back to random ID order.
+    await h.database.prepare('UPDATE contents SET created_at=created_at-60 WHERE id=?').bind(parent.data.id).run();
     for (const id of [parent.data.id, lonely.data.id]) assert.equal((await h.api('DELETE', `/contents/${id}`, 'student-a', { })).status, 200);
     const list = await h.api('GET', `/comments?targetKind=question&targetId=${q}`);
     assert.deepEqual(list.data.items.map(x => [x.id, x.status ?? 'visible']), [[parent.data.id, 'deleted'], [child.data.id, 'visible']]);
