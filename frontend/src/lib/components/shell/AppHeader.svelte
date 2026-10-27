@@ -109,7 +109,7 @@
                 <Menu items={userItems}>
                     {#snippet trigger(props)}
                         <Button {...props} variant="ghost" class="shell-user-trigger" aria-label={`${session.user?.nickname ?? "未设置昵称"}的用户菜单`}>
-                            <Avatar name={session.user?.nickname ?? "未设置昵称"} src={`/api/profiles/${encodeURIComponent(session.user?.id ?? "")}/avatar`} size="sm" />
+                            <Avatar name={session.user?.nickname ?? ""} src={`/api/profiles/${encodeURIComponent(session.user?.id ?? "")}/avatar`} size="sm" />
                             <span class="user-name">{session.user?.nickname ?? "未设置昵称"}</span><span class="user-chevron"><ChevronDown size="1em" /></span>
                         </Button>
                     {/snippet}
