@@ -81,10 +81,11 @@ test('deletion clears only title, body and tags while preserving relationships, 
     }
     assert.equal(after.status, 'deleted'); assert.equal(after.updated_by, 'student-a');
     assert.ok(after.updated_at >= before.updated_at);
-    assert.equal((await h.api('GET', `/questions/${q}/answers`)).data.items[0].id, answer);
+    assert.equal(await h.database.prepare('SELECT target_id FROM contents WHERE id=?').bind(answer).first('target_id'), q);
+    assert.equal((await h.api('GET', `/questions/${q}/answers`)).status, 404);
     assert.equal((await h.api('GET', `/moderation/contents/${q}`, 'teacher-a')).data.body, null);
     const repeated = await h.api('POST', '/courses/course-a/questions', 'student-a', payload, options);
     assert.equal(repeated.data.id, q);
-    assert.equal((await h.api('GET', `/questions/${q}`)).data.status, 'deleted');
+    assert.equal((await h.api('GET', `/questions/${q}`)).status, 404);
     await assert.rejects(h.database.prepare('UPDATE contents SET body=? WHERE id=?').bind(JSON.stringify(doc('不能恢复')), q).run(), /contents_deleted_payload/);
 });

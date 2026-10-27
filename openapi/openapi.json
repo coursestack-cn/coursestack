@@ -1684,7 +1684,7 @@
     },
     "/api/questions/{id}": {
       "get": {
-        "summary": "问题详情；已删除问题返回关联占位",
+        "summary": "问题详情；已删除或下架的问题返回 404",
         "operationId": "get__api_questions_id_",
         "security": [
           {},
@@ -1714,14 +1714,7 @@
                   "type": "object",
                   "properties": {
                     "data": {
-                      "oneOf": [
-                        {
-                          "$ref": "#/components/schemas/Content"
-                        },
-                        {
-                          "$ref": "#/components/schemas/Tombstone"
-                        }
-                      ]
+                      "$ref": "#/components/schemas/Content"
                     }
                   },
                   "required": [
@@ -2169,7 +2162,7 @@
     },
     "/api/comments": {
       "get": {
-        "summary": "资料、问题、回答下的评论与回复",
+        "summary": "资料、问题、回答下的评论与回复，平铺排列；已删除评论仅在仍有可见回复时以占位出现",
         "operationId": "get__api_comments",
         "security": [
           {},
@@ -2247,7 +2240,41 @@
                   "type": "object",
                   "properties": {
                     "data": {
-                      "$ref": "#/components/schemas/ContentPage"
+                      "type": "object",
+                      "properties": {
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "oneOf": [
+                              {
+                                "$ref": "#/components/schemas/Content"
+                              },
+                              {
+                                "$ref": "#/components/schemas/Tombstone"
+                              }
+                            ]
+                          }
+                        },
+                        "page": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "pageSize": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "total": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "required": [
+                        "items",
+                        "page",
+                        "pageSize",
+                        "total"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "required": [
@@ -2543,7 +2570,7 @@
     },
     "/api/contents/{id}": {
       "get": {
-        "summary": "内容详情；已删除内容仅返回占位信息",
+        "summary": "内容详情；已删除评论返回占位，已删除的问题、资料、回答及其下内容返回 404",
         "operationId": "get__api_contents_id_",
         "security": [
           {},
@@ -2877,7 +2904,7 @@
         }
       },
       "delete": {
-        "summary": "清空正文并保留关联占位；相关采纳及加分在同一事务撤回",
+        "summary": "清空标题、正文和标签。评论保留占位及回复；问题、资料、回答连同其下内容不再公开。相关采纳及该内容的积分在同一事务撤回",
         "operationId": "delete__api_contents_id_",
         "security": [
           {
@@ -6873,12 +6900,12 @@
                 "type": "null"
               }
             ],
-            "description": "回答和评论的直接父内容摘要；问题和资料为 null。删除父内容后仍保留摘要。"
+            "description": "回答和评论的直接父内容摘要；问题和资料为 null。父评论删除后仍保留摘要。"
           },
           "commentCount": {
             "type": "integer",
             "minimum": 0,
-            "description": "与该内容的评论列表 total 一致，包含各层可见评论和回复；不含回答下另设的评论区，不计已删除占位和下架分支。"
+            "description": "各层可见评论和回复的数量；不含回答下另设的评论区，不计删除占位和下架分支。评论列表的 total 另包含仍有可见回复的删除占位。"
           },
           "answerCount": {
             "type": "integer",
@@ -6926,13 +6953,7 @@
             "pattern": "^[a-zA-Z0-9_-]+$"
           },
           "kind": {
-            "type": "string",
-            "enum": [
-              "material",
-              "question",
-              "answer",
-              "comment"
-            ]
+            "const": "comment"
           },
           "courseId": {
             "type": "string",
@@ -6941,33 +6962,19 @@
             "pattern": "^[a-zA-Z0-9_-]+$"
           },
           "targetKind": {
-            "anyOf": [
-              {
-                "type": "string",
-                "enum": [
-                  "material",
-                  "question",
-                  "answer",
-                  "comment"
-                ]
-              },
-              {
-                "type": "null"
-              }
+            "type": "string",
+            "enum": [
+              "material",
+              "question",
+              "answer",
+              "comment"
             ]
           },
           "targetId": {
-            "anyOf": [
-              {
-                "type": "string",
-                "minLength": 1,
-                "maxLength": 100,
-                "pattern": "^[a-zA-Z0-9_-]+$"
-              },
-              {
-                "type": "null"
-              }
-            ]
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "pattern": "^[a-zA-Z0-9_-]+$"
           },
           "status": {
             "const": "deleted"
@@ -6991,17 +6998,12 @@
                 "type": "null"
               }
             ],
-            "description": "回答和评论的直接父内容摘要；问题和资料为 null。删除父内容后仍保留摘要。"
+            "description": "回答和评论的直接父内容摘要；问题和资料为 null。父评论删除后仍保留摘要。"
           },
           "commentCount": {
             "type": "integer",
             "minimum": 0,
-            "description": "与该内容的评论列表 total 一致，包含各层可见评论和回复；不含回答下另设的评论区，不计已删除占位和下架分支。"
-          },
-          "answerCount": {
-            "type": "integer",
-            "minimum": 0,
-            "description": "仅问题返回；与问题的公开回答列表 total 一致。"
+            "description": "各层可见评论和回复的数量；不含回答下另设的评论区，不计删除占位和下架分支。评论列表的 total 另包含仍有可见回复的删除占位。"
           }
         },
         "required": [
@@ -7016,26 +7018,7 @@
           "replyTo",
           "commentCount"
         ],
-        "additionalProperties": false,
-        "allOf": [
-          {
-            "if": {
-              "properties": {
-                "kind": {
-                  "const": "question"
-                }
-              },
-              "required": [
-                "kind"
-              ]
-            },
-            "then": {
-              "required": [
-                "answerCount"
-              ]
-            }
-          }
-        ]
+        "additionalProperties": false
       },
       "ContentPage": {
         "type": "object",

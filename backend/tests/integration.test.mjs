@@ -68,7 +68,7 @@ test('删除问题撤销奖励并阻止后续回答，管理员可以跨课程�
     assert.equal((await h.api('DELETE', `/contents/${q}`, 'student-a', { })).status, 200);
     assert.equal((await h.api('POST', `/questions/${q}/answers`, 'student-b', { body: doc('删除后回复') })).status, 404);
     assert.equal(await h.database.prepare('SELECT SUM(delta_points) AS n FROM bonus_ledger').first('n'), 0);
-    assert.equal((await h.api('GET', `/contents/${q}`)).data.status, 'deleted');
+    for (const id of [q, a]) assert.equal((await h.api('GET', `/contents/${id}`)).status, 404);
 });
 test('数据库拒绝跨问题采纳及内容身份迁移', async () => {
     const q1 = await h.postQuestion(), q2 = await h.postQuestion(), a = await h.postAnswer(q1);

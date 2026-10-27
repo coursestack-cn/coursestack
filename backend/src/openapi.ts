@@ -20,6 +20,7 @@ const q = (name: string, schema: Schema = { type: 'string' }, required = false) 
 const enumeration = (...values: string[]): Schema => ({ type: 'string', enum: values });
 const pagination = [q('page', { type: 'integer', minimum: 1, maximum: 10000, default: 1 }),
     q('pageSize', { type: 'integer', minimum: 1, maximum: 50, default: 20 })];
+const paged = (item: Schema): Schema => object({ items: { type: 'array', items: item }, page: positiveInteger, pageSize: positiveInteger, total: { type: 'integer', minimum: 0 } });
 type Definition = { method: string; path: string; summary: string; auth?: 'optional' | 'session' | 'internal';
     request?: Schema; create?: boolean; parameters?: unknown[]; response?: Schema };
 const defs: Definition[] = [
@@ -33,15 +34,16 @@ const defs: Definition[] = [
     { method: 'get', path: '/courses/{id}/questions', summary: '问题分页、未解决、活跃和标签筛选', response: ref('ContentPage'), parameters: [...pagination,
         q('state', enumeration('all', 'unresolved', 'solved')), q('sort', enumeration('newest', 'active', 'score')), q('tag')] },
     { method: 'post', path: '/courses/{id}/questions', summary: '发布问题，资料引用使用 ProseMirror JSON 正文中的链接', auth: 'session', create: true, request: object(qFields, ['title', 'body']) },
-    { method: 'get', path: '/questions/{id}', summary: '问题详情；已删除问题返回关联占位', response: { oneOf: [ref('Content'), ref('Tombstone')] } },
+    { method: 'get', path: '/questions/{id}', summary: '问题详情；已删除或下架的问题返回 404', response: ref('Content') },
     { method: 'get', path: '/questions/{id}/answers', summary: '采纳置顶，其余净赞数降序，时间及ID稳定排序', response: ref('ContentPage'), parameters: pagination },
     { method: 'post', path: '/questions/{id}/answers', summary: '发布回答', auth: 'session', create: true, request: object({ body }) },
-    { method: 'get', path: '/comments', summary: '资料、问题、回答下的评论与回复', response: ref('ContentPage'), parameters: [...pagination, q('targetKind', enumeration('material', 'question', 'answer', 'comment'), true), q('targetId', id, true), q('sort', enumeration('oldest', 'score'))] },
+    { method: 'get', path: '/comments', summary: '资料、问题、回答下的评论与回复，平铺排列；已删除评论仅在仍有可见回复时以占位出现',
+        response: paged({ oneOf: [ref('Content'), ref('Tombstone')] }), parameters: [...pagination, q('targetKind', enumeration('material', 'question', 'answer', 'comment'), true), q('targetId', id, true), q('sort', enumeration('oldest', 'score'))] },
     { method: 'post', path: '/comments', summary: '发布评论或回复评论；target 指向直接父内容', auth: 'session', create: true,
         request: object({ targetKind: enumeration('material', 'question', 'answer', 'comment'), targetId: id, body }, ['targetKind', 'targetId', 'body']) },
-    { method: 'get', path: '/contents/{id}', summary: '内容详情；已删除内容仅返回占位信息', response: { oneOf: [ref('Content'), ref('Tombstone')] } },
+    { method: 'get', path: '/contents/{id}', summary: '内容详情；已删除评论返回占位，已删除的问题、资料、回答及其下内容返回 404', response: { oneOf: [ref('Content'), ref('Tombstone')] } },
     { method: 'patch', path: '/contents/{id}', summary: '编辑内容；仅标题、正文或标签实际变化时更新 editedAt，按最终写入顺序生效，省略字段保持原值', auth: 'session', request: { anyOf: [object(qFields, []), object({ body })] }, response: ref('Content') },
-    { method: 'delete', path: '/contents/{id}', summary: '清空正文并保留关联占位；相关采纳及加分在同一事务撤回', auth: 'session' },
+    { method: 'delete', path: '/contents/{id}', summary: '清空标题、正文和标签。评论保留占位及回复；问题、资料、回答连同其下内容不再公开。相关采纳及该内容的积分在同一事务撤回', auth: 'session' },
     { method: 'put', path: '/contents/{id}/vote', summary: '问题、回答、评论设置赞踩：1赞、-1踩、0撤销；禁止自投', auth: 'session', request: object({ value: { type: 'integer', enum: [-1, 0, 1] } }) },
     { method: 'put', path: '/questions/{id}/acceptance', summary: '当期课程教师或管理员采纳、更换或取消；answerId=null 取消', auth: 'session', request: object({ answerId: { anyOf: [id, { type: 'null' }] } }) },
     { method: 'post', path: '/courses/{id}/bonus-adjustments', summary: '当前课程教师或管理员为指定课程、学期、学生手动加减整数分', auth: 'session', create: true,
@@ -67,12 +69,11 @@ const bool: Schema = { type: 'boolean' };
 const integer: Schema = { type: 'integer' };
 const contentMetadata = {
     editedAt: { type: ['integer', 'null'], description: 'Unix 秒；null 表示从未编辑。仅内容 PATCH 实际改变标题、正文或标签时更新；前端仅以是否为 null 判断已编辑。' },
-    replyTo: { anyOf: [ref('ReplyTo'), { type: 'null' }], description: '回答和评论的直接父内容摘要；问题和资料为 null。删除父内容后仍保留摘要。' },
-    commentCount: { type: 'integer', minimum: 0, description: '与该内容的评论列表 total 一致，包含各层可见评论和回复；不含回答下另设的评论区，不计已删除占位和下架分支。' },
+    replyTo: { anyOf: [ref('ReplyTo'), { type: 'null' }], description: '回答和评论的直接父内容摘要；问题和资料为 null。父评论删除后仍保留摘要。' },
+    commentCount: { type: 'integer', minimum: 0, description: '各层可见评论和回复的数量；不含回答下另设的评论区，不计删除占位和下架分支。评论列表的 total 另包含仍有可见回复的删除占位。' },
 };
 const answerCount: Schema = { type: 'integer', minimum: 0, description: '仅问题返回；与问题的公开回答列表 total 一致。' };
 const questionCounts = { if: { properties: { kind: { const: 'question' } }, required: ['kind'] }, then: { required: ['answerCount'] } };
-const paged = (item: Schema): Schema => object({ items: { type: 'array', items: item }, page: positiveInteger, pageSize: positiveInteger, total: { type: 'integer', minimum: 0 } });
 const ledger = object({ id: positiveInteger, courseId: id,
     studentId: id, termId: id, deltaPoints: signedPoints, sourceKind: enumeration('question','answer','acceptance','comment','material','manual'),
     sourceId: { ...str(160), description: '内容 ID、采纳答案 ID、materialId@version 或手动调整幂等键' }, operatorId: id,
@@ -151,9 +152,8 @@ export const openapi = {
                     title: { type: ['string', 'null'] }, body: nullableBody, format: { const: 'prosemirror' }, tags,
                     targetKind: nullableKind, targetId: nullableId, ...contentMetadata, answerCount, acceptedAnswerId: { type: ['string', 'null'] }, solved: { type: 'boolean' },
                     isAccepted: { type: 'boolean' }, score: { type: 'integer' }, myVote: { type: 'integer', enum: [-1, 0, 1] }, createdAt: { type: 'integer' }, updatedAt: { type: 'integer' } } },
-            Tombstone: { ...object({ id, kind: enumeration('material', 'question', 'answer', 'comment'), courseId: id, targetKind: nullableKind, targetId: nullableId,
-                status: { const: 'deleted' }, body: { type: 'null' }, ...contentMetadata, answerCount },
-                ['id', 'kind', 'courseId', 'targetKind', 'targetId', 'status', 'body', ...Object.keys(contentMetadata)]), allOf: [questionCounts] },
+            Tombstone: object({ id, kind: { const: 'comment' }, courseId: id, targetKind: enumeration('material', 'question', 'answer', 'comment'), targetId: id,
+                status: { const: 'deleted' }, body: { type: 'null' }, ...contentMetadata }),
             ContentPage: object({ items: { type: 'array', items: ref('Content') }, page: positiveInteger, pageSize: positiveInteger, total: { type: 'integer', minimum: 0 } }),
             CoursePage: object({ items: { type: 'array', items: ref('Course') }, page: positiveInteger, pageSize: positiveInteger, total: { type: 'integer', minimum: 0 } }),
         },

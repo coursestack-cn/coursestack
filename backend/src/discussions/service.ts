@@ -16,7 +16,7 @@ export async function visibleContent(c: Ctx, id: string, kind?: ContentRow['kind
     if (!row || (kind && row.kind !== kind)) throw new HttpError(404, 'CONTENT_UNAVAILABLE', '内容不存在或不可用');
     return row;
 }
-// Deleted parents keep their place in a thread; hidden ancestors block the entire branch.
+// Deleted comments keep their place in a thread; other deleted or hidden ancestors block the entire branch.
 export async function accessibleContent(c: Ctx, id: string, kind?: ContentRow['kind']) {
     const row = await createDatabase(c.env.DB).get<ContentRow>(sql`SELECT c.*,a.answer_id AS acceptedAnswerId FROM accessible_contents c LEFT JOIN acceptances a ON a.question_id=c.id WHERE c.id=${id}`);
     if (!row || (kind && row.kind !== kind)) throw new HttpError(404, 'CONTENT_UNAVAILABLE', '内容不存在或不可用');
@@ -25,6 +25,9 @@ export async function accessibleContent(c: Ctx, id: string, kind?: ContentRow['k
 export async function tombstone(c: Ctx, id: string) {
     const row = await createDatabase(c.env.DB).get<PublicRow>(sql`${publicSelect(c, true)} WHERE c.id=${id} AND c.status='deleted'`);
     if (!row) throw new HttpError(404, 'CONTENT_UNAVAILABLE', '内容不存在或不可用');
+    return tombstoneDto(row);
+}
+export function tombstoneDto(row: PublicRow) {
     return { id: row.id, kind: row.kind, courseId: row.course_id, targetKind: row.target_kind,
         targetId: row.target_id, status: 'deleted', body: null, ...contentMetadata(row) };
 }

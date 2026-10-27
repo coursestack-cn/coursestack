@@ -146,9 +146,12 @@ test('删除评论清空正文并保留关联占位与回复，删除内容不�
     const q = await h.postQuestion();
     const parent = await h.api('POST', '/comments', 'student-a', { targetKind: 'question', targetId: q, body: doc('原评论') });
     const child = await h.api('POST', '/comments', 'student-b', { targetKind: 'comment', targetId: parent.data.id, body: doc('保留回复') });
-    assert.equal((await h.api('DELETE', `/contents/${parent.data.id}`, 'student-a', { })).status, 200);
+    const lonely = await h.api('POST', '/comments', 'student-a', { targetKind: 'question', targetId: q, body: doc('无回复评论') });
+    for (const id of [parent.data.id, lonely.data.id]) assert.equal((await h.api('DELETE', `/contents/${id}`, 'student-a', { })).status, 200);
     const list = await h.api('GET', `/comments?targetKind=question&targetId=${q}`);
-    assert.deepEqual(list.data.items.map((x     ) => x.id), [child.data.id]);
+    assert.deepEqual(list.data.items.map(x => [x.id, x.status ?? 'visible']), [[parent.data.id, 'deleted'], [child.data.id, 'visible']]);
+    assert.equal(list.data.total, 2); assert.equal(list.data.items[0].body, null); assert.equal('author' in list.data.items[0], false);
+    assert.equal((await h.api('GET', `/contents/${lonely.data.id}`)).data.status, 'deleted');
     assert.equal((await h.api('GET', `/contents/${parent.data.id}`)).data.body, null);
     assert.equal(await h.database.prepare('SELECT body FROM contents WHERE id=?').bind(parent.data.id).first('body'), null);
     assert.equal((await h.api('PUT', `/contents/${parent.data.id}/moderation`, 'teacher-a', { action: 'restore', reason: '尝试恢复删除' })).status, 409);
@@ -214,20 +217,37 @@ test('资料统一为内容，文件外键拒绝非资料，直接父级拒绝�
     await assert.rejects(() => h.database.prepare("UPDATE contents SET target_kind='material',target_id='material-a' WHERE id=?").bind(answer).run(), /content_identity_immutable/);
 });
 
-test('删除问题或资料清空正文与标题，保留回答、评论及文件关系', async () => {
-    const q = await h.postQuestion('student-a', { tags: ['删除测试'] }), answer = await h.postAnswer(q);
-    for (const id of [q, 'material-a']) {
-        const kind = id === q ? 'question' : 'material';
-        const comment = await h.api('POST', '/comments', 'student-b', { targetKind: kind, targetId: id, body: doc('保留内容') });
-        assert.equal((await h.api('DELETE', `/contents/${id}`, 'student-a', { })).status, 200);
+test('删除问题、资料或回答清空正文与标题，其下内容不再公开但关系与文件保留', async () => {
+    const q = await h.postQuestion('student-a', { tags: ['删除测试'] }), other = await h.postQuestion(), answer = await h.postAnswer(other);
+    for (const [id, kind] of [[q, 'question'], ['material-a', 'material'], [answer, 'answer']]) {
+        const comment = await h.api('POST', '/comments', 'student-b', { targetKind: kind, targetId: id, body: doc('下级内容') });
+        assert.equal((await h.api('DELETE', `/contents/${id}`, id === answer ? 'student-b' : 'student-a', { })).status, 200);
         assert.deepEqual(await h.database.prepare('SELECT title,body,tags FROM contents WHERE id=?').bind(id).first(), { title: null, body: null, tags: null });
-        const list = await h.api('GET', `/comments?targetKind=${kind}&targetId=${id}`);
-        assert.equal(list.status, 200); assert.equal(list.data.items[0].id, comment.data.id);
-        assert.equal((await h.api('POST', '/comments', 'student-b', { targetKind: kind, targetId: id, body: doc('不能回复占位') })).status, 404);
+        for (const path of [`/contents/${id}`, `/contents/${comment.data.id}`, `/comments?targetKind=${kind}&targetId=${id}`]) {
+            assert.equal((await h.api('GET', path)).status, 404, path);
+        }
+        assert.equal(await h.database.prepare('SELECT target_id FROM contents WHERE id=?').bind(comment.data.id).first('target_id'), id);
+        assert.equal((await h.api('POST', '/comments', 'student-b', { targetKind: kind, targetId: id, body: doc('不能回复') })).status, 404);
     }
-    assert.equal((await h.api('GET', `/questions/${q}`)).data.status, 'deleted');
-    assert.equal((await h.api('GET', `/questions/${q}/answers`)).data.items[0].id, answer);
+    assert.equal((await h.api('GET', `/questions/${q}`)).status, 404);
+    assert.equal((await h.api('GET', `/questions/${q}/answers`)).status, 404);
+    assert.equal((await h.api('GET', `/questions/${other}/answers`)).data.total, 0);
     assert.equal(await h.database.prepare("SELECT material_id FROM file_versions WHERE material_id='material-a' AND version=1").first('material_id'), 'material-a');
+});
+
+test('删除父内容不撤回其下回答已得的积分，下架才撤回', async () => {
+    await h.policy({ pointsAnswer: 4 });
+    const q = await h.postQuestion(), answer = await h.postAnswer(q);
+    const points = () => h.database.prepare("SELECT COALESCE(SUM(delta_points),0) AS n FROM bonus_ledger WHERE student_id='student-b'").first('n');
+    assert.equal(await points(), 4);
+    assert.equal((await h.api('DELETE', `/contents/${q}`, 'student-a', { })).status, 200);
+    assert.equal((await h.api('GET', `/contents/${answer}`)).status, 404);
+    assert.equal(await points(), 4);
+    const hidden = await h.postQuestion(), hiddenAnswer = await h.postAnswer(hidden);
+    assert.equal(await points(), 8);
+    assert.equal((await h.api('PUT', `/contents/${hidden}/moderation`, 'teacher-a', { action: 'hide', reason: '下架整个分支' })).status, 200);
+    assert.equal((await h.api('GET', `/contents/${hiddenAnswer}`)).status, 404);
+    assert.equal(await points(), 4);
 });
 
 test('任意层评论下架会隐藏整个分支，恢复后回复与活跃排序恢复', async () => {

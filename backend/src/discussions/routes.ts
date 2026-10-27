@@ -5,7 +5,7 @@ import { HttpError, respond, assertChanged, input, listResult, page, requestIden
 import { activeUser, editPermission } from '../permissions.ts';
 import { actor } from '../auth/middleware.ts';
 import type { AppEnv, Ctx, ContentRow, PublicRow } from '../discussions/types.ts';
-import { accessibleContent, contentDto, publicDetail, publicSelect, requireEditor, tombstone, visibleContent } from '../discussions/service.ts';
+import { accessibleContent, contentDto, publicDetail, publicSelect, requireEditor, tombstone, tombstoneDto, visibleContent } from '../discussions/service.ts';
 import { bodySchema, jsonChanged, type ProseMirrorDocument } from './body.ts';
 import { createDatabase } from '../db/index.ts';
 const now = () => Math.floor(Date.now() / 1000);
@@ -67,11 +67,11 @@ discussionRoutes.post('/courses/:id/questions', async c => {
     c.header('Location', `/api/questions/${id}`); return respond(c, { id }, 201);
 });
 discussionRoutes.get('/questions/:id', async c => {
-    const row = await accessibleContent(c, c.req.param('id'), 'question');
-    return respond(c, row.status === 'deleted' ? await tombstone(c, row.id) : await publicDetail(c, row.id));
+    const row = await visibleContent(c, c.req.param('id'), 'question');
+    return respond(c, await publicDetail(c, row.id));
 });
 discussionRoutes.get('/questions/:id/answers', async c => {
-    const question = await accessibleContent(c, c.req.param('id'), 'question'), p = page(c);
+    const question = await visibleContent(c, c.req.param('id'), 'question'), p = page(c);
     const { rows, total } = await queryPage<PublicRow>(c, p, sql`${publicSelect(c)} WHERE c.kind='answer' AND c.target_kind='question' AND c.target_id=${question.id}
         ORDER BY (c.id=${question.acceptedAnswerId}) DESC,score DESC,c.created_at ASC,c.id ASC`);
     return respond(c, listResult(rows.map(r => ({ ...contentDto(r), isAccepted: r.id === question.acceptedAnswerId })), p, total));
@@ -91,9 +91,14 @@ discussionRoutes.get('/comments', async c => {
     const { rows, total } = await queryPage<PublicRow>(c, p, sql`WITH RECURSIVE thread(id) AS (
         SELECT id FROM accessible_contents WHERE kind='comment' AND target_kind=${kind} AND target_id=${targetId}
         UNION ALL SELECT child.id FROM accessible_contents child JOIN thread parent ON child.target_id=parent.id WHERE child.kind='comment'
-    ) ${publicSelect(c)} WHERE c.id IN (SELECT id FROM thread)
+    ) ${publicSelect(c, true)} WHERE c.id IN (SELECT id FROM thread)
+        AND (c.status='visible' OR EXISTS(WITH RECURSIVE below(id,status) AS (
+            SELECT id,status FROM accessible_contents WHERE target_id=c.id
+            UNION ALL SELECT child.id,child.status FROM accessible_contents child JOIN below parent ON child.target_id=parent.id
+        ) SELECT 1 FROM below WHERE status='visible'))
         ORDER BY ${sort === 'score' ? sql`score DESC,` : sql``}c.created_at ASC,c.id ASC`);
-    return respond(c, listResult(rows.map(contentDto), p, total));
+    // A deleted comment is listed as a placeholder only while some reply below it is still visible.
+    return respond(c, listResult(rows.map(r => r.status === 'deleted' ? tombstoneDto(r) : contentDto(r)), p, total));
 });
 discussionRoutes.post('/comments', async c => {
     actor(c);

@@ -1,21 +1,32 @@
+-- Deleted comments stay as thread placeholders; any other deleted or hidden content closes its branch.
 CREATE VIEW accessible_contents AS
 WITH RECURSIVE reachable(id) AS (
-    SELECT id FROM contents WHERE target_id IS NULL AND status IN ('visible','deleted')
+    SELECT id FROM contents WHERE target_id IS NULL AND status='visible'
     UNION ALL
-    SELECT c.id FROM contents c JOIN reachable p ON c.target_id=p.id WHERE c.status IN ('visible','deleted')
+    SELECT c.id FROM contents c JOIN reachable p ON c.target_id=p.id
+    WHERE c.status='visible' OR (c.status='deleted' AND c.kind='comment')
 )
 SELECT c.* FROM contents c JOIN reachable r ON r.id=c.id;
 --> statement-breakpoint
 CREATE VIEW public_contents AS SELECT * FROM accessible_contents WHERE status='visible';
 --> statement-breakpoint
+-- Rewards follow moderation only: deleting a parent hides its branch but keeps points already earned below it.
+CREATE VIEW rewardable_contents AS
+WITH RECURSIVE unhidden(id) AS (
+    SELECT id FROM contents WHERE target_id IS NULL AND status IN ('visible','deleted')
+    UNION ALL
+    SELECT c.id FROM contents c JOIN unhidden p ON c.target_id=p.id WHERE c.status IN ('visible','deleted')
+)
+SELECT c.* FROM contents c JOIN unhidden u ON u.id=c.id WHERE c.status='visible';
+--> statement-breakpoint
 CREATE VIEW public_acceptances AS
 SELECT a.* FROM acceptances a JOIN public_contents q ON q.id=a.question_id JOIN public_contents answer ON answer.id=a.answer_id;
 --> statement-breakpoint
 CREATE VIEW bonus_sources AS
-SELECT kind AS source_kind,id AS source_id FROM public_contents WHERE kind IN ('question','answer','comment')
+SELECT kind AS source_kind,id AS source_id FROM rewardable_contents WHERE kind IN ('question','answer','comment')
 UNION ALL SELECT 'acceptance',answer_id FROM public_acceptances
 UNION ALL SELECT 'material',f.material_id||'@'||f.version FROM file_versions f
-    JOIN public_contents m ON m.id=f.material_id WHERE f.status='visible';
+    JOIN rewardable_contents m ON m.id=f.material_id WHERE f.status='visible';
 --> statement-breakpoint
 CREATE VIEW bonus_state AS
 SELECT l.* FROM bonus_ledger l WHERE l.source_kind<>'manual'

@@ -37,12 +37,12 @@ test('教师和未正式修读者的回答可以采纳，但不加分', async ()
     const outsider = await h.postAnswer(q, 'visitor'); assert.equal((await h.accept(q, outsider)).status, 200); assert.equal((await balance('teacher-a')).entries, 0);
     assert.equal((await balance('visitor')).entries, 0);
 });
-test('删除被采纳答案自动取消采纳并冲销加分，保留删除占位', async () => {
+test('删除被采纳答案自动取消采纳并冲销加分，回答不再公开', async () => {
     await h.policy(); const q = await h.postQuestion(), a = await h.postAnswer(q); await h.accept(q, a);
     const deleted = await h.api('DELETE', `/contents/${a}`, 'student-b', { });
     assert.equal(deleted.status, 200); assert.equal((await h.api('GET', `/questions/${q}`)).data.solved, false);
     assert.equal((await balance()).total, 0);
-    const tombstone = await h.api('GET', `/contents/${a}`); assert.equal(tombstone.data.body, null); assert.equal(tombstone.data.status, 'deleted');
+    assert.equal((await h.api('GET', `/contents/${a}`)).status, 404);
     assert.equal((await h.api('GET', `/questions/${q}/answers`)).data.items.length, 0);
 });
 test('下架答案撤回分数；恢复可见性恢复采纳和原奖励', async () => {

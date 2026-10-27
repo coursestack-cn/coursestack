@@ -166,10 +166,12 @@ test('votes, acceptance, points, visibility, versions and deletion preserve edit
         await restore(id); await unchanged();
         assert.equal((await detail(id)).editedAt, expected.get(id));
     }
-    for (const id of expected.keys()) {
+    await remove(c); await unchanged();
+    const placeholder = await detail(c);
+    assert.equal(placeholder.status, 'deleted'); assert.equal(placeholder.editedAt, expected.get(c));
+    for (const id of [a, q, 'material-a']) {
         await remove(id); await unchanged();
-        const placeholder = await detail(id);
-        assert.equal(placeholder.status, 'deleted'); assert.equal(placeholder.editedAt, expected.get(id));
+        assert.equal((await h.api('GET', `/contents/${id}`)).status, 404);
     }
 });
 
@@ -181,13 +183,12 @@ test('replyTo distinguishes deleted content from deleted authors and reads curre
     for (const [parent, reply] of pairs) assert.deepEqual((await detail(reply)).replyTo,
         { id: parent, author: { nickname: null, isDeleted: false }, isDeleted: false });
     await h.database.prepare("UPDATE accounts SET nickname='新昵称' WHERE id='student-a'").run();
-    for (const [parent, reply] of pairs) {
-        await remove(parent);
-        assert.deepEqual((await detail(reply)).replyTo, { id: parent, author: { nickname: '新昵称', isDeleted: false }, isDeleted: true });
-    }
+    const commentReply = pairs.find(([parent]) => parent === c)[1];
+    await remove(c);
+    assert.deepEqual((await detail(commentReply)).replyTo, { id: c, author: { nickname: '新昵称', isDeleted: false }, isDeleted: true });
     await h.database.prepare("UPDATE accounts SET status='deleted' WHERE id='student-a'").run();
     for (const [parent, reply] of pairs) {
-        const expected = { id: parent, author: { nickname: '已删除', isDeleted: true }, isDeleted: true };
+        const expected = { id: parent, author: { nickname: '已删除', isDeleted: true }, isDeleted: parent === c };
         assert.deepEqual((await detail(reply)).replyTo, expected);
         const list = await h.api('GET', `/comments?targetKind=${(await detail(parent)).kind}&targetId=${parent}`);
         assert.deepEqual(list.data.items.find(row => row.id === reply).replyTo, expected);
@@ -195,52 +196,59 @@ test('replyTo distinguishes deleted content from deleted authors and reads curre
     const owned = await h.postQuestion('visitor'), reply = await comment(owned);
     await h.database.prepare("UPDATE accounts SET status='deleted' WHERE id='visitor'").run();
     assert.deepEqual((await detail(reply)).replyTo, { id: owned, author: { nickname: '已删除', isDeleted: true }, isDeleted: false });
-    const answerPlaceholder = await detail(a);
-    assert.deepEqual(answerPlaceholder.replyTo, { id: q, author: { nickname: '已删除', isDeleted: true }, isDeleted: true });
+    // Remove the answer before its question; a deleted question already closes the answer's branch.
+    for (const parent of [a, 'material-a', q]) {
+        await remove(parent);
+        assert.equal((await h.api('GET', `/contents/${pairs.find(([id]) => id === parent)[1]}`)).status, 404);
+    }
 });
 
-test('counts match public list totals through nested replies, hidden branches, deleted parents and pagination', async () => {
+test('counts follow visible comments while list totals add placeholders that still have visible replies', async () => {
     const q = await h.postQuestion(), a = await h.postAnswer(q), hiddenAnswer = await h.postAnswer(q), deletedAnswer = await h.postAnswer(q);
     const visible = await comment(q), child = await comment(visible), hidden = await comment(q), hiddenChild = await comment(hidden);
     const deleted = await comment(q), survivor = await comment(deleted), grandchild = await comment(survivor);
     const answerComment = await comment(a), answerReply = await comment(answerComment);
     const materialComment = await comment('material-a'), materialReply = await comment(materialComment);
     const hiddenAnswerComment = await comment(hiddenAnswer), deletedAnswerComment = await comment(deletedAnswer);
-    await hide(hiddenAnswer); const hiddenRevision = await hide(hidden);
+    await hide(hiddenAnswer); await hide(hidden);
     await remove(deletedAnswer); await remove(deleted);
-    const checkComments = async (id, count) => {
+    const checkComments = async (id, count, total = count) => {
         const row = await detail(id), list = await h.api('GET', `/comments?targetKind=${row.kind}&targetId=${id}&pageSize=1`);
-        assert.equal(list.status, 200); assert.equal(row.commentCount, count, id); assert.equal(row.commentCount, list.data.total, id);
-        assert.equal(list.data.items.length, Math.min(count, 1));
+        assert.equal(list.status, 200); assert.equal(row.commentCount, count, id); assert.equal(list.data.total, total, id);
+        assert.equal(list.data.items.length, Math.min(total, 1));
     };
-    await checkComments(q, 4); await checkComments(visible, 1); await checkComments(child, 0);
+    await checkComments(q, 4, 5); await checkComments(visible, 1); await checkComments(child, 0);
     await checkComments(deleted, 2); await checkComments(survivor, 1); await checkComments(grandchild, 0);
     await checkComments(a, 2); await checkComments(answerComment, 1); await checkComments(answerReply, 0);
     await checkComments('material-a', 2); await checkComments(materialComment, 1); await checkComments(materialReply, 0);
-    await checkComments(deletedAnswer, 1); await checkComments(deletedAnswerComment, 0);
     const answers = await h.api('GET', `/questions/${q}/answers?pageSize=1`);
     assert.equal((await detail(q)).answerCount, 1); assert.equal(answers.data.total, 1);
     const listedQuestion = (await h.api('GET', '/courses/course-a/questions')).data.items.find(row => row.id === q);
     assert.equal(listedQuestion.answerCount, 1); assert.equal(listedQuestion.commentCount, 4);
-    for (const id of [hiddenAnswer, hiddenAnswerComment, hidden, hiddenChild]) assert.equal((await h.api('GET', `/contents/${id}`)).status, 404);
-    await restore(hidden, hiddenRevision); await checkComments(q, 6);
-    await remove(hidden); await checkComments(q, 5);
-    await remove(q); await checkComments(q, 5);
-    const placeholder = (await h.api('GET', `/questions/${q}`)).data;
-    assert.equal(placeholder.status, 'deleted'); assert.equal(placeholder.answerCount, 1); assert.equal(placeholder.commentCount, 5);
+    for (const id of [hiddenAnswer, hiddenAnswerComment, hidden, hiddenChild, deletedAnswer, deletedAnswerComment]) {
+        assert.equal((await h.api('GET', `/contents/${id}`)).status, 404);
+    }
+    await restore(hidden); await checkComments(q, 6, 7);
+    await remove(hidden); await checkComments(q, 5, 7);
+    await remove(child); await checkComments(visible, 0); await checkComments(q, 4, 6);
+    await remove(q);
+    for (const path of [`/questions/${q}`, `/comments?targetKind=question&targetId=${q}`, `/comments?targetKind=answer&targetId=${a}`]) {
+        assert.equal((await h.api('GET', path)).status, 404, path);
+    }
     const empty = await h.postQuestion();
     assert.equal((await detail(empty)).answerCount, 0); await checkComments(empty, 0);
 });
 
-test('OpenAPI describes nullable editing time, reply summaries and question-only answer counts', () => {
+test('OpenAPI describes nullable editing time, reply summaries, question-only answer counts and comment placeholders', () => {
     const { Content, Tombstone, ReplyTo } = openapi.components.schemas;
     for (const schema of [Content, Tombstone]) {
         for (const field of ['editedAt', 'replyTo', 'commentCount']) assert.ok(schema.required.includes(field));
         assert.deepEqual(schema.properties.editedAt.type, ['integer', 'null']);
         assert.deepEqual(schema.properties.replyTo.anyOf, [{ $ref: '#/components/schemas/ReplyTo' }, { type: 'null' }]);
-        assert.equal(schema.properties.commentCount.minimum, 0); assert.equal(schema.properties.answerCount.minimum, 0);
-        assert.deepEqual(schema.allOf[0].then.required, ['answerCount']);
+        assert.equal(schema.properties.commentCount.minimum, 0);
     }
+    assert.equal(Content.properties.answerCount.minimum, 0); assert.deepEqual(Content.allOf[0].then.required, ['answerCount']);
+    assert.deepEqual(Tombstone.properties.kind, { const: 'comment' }); assert.equal('answerCount' in Tombstone.properties, false);
     assert.deepEqual(ReplyTo.required, ['id', 'author', 'isDeleted']);
     assert.deepEqual(ReplyTo.properties.author.required, ['nickname', 'isDeleted']);
 });
