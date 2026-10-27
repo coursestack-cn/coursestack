@@ -15,7 +15,7 @@
     import Dialog from "$lib/components/ui/Dialog.svelte";
     import Pagination from "$lib/components/ui/Pagination.svelte";
 
-    type Account = { id: string; nickname: string; schoolNumber: string | null; role: Role;
+    type Account = { id: string; nickname: string | null; schoolNumber: string | null; role: Role;
         status: "active" | "disabled"; mustChangePassword: boolean; name: string | null;
         department: string | null; major: string | null; grade: string | null };
     type AccountList = { items: Account[]; page: number; pageSize: number; total: number };
@@ -93,7 +93,7 @@
         } catch (cause) {
             if (!alive) return;
             resetError = userMessage(cause, {
-                ACCOUNT_RETIRED: "账号身份已变更，请关闭弹窗并重新选择账号。",
+                ACCOUNT_DELETED: "账号身份已变更，请关闭弹窗并重新选择账号。",
                 INVALID_PASSWORD: "密码的 UTF-8 编码不能超过 72 字节。",
                 default: "未能确认重置结果。请先核对账号状态；如需再次重置，请重新打开弹窗。"
             });
@@ -130,11 +130,11 @@
             <div class="table-scroll">
                 <table>
                     <caption class="sr-only">账号列表</caption>
-                    <thead><tr><th>学工号</th><th>公开名称</th><th>身份</th><th>状态</th><th>密码要求</th><th>操作</th></tr></thead>
+                    <thead><tr><th>学工号</th><th>昵称</th><th>身份</th><th>状态</th><th>密码要求</th><th>操作</th></tr></thead>
                     <tbody>
                         {#each result.items as account (account.id)}
                             <tr>
-                                <td>{account.schoolNumber ?? "—"}</td><td>{account.nickname}</td>
+                                <td>{account.schoolNumber ?? "—"}</td><td>{account.nickname ?? "—"}</td>
                                 <td>{roleNames[account.role]}</td>
                                 <td>{account.status === "active" ? "正常" : "已禁用"}</td>
                                 <td>{account.mustChangePassword ? "登录后需改密" : "—"}</td>
@@ -151,7 +151,7 @@
     {/if}
 </PageLayout>
 
-<Dialog bind:open title={completed ? "密码已重置" : "重置密码"} description={selected ? `${selected.schoolNumber} · ${selected.nickname}` : undefined}
+<Dialog bind:open title={completed ? "密码已重置" : "重置密码"} description={selected ? `${selected.schoolNumber} · ${selected.nickname ?? "未设置昵称"}` : undefined}
     dismissible={!pending} onclose={() => { password = generatedPassword = ""; selected = null; }}>
     {#if completed}
         <p>该账号的所有登录会话已注销。{selected?.mustChangePassword ? "用户下次登录后需要立即修改密码。" : "用户可以使用新密码直接登录。"}</p>

@@ -2,7 +2,7 @@ import { api, onUnauthorized, toApiError, type ApiError } from "$lib/api/client"
 import { toast } from "$lib/components/ui/toast.svelte.js";
 
 export type Role = "student" | "teacher" | "admin";
-export type User = { id: string; nickname: string; role: Role; mustChangePassword: boolean };
+export type User = { id: string; nickname: string | null; role: Role; mustChangePassword: boolean };
 export type SessionStatus = "loading" | "authenticated" | "anonymous";
 
 let status = $state<SessionStatus>("loading");
