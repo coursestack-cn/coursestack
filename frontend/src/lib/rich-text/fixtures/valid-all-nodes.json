@@ -1,0 +1,236 @@
+{
+    "type": "doc",
+    "content": [
+        {
+            "type": "heading",
+            "attrs": {
+                "level": 2
+            },
+            "content": [
+                {
+                    "type": "text",
+                    "text": "课程笔记"
+                }
+            ]
+        },
+        {
+            "type": "paragraph",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "加粗",
+                    "marks": [
+                        {
+                            "type": "bold"
+                        }
+                    ]
+                },
+                {
+                    "type": "text",
+                    "text": "、"
+                },
+                {
+                    "type": "text",
+                    "text": "斜体",
+                    "marks": [
+                        {
+                            "type": "italic"
+                        }
+                    ]
+                },
+                {
+                    "type": "text",
+                    "text": "、"
+                },
+                {
+                    "type": "text",
+                    "text": "删除线",
+                    "marks": [
+                        {
+                            "type": "strike"
+                        }
+                    ]
+                },
+                {
+                    "type": "text",
+                    "text": "、"
+                },
+                {
+                    "type": "text",
+                    "text": "行内代码",
+                    "marks": [
+                        {
+                            "type": "code"
+                        }
+                    ]
+                },
+                {
+                    "type": "text",
+                    "text": "。"
+                },
+                {
+                    "type": "text",
+                    "text": "资料页",
+                    "marks": [
+                        {
+                            "type": "link",
+                            "attrs": {
+                                "href": "/materials/example?version=2#preview"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "type": "text",
+                    "text": " / "
+                },
+                {
+                    "type": "text",
+                    "text": "外部资料",
+                    "marks": [
+                        {
+                            "type": "link",
+                            "attrs": {
+                                "href": "https://example.com/course"
+                            }
+                        }
+                    ]
+                },
+                {
+                    "type": "hardBreak"
+                },
+                {
+                    "type": "text",
+                    "text": "欧拉公式："
+                },
+                {
+                    "type": "inlineMath",
+                    "attrs": {
+                        "latex": "e^{i\\pi}+1=0"
+                    }
+                }
+            ]
+        },
+        {
+            "type": "heading",
+            "attrs": {
+                "level": 3
+            },
+            "content": [
+                {
+                    "type": "text",
+                    "text": "列表和引用"
+                }
+            ]
+        },
+        {
+            "type": "bulletList",
+            "content": [
+                {
+                    "type": "listItem",
+                    "content": [
+                        {
+                            "type": "paragraph",
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": "第一点"
+                                }
+                            ]
+                        },
+                        {
+                            "type": "orderedList",
+                            "attrs": {
+                                "start": 2
+                            },
+                            "content": [
+                                {
+                                    "type": "listItem",
+                                    "content": [
+                                        {
+                                            "type": "paragraph",
+                                            "content": [
+                                                {
+                                                    "type": "text",
+                                                    "text": "嵌套项目"
+                                                }
+                                            ]
+                                        }
+                                    ]
+                                }
+                            ]
+                        }
+                    ]
+                },
+                {
+                    "type": "listItem",
+                    "content": [
+                        {
+                            "type": "paragraph",
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": "第二点"
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "type": "blockquote",
+            "content": [
+                {
+                    "type": "paragraph",
+                    "content": [
+                        {
+                            "type": "text",
+                            "text": "引用正文，可继续包含其他块。"
+                        }
+                    ]
+                }
+            ]
+        },
+        {
+            "type": "heading",
+            "attrs": {
+                "level": 4
+            },
+            "content": [
+                {
+                    "type": "text",
+                    "text": "代码与公式"
+                }
+            ]
+        },
+        {
+            "type": "codeBlock",
+            "attrs": {
+                "language": "python"
+            },
+            "content": [
+                {
+                    "type": "text",
+                    "text": "def square(value):\n    return value ** 2"
+                }
+            ]
+        },
+        {
+            "type": "blockMath",
+            "attrs": {
+                "latex": "\\int_0^1 x^2\\,dx = \\frac{1}{3}"
+            }
+        },
+        {
+            "type": "horizontalRule"
+        },
+        {
+            "type": "image",
+            "attrs": {
+                "src": "/favicon.svg",
+                "alt": "课栈标志"
+            }
+        }
+    ]
+}

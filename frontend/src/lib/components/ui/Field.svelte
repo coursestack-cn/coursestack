@@ -2,7 +2,7 @@
     import type { Snippet } from "svelte";
     import type { HTMLAttributes } from "svelte/elements";
 
-    export type FieldControl = { id: string; describedBy: string | undefined; invalid: boolean; required: boolean };
+    export type FieldControl = { id: string; labelId: string; describedBy: string | undefined; invalid: boolean; required: boolean };
     export type Props = Omit<HTMLAttributes<HTMLDivElement>, "children" | "id"> & {
         id?: string;
         label: string;
@@ -17,11 +17,22 @@
     const generatedId = $props.id();
     let { id = generatedId, label, required = false, help, error, children, class: className = "", ...rest }: Props = $props();
     const describedBy = $derived([help && `${id}-help`, error && `${id}-error`].filter(Boolean).join(" ") || undefined);
+
+    // Labels already support native controls. Contenteditables use aria-labelledby;
+    // this action supplies the same pointer-to-focus behavior without another tab stop.
+    function focusControl(label: HTMLLabelElement) {
+        const focus = (event: MouseEvent) => {
+            const control = document.getElementById(id);
+            if (control?.isContentEditable) { event.preventDefault(); control.focus(); }
+        };
+        label.addEventListener("click", focus);
+        return { destroy: () => label.removeEventListener("click", focus) };
+    }
 </script>
 
 <div {...rest} class={`field ${className}`}>
-    <label for={id}>{label}{#if required}<span class="required" aria-hidden="true">（必填）</span>{/if}</label>
-    {@render children({ id, describedBy, invalid: Boolean(error), required })}
+    <label id={`${id}-label`} for={id} use:focusControl>{label}{#if required}<span class="required" aria-hidden="true">（必填）</span>{/if}</label>
+    {@render children({ id, labelId: `${id}-label`, describedBy, invalid: Boolean(error), required })}
     {#if help}<p id={`${id}-help`} class="help">{help}</p>{/if}
     {#if error}<p id={`${id}-error`} class="error" role="alert">{error}</p>{/if}
 </div>

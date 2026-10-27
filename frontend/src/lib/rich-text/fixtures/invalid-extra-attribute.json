@@ -1,0 +1,13 @@
+{
+    "type": "doc",
+    "content": [
+        {
+            "type": "image",
+            "attrs": {
+                "src": "/favicon.svg",
+                "alt": null,
+                "title": "多余字段"
+            }
+        }
+    ]
+}

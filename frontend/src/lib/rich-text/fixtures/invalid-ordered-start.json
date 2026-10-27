@@ -1,0 +1,27 @@
+{
+    "type": "doc",
+    "content": [
+        {
+            "type": "orderedList",
+            "attrs": {
+                "start": 0
+            },
+            "content": [
+                {
+                    "type": "listItem",
+                    "content": [
+                        {
+                            "type": "paragraph",
+                            "content": [
+                                {
+                                    "type": "text",
+                                    "text": "序号必须为正整数"
+                                }
+                            ]
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}

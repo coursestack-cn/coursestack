@@ -1,0 +1,22 @@
+{
+    "type": "doc",
+    "content": [
+        {
+            "type": "paragraph",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "危险链接",
+                    "marks": [
+                        {
+                            "type": "link",
+                            "attrs": {
+                                "href": "javascript:alert(1)"
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}

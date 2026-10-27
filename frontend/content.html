@@ -1,0 +1,25 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <script>
+        try {
+            const theme = localStorage.getItem("coursestack-theme");
+            if (theme === "light" || theme === "dark") document.documentElement.setAttribute("data-theme", theme);
+        } catch {}
+    </script>
+    <link rel="icon" href="/favicon.svg" type="image/svg+xml" />
+    <title>内容组件预览 | CourseStack</title>
+</head>
+<body>
+    <div id="app"></div>
+    <script type="module">
+        import { mount } from "svelte";
+        import Content from "/src/preview/Content.svelte";
+        import "/src/styles/tokens.css";
+        import "/src/styles/base.css";
+        mount(Content, { target: document.getElementById("app") });
+    </script>
+</body>
+</html>

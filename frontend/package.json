@@ -16,6 +16,17 @@
     },
     "dependencies": {
         "@lucide/svelte": "1.61.0",
+        "@tiptap/core": "3.32.0",
+        "@tiptap/extension-code-block": "3.32.0",
+        "@tiptap/extension-image": "3.32.0",
+        "@tiptap/extension-link": "3.32.0",
+        "@tiptap/extension-ordered-list": "3.32.0",
+        "@tiptap/extension-placeholder": "3.32.0",
+        "@tiptap/pm": "3.32.0",
+        "@tiptap/starter-kit": "3.32.0",
+        "highlight.js": "11.11.1",
+        "katex": "0.19.1",
+        "lowlight": "3.3.0",
         "svelte": "5.57.2"
     },
     "devDependencies": {

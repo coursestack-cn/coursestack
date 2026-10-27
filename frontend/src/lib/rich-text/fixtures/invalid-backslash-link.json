@@ -1,0 +1,22 @@
+{
+    "type": "doc",
+    "content": [
+        {
+            "type": "paragraph",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "不能利用浏览器的反斜杠地址解析",
+                    "marks": [
+                        {
+                            "type": "link",
+                            "attrs": {
+                                "href": "/\\example.com/path"
+                            }
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}

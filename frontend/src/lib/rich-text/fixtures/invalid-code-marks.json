@@ -1,0 +1,22 @@
+{
+    "type": "doc",
+    "content": [
+        {
+            "type": "codeBlock",
+            "attrs": {
+                "language": null
+            },
+            "content": [
+                {
+                    "type": "text",
+                    "text": "const answer = 42",
+                    "marks": [
+                        {
+                            "type": "bold"
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}

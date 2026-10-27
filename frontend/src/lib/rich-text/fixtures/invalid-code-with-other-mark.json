@@ -1,0 +1,22 @@
+{
+    "type": "doc",
+    "content": [
+        {
+            "type": "paragraph",
+            "content": [
+                {
+                    "type": "text",
+                    "text": "独占code",
+                    "marks": [
+                        {
+                            "type": "code"
+                        },
+                        {
+                            "type": "bold"
+                        }
+                    ]
+                }
+            ]
+        }
+    ]
+}
