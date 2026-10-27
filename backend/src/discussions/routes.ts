@@ -1,11 +1,12 @@
 import { Hono } from 'hono';
 import { sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { HttpError, respond, assertChanged, input, listResult, page, requestIdentity, revisionSchema, idSchema, bodySchema, tagsSchema, parsedEnum, queryPage } from '../http.ts';
+import { HttpError, respond, assertChanged, input, listResult, page, requestIdentity, revisionSchema, idSchema, tagsSchema, parsedEnum, queryPage } from '../http.ts';
 import { activeUser, editPermission } from '../permissions.ts';
 import { actor } from '../auth/middleware.ts';
 import type { AppEnv, Ctx, ContentRow, PublicRow } from '../discussions/types.ts';
 import { accessibleContent, contentDto, publicDetail, publicSelect, requireEditor, tombstone, visibleContent } from '../discussions/service.ts';
+import { bodySchema, type ProseMirrorDocument } from './body.ts';
 import { createDatabase } from '../db/index.ts';
 const now = () => Math.floor(Date.now() / 1000);
 const uid = () => crypto.randomUUID();
@@ -13,7 +14,7 @@ import { getCourse } from '../courses/routes.ts';
 
 const questionInput = z.object({ title: z.string().trim().min(1).max(200), body: bodySchema,
     tags: tagsSchema.nullable().default(null) }).strict();
-type NewContent = { kind: ContentRow['kind']; courseId: string; body: string; title?: string;
+type NewContent = { kind: ContentRow['kind']; courseId: string; body: ProseMirrorDocument; title?: string;
     tags?: string[] | null; targetKind?: ContentRow['kind']; targetId?: string };
 async function insertContent(c: Ctx, data: NewContent) {
     const a = actor(c), identity = await requestIdentity(c, data);
@@ -25,7 +26,7 @@ async function insertContent(c: Ctx, data: NewContent) {
     const id = uid(), at = now();
     await createDatabase(c.env.DB).run(sql`INSERT INTO contents(id,kind,course_id,author_id,title,body,tags,target_kind,target_id,
         created_at,updated_at,updated_by,request_key,request_hash)
-        SELECT ${id},${data.kind},${data.courseId},${a.id},${data.title ?? null},${data.body},${data.tags?.length ? JSON.stringify(data.tags) : null},
+        SELECT ${id},${data.kind},${data.courseId},${a.id},${data.title ?? null},${JSON.stringify(data.body)},${data.tags?.length ? JSON.stringify(data.tags) : null},
         ${data.targetKind ?? null},${data.targetId ?? null},
         ${at},${at},${a.id},${identity.key},${identity.fingerprint} WHERE ${activeUser(a)}
         ON CONFLICT(author_id,request_key) DO NOTHING`);
@@ -44,8 +45,8 @@ discussionRoutes.get('/courses/:id/questions', async c => {
     const tag = c.req.query('tag');
     if (c.req.query('fileVersionId') !== undefined) throw new HttpError(400, 'INVALID_FILTER', '资料引用使用正文链接，不支持按文件版本筛选');
     if (tag && tag.length > 30) throw new HttpError(400, 'INVALID_FILTER', '标签最长30字');
-    const stateFilter = state === 'solved' ? sql`AND c.accepted_answer_id IS NOT NULL`
-        : state === 'unresolved' ? sql`AND c.accepted_answer_id IS NULL` : sql``;
+    const stateFilter = state === 'solved' ? sql`AND accepted.answer_id IS NOT NULL`
+        : state === 'unresolved' ? sql`AND accepted.answer_id IS NULL` : sql``;
     const order = sort === 'score' ? sql`score DESC,c.created_at DESC,c.id ASC` : sort === 'active'
         ? sql`(WITH RECURSIVE activity(id,updated_at) AS (
                 SELECT id,updated_at FROM accessible_contents WHERE id=c.id
@@ -72,8 +73,8 @@ discussionRoutes.get('/questions/:id', async c => {
 discussionRoutes.get('/questions/:id/answers', async c => {
     const question = await accessibleContent(c, c.req.param('id'), 'question'), p = page(c);
     const { rows, total } = await queryPage<PublicRow>(c, p, sql`${publicSelect(c)} WHERE c.kind='answer' AND c.target_kind='question' AND c.target_id=${question.id}
-        ORDER BY (c.id=${question.accepted_answer_id}) DESC,score DESC,c.created_at ASC,c.id ASC`);
-    return respond(c, listResult(rows.map(r => ({ ...contentDto(r), isAccepted: r.id === question.accepted_answer_id })), p, total));
+        ORDER BY (c.id=${question.acceptedAnswerId}) DESC,score DESC,c.created_at ASC,c.id ASC`);
+    return respond(c, listResult(rows.map(r => ({ ...contentDto(r), isAccepted: r.id === question.acceptedAnswerId })), p, total));
 });
 discussionRoutes.post('/questions/:id/answers', async c => {
     actor(c);
@@ -112,8 +113,8 @@ discussionRoutes.patch('/contents/:id', async c => {
     const schema = row.kind === 'question' || row.kind === 'material' ? questionInput.pick({ title: true, body: true }).partial()
         .extend({ revision: revisionSchema, tags: tagsSchema.nullable().optional() }).strict()
         : z.object({ revision: revisionSchema, body: bodySchema }).strict();
-    const data = await input(c, schema) as { revision: number; title?: string; body?: string; tags?: string[] | null };
-    const result = await createDatabase(c.env.DB).run(sql`UPDATE contents SET title=${data.title ?? row.title},body=${data.body ?? row.body},
+    const data = await input(c, schema) as { revision: number; title?: string; body?: ProseMirrorDocument; tags?: string[] | null };
+    const result = await createDatabase(c.env.DB).run(sql`UPDATE contents SET title=${data.title ?? row.title},body=${data.body === undefined ? row.body : JSON.stringify(data.body)},
         tags=${data.tags === undefined ? row.tags : data.tags?.length ? JSON.stringify(data.tags) : null},
         updated_at=${now()},updated_by=${a.id},revision=revision+1
         WHERE id=${row.id} AND revision=${data.revision} AND id IN (SELECT id FROM public_contents)
@@ -123,10 +124,8 @@ discussionRoutes.patch('/contents/:id', async c => {
 discussionRoutes.delete('/contents/:id', async c => {
     const row = await visibleContent(c, c.req.param('id')), a = await requireEditor(c, row);
     const data = await input(c, z.object({ revision: revisionSchema }).strict());
-    const result = await createDatabase(c.env.DB).run(sql`UPDATE contents SET status='deleted',body='',tags=NULL,title=CASE WHEN title IS NULL THEN NULL ELSE '' END,
-        revision=revision+1,updated_at=${now()},updated_by=${a.id},
-        accepted_answer_id=NULL,accepted_by=NULL,accepted_at=NULL,accepted_term_id=NULL,
-        acceptance_id=NULL,award_cents=0,award_eligible=0 WHERE id=${row.id} AND revision=${data.revision}
+    const result = await createDatabase(c.env.DB).run(sql`UPDATE contents SET status='deleted',body=NULL,tags=NULL,title=NULL,
+        revision=revision+1,updated_at=${now()},updated_by=${a.id} WHERE id=${row.id} AND revision=${data.revision}
         AND id IN (SELECT id FROM public_contents) AND ${editPermission(a, sql`contents.course_id`, sql`contents.author_id`)}`);
     assertChanged(result); return respond(c, { id: row.id, status: 'deleted', revision: data.revision + 1 });
 });

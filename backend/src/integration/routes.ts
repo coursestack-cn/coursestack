@@ -5,6 +5,7 @@ import { internalAuth } from '../auth/middleware.ts';
 import { HttpError, respond, input, listResult, page, parsedEnum, queryPage } from '../http.ts';
 import { actor } from '../auth/middleware.ts';
 import type { AppEnv, PublicRow } from '../discussions/types.ts';
+import { parseBody } from '../discussions/body.ts';
 import { contentDto, publicDetail, publicSelect } from '../discussions/service.ts';
 import { createDatabase } from '../db/index.ts';
 const now = () => Math.floor(Date.now() / 1000);
@@ -47,15 +48,16 @@ internalRoutes.get('/documents', async c => {
     // after all pages to catch inserts, deletions and edits during pagination.
     const watermark = await createDatabase(c.env.DB).get<{ seq: number }>(sql`SELECT COALESCE(MAX(seq),0) AS seq FROM business_events`);
     const rows = await createDatabase(c.env.DB).all<{ documentId: string; id: string; kind: string; courseId: string; title: string | null;
-        body: string; tags: string | null; targetKind: string | null; targetId: string | null; revision: number; updatedAt: number }>(sql`
+        body: string | null; tags: string | null; targetKind: string | null; targetId: string | null; revision: number; updatedAt: number }>(sql`
         SELECT * FROM (
             SELECT 'course:'||id AS documentId,id,'course' AS kind,id AS courseId,name AS title,introduction AS body,
-                NULL AS tags,NULL AS targetKind,NULL AS targetId,revision,COALESCE(updated_at,created_at) AS updatedAt FROM courses
+                NULL AS tags,NULL AS targetKind,NULL AS targetId,revision,updated_at AS updatedAt FROM courses
             UNION ALL
             SELECT kind||':'||id AS documentId,id,kind,course_id AS courseId,title,body,tags,target_kind AS targetKind,target_id AS targetId,revision,updated_at AS updatedAt
                 FROM public_contents WHERE kind IN ('material','question','answer')
         ) WHERE documentId>${after} ORDER BY documentId ASC LIMIT ${limit + 1}`);
-    const items = rows.slice(0, limit).map(r => ({ ...r, tags: r.tags === null ? null : JSON.parse(r.tags) as string[] }));
+    const items = rows.slice(0, limit).map(r => ({ ...r, body: r.kind === 'course' ? r.body : parseBody(r.body),
+        format: r.kind === 'course' ? 'text' : 'prosemirror', tags: r.tags === null ? null : JSON.parse(r.tags) as string[] }));
     return respond(c, { items, nextCursor: items.at(-1)?.documentId ?? after, hasMore: rows.length > limit, watermark: watermark?.seq ?? 0 });
 });
 internalRoutes.get('/contents/:id', async c => {

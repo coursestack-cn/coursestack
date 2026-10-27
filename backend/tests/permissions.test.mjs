@@ -7,7 +7,7 @@ import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 import { eq } from 'drizzle-orm';
 import { createDatabase } from '../src/db/index.ts';
 import { accounts, terms, enrollments } from '../src/db/schema.ts';
-import { getPublicProfile, getStudentRecordForAdministrator, getStudentRecordForTeacher, isAdministrator, isCurrentCourseTeacher } from '../src/permissions.ts';
+import { getPublicProfile, isAdministrator, isCurrentCourseTeacher } from '../src/permissions.ts';
 import worker from '../src/index.ts';
 import { initializeAdministrator } from '../src/auth/service.ts';
 import { digest, passwordField } from '../src/auth/crypto.ts';
@@ -27,7 +27,9 @@ INSERT INTO enrollments(course_id,term_id,account_id) VALUES ('course','previous
 UPDATE terms SET current=0;
 UPDATE terms SET current=1 WHERE id='current';
 INSERT INTO enrollments(course_id,term_id,account_id) VALUES ('course','current','teacher'),('other-course','current','other-teacher');
-INSERT INTO courses (id, name) VALUES ('course', '课程甲'), ('other-course', '课程乙');
+INSERT INTO courses (id, name, code, created_by, updated_by, request_key, request_hash) VALUES
+('course', '课程甲', 'COURSE', 'teacher', 'teacher', 'fixture-course', 'fixture'),
+('other-course', '课程乙', 'OTHER', 'other-teacher', 'other-teacher', 'fixture-other', 'fixture');
 INSERT INTO enrollments (course_id, term_id, account_id) VALUES ('course', 'current', 'student'), ('course', 'previous', 'history'), ('other-course', 'current', 'outsider');
 `;
 
@@ -56,7 +58,6 @@ DELETE FROM file_versions;
 DELETE FROM business_events;
 DELETE FROM contents;
 DELETE FROM sessions;
-DELETE FROM account_audit;
 DELETE FROM login_attempts;
 DELETE FROM enrollments WHERE account_id IN (SELECT id FROM accounts WHERE role='student');
 DELETE FROM enrollments;
@@ -73,57 +74,41 @@ test('public profile is a field allowlist and never includes academic identity',
     assert.equal(await getPublicProfile(db, 'student'), null);
 });
 
-test('only active administrator accounts have global academic access', async () => {
+test('only active administrator accounts have administrator permission', async () => {
     assert.equal(await isAdministrator(db, 'admin'), true);
-    assert.deepEqual(await getStudentRecordForAdministrator(db, 'admin', 'outsider'), {
-        accountId: 'outsider', schoolNumber: 'TEST-003', name: '虚构丙', department: null, major: null, grade: null,
-    });
     for (const actor of [null, 'missing', 'teacher', 'student']) {
         assert.equal(await isAdministrator(db, actor), false);
-        assert.equal(await getStudentRecordForAdministrator(db, actor, 'student'), null);
     }
     await db.update(accounts).set({ status: 'disabled' }).where(eq(accounts.id, 'admin'));
     assert.equal(await isAdministrator(db, 'admin'), false);
-    assert.equal(await getStudentRecordForAdministrator(db, 'admin', 'student'), null);
 });
 
-test('academic access requires both current teaching and current enrollment in the same course', async () => {
+test('course teacher permission requires a current teaching assignment', async () => {
     assert.equal(await isCurrentCourseTeacher(db, 'teacher', 'course'), true);
-    assert.deepEqual(await getStudentRecordForTeacher(db, 'teacher', 'course', 'student'), {
-        accountId: 'student', schoolNumber: 'TEST-001', name: '虚构甲', department: null, major: null, grade: null,
-    });
     for (const actor of [null, 'missing', 'student', 'history', 'other-teacher', 'admin']) {
         assert.equal(await isCurrentCourseTeacher(db, actor, 'course'), false);
-        assert.equal(await getStudentRecordForTeacher(db, actor, 'course', 'student'), null);
     }
-    for (const student of ['history', 'outsider', 'missing']) {
-        assert.equal(await getStudentRecordForTeacher(db, 'teacher', 'course', student), null);
-    }
-    assert.equal(await getStudentRecordForTeacher(db, 'teacher', 'other-course', 'outsider'), null);
 });
 
 test('disabling a teacher or revoking teaching immediately removes access', async () => {
     await db.update(accounts).set({ status: 'disabled' }).where(eq(accounts.id, 'teacher'));
     assert.equal(await isCurrentCourseTeacher(db, 'teacher', 'course'), false);
-    assert.equal(await getStudentRecordForTeacher(db, 'teacher', 'course', 'student'), null);
     await db.update(accounts).set({ status: 'active' }).where(eq(accounts.id, 'teacher'));
     await db.update(enrollments).set({ accountId: 'other-teacher' }).where(eq(enrollments.accountId, 'teacher'));
-    assert.equal(await getStudentRecordForTeacher(db, 'teacher', 'course', 'student'), null);
+    assert.equal(await isCurrentCourseTeacher(db, 'teacher', 'course'), false);
+    assert.equal(await isCurrentCourseTeacher(db, 'other-teacher', 'course'), true);
 });
 
 test('term changes remove old access without deleting history; no term grants nothing', async () => {
     await setCurrentTerm(binding, 'next');
     assert.equal(await isCurrentCourseTeacher(db, 'teacher', 'course'), false);
-    assert.equal(await getStudentRecordForTeacher(db, 'teacher', 'course', 'student'), null);
     const count = await binding.prepare("SELECT COUNT(*) AS count FROM enrollments WHERE account_id IN (SELECT id FROM accounts WHERE role='student')").first('count');
     assert.equal(count, 3);
     await binding.prepare("INSERT INTO enrollments (course_id, term_id, account_id) VALUES ('course', 'next', 'teacher')").run();
     assert.equal(await isCurrentCourseTeacher(db, 'teacher', 'course'), true);
-    assert.equal(await getStudentRecordForTeacher(db, 'teacher', 'course', 'student'), null);
     await binding.prepare("INSERT INTO enrollments (course_id, term_id, account_id) VALUES ('course', 'next', 'student')").run();
-    assert.ok(await getStudentRecordForTeacher(db, 'teacher', 'course', 'student'));
     await setCurrentTerm(binding, null);
-    assert.equal(await getStudentRecordForTeacher(db, 'teacher', 'course', 'student'), null);
+    assert.equal(await isCurrentCourseTeacher(db, 'teacher', 'course'), false);
 });
 
 test('foreign keys and checks reject wrong identities, orphan relations and duplicate enrollment', async () => {
@@ -147,7 +132,6 @@ test('foreign keys and checks reject wrong identities, orphan relations and dupl
         await assert.rejects(binding.prepare(sql).run(), /constraint|replace_account_identity|invalid_.*identity|enrollment_teacher_required|enrollment_teacher_unique|current_term_required/i, sql);
     }
     await assert.rejects(() => binding.prepare("INSERT INTO enrollments (course_id, term_id, account_id) VALUES ('course', 'current', 'other-teacher')").run(), /enrollment_teacher_unique/);
-    assert.equal(await getStudentRecordForTeacher(db, 'other-teacher', 'course', 'student'), null);
 });
 
 test('D1 batches roll back all writes when a membership constraint fails', async () => {
@@ -178,7 +162,7 @@ test('HTTP handles health, unknown routes, methods and database errors', async (
     const post = await worker.fetch(new Request('http://local/api/health', { method: 'POST' }), env);
     assert.equal(post.status, 405);
     assert.equal(post.headers.get('Allow'), 'GET');
-    for (const path of ['/api/register', '/api/login', '/api/students/student']) {
+    for (const path of ['/api/register', '/api/login', '/api/students/student', '/api/courses/course/students/student/academic-record']) {
         assert.equal((await worker.fetch(new Request(`http://local${path}`), env)).status, 404);
     }
     const unavailable = await worker.fetch(new Request('http://local/api/health'), {

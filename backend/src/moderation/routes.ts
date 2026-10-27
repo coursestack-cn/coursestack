@@ -5,6 +5,7 @@ import { HttpError, respond, assertChanged, input, listResult, page, requestIden
 import { management, activeUser, requireManagement } from '../permissions.ts';
 import { actor } from '../auth/middleware.ts';
 import type { AppEnv } from '../discussions/types.ts';
+import { parseBody } from '../discussions/body.ts';
 import { rawContent, visibleContent } from '../discussions/service.ts';
 import { createDatabase, prepareStatement } from '../db/index.ts';
 const now = () => Math.floor(Date.now() / 1000);
@@ -63,7 +64,7 @@ moderationRoutes.get('/moderation/contents/:id', async c => {
     const row = await rawContent(c, c.req.param('id'));
     await requireManagement(c, row.course_id);
     return respond(c, { id: row.id, kind: row.kind, courseId: row.course_id, authorId: row.author_id,
-        title: row.title, body: row.body, status: row.status, revision: row.revision,
+        title: row.title, body: parseBody(row.body), status: row.status, revision: row.revision,
         targetKind: row.target_kind, targetId: row.target_id,
         createdAt: row.created_at, updatedAt: row.updated_at });
 });
@@ -79,9 +80,7 @@ moderationRoutes.put('/contents/:id/moderation', async c => {
     const result = await c.env.DB.batch([
         sql`INSERT INTO moderation_actions(content_id,actor_id,old_status,new_status,reason,created_at)
             SELECT id,${a.id},status,${desired},${data.reason},${at} FROM contents WHERE ${gate}`,
-        sql`UPDATE contents SET status=${desired},revision=revision+1,updated_at=${at},updated_by=${a.id},
-            accepted_answer_id=NULL,accepted_by=NULL,accepted_at=NULL,accepted_term_id=NULL,
-            acceptance_id=NULL,award_cents=0,award_eligible=0 WHERE ${gate}`,
+        sql`UPDATE contents SET status=${desired},revision=revision+1,updated_at=${at},updated_by=${a.id} WHERE ${gate}`,
     ].map(s => prepareStatement(c.env.DB, s)));
     assertChanged(result[1]); return respond(c, { id: row.id, status: desired, revision: data.revision + 1, changed: true });
 });

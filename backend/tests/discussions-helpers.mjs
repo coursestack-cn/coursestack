@@ -4,6 +4,8 @@ import worker from '../src/index.ts';
 import { digest } from '../src/auth/crypto.ts';
 import { readMigrations } from '../scripts/lib/migrations.mjs';
 
+export const doc = text => ({ type: 'doc', content: [{ type: 'paragraph', ...(text ? { content: [{ type: 'text', text }] } : {}) }] });
+export const linkDoc = (text, href) => ({ type: 'doc', content: [{ type: 'paragraph', content: [{ type: 'text', text, marks: [{ type: 'link', attrs: { href } }] }] }] });
 export const internalToken = 'fictional-test-internal-service-token';
 export const tokenFor = id => Buffer.from(id).toString('hex').padEnd(64, '0');
 const fixture = `
@@ -19,8 +21,10 @@ INSERT INTO courses(id,name,code,created_by,updated_by,created_at,updated_at,req
  ('course-a','高等数学','MATH101','teacher-a','teacher-a',1792540800,1792540800,'fixture-course-a','fixture'),
  ('course-b','大学物理','PHYS101','teacher-b','teacher-b',1792540800,1792540800,'fixture-course-b','fixture');
 INSERT INTO enrollments(course_id,account_id,term_id) VALUES ('course-a','student-a','term-active'),('course-a','student-b','term-active'),('course-b','student-b','term-active'),('course-a','visitor','term-old');
-INSERT INTO contents(id,kind,course_id,author_id,title,body,updated_by) VALUES ('material-a','material','course-a','student-a','微积分讲义','','student-a'),('material-b','material','course-b','teacher-b','物理讲义','','teacher-b');
-INSERT INTO file_versions VALUES ('version-a1','material-a','微积分-v1.pdf',1,'visible'),('version-a2','material-a','微积分-v2.pdf',2,'visible'),('version-a-hidden','material-a','内部版本.pdf',3,'hidden'),('version-b1','material-b','物理-v1.pdf',1,'visible');
+INSERT INTO contents(id,kind,course_id,author_id,title,body,updated_by,request_key,request_hash) VALUES ('material-a','material','course-a','student-a','微积分讲义',NULL,'student-a','fixture-material-a','fixture'),('material-b','material','course-b','teacher-b','物理讲义',NULL,'teacher-b','fixture-material-b','fixture');
+INSERT INTO file_versions(material_id,version,filename,status,uploaded_by,updated_by) VALUES
+('material-a',1,'微积分-v1.pdf','visible','student-a','student-a'),('material-a',2,'微积分-v2.pdf','visible','student-a','student-a'),
+('material-a',3,'内部版本.pdf','hidden','student-a','student-a'),('material-b',1,'物理-v1.pdf','visible','teacher-b','teacher-b');
 `;
 
 export async function setCurrentTerm(db, id) {
@@ -64,10 +68,10 @@ export async function start(options = {}) {
             return { status: response.status, data: response.ok ? payload.data : payload, headers: response.headers, payload };
         }
         async function postQuestion(as = 'student-a', extra = {}, course = 'course-a') {
-            const response = await api('POST', `/courses/${course}/questions`, as, { title: '极限如何计算？', body: '求解极限。', ...extra });
+            const response = await api('POST', `/courses/${course}/questions`, as, { title: '极限如何计算？', body: doc('求解极限。'), ...extra });
             assert.equal(response.status, 201, JSON.stringify(response.data)); return response.data.id;
         }
-        async function postAnswer(question, as = 'student-b', body = '利用夹逼定理，极限为1。') {
+        async function postAnswer(question, as = 'student-b', body = doc('利用夹逼定理，极限为1。')) {
             const response = await api('POST', `/questions/${question}/answers`, as, { body });
             assert.equal(response.status, 201, JSON.stringify(response.data)); return response.data.id;
         }
@@ -76,10 +80,10 @@ export async function start(options = {}) {
             assert.equal(response.status, 200); return response.data.revision;
         }
         const accept = async (question, answer, as = 'teacher-a') => api('PUT', `/questions/${question}/acceptance`, as,
-            { answerId: answer, revision: await revision(question) });
-        async function policy(enabled = true, bonusPoints = 2) {
+            { answerId: answer });
+        async function policy(rules = { acceptancePoints: 50 }) {
             const course = await api('GET', '/courses/course-a');
-            const response = await api('PUT', '/courses/course-a/bonus-policy', 'teacher-a', { revision: course.data.revision, enabled, bonusPoints });
+            const response = await api('PUT', '/courses/course-a/bonus-policy', 'teacher-a', { revision: course.data.revision, questionPoints: 0, answerPoints: 0, acceptancePoints: 0, commentPoints: 0, materialPoints: 0, materialPerVersion: false, ...rules });
             assert.equal(response.status, 200, JSON.stringify(response.data)); return response;
         }
         return { mf, database, env, worker: { fetch }, api, postQuestion, postAnswer, revision, accept, policy, dispose: () => mf.dispose() };

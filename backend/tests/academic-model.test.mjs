@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { beforeEach, afterEach, test } from 'node:test';
-import { start, setCurrentTerm } from './discussions-helpers.mjs';
+import { start, setCurrentTerm, doc } from './discussions-helpers.mjs';
 
 let h;
 beforeEach(async () => { h = await start(); });
@@ -59,7 +59,7 @@ test('concurrent attempts to create the same new instance admit exactly one teac
 
 test('tags are nullable and only questions/materials may store a JSON array', async () => {
     const q = await h.postQuestion('student-a', { tags: ['标签'] }), a = await h.postAnswer(q);
-    const comment = await h.api('POST', '/comments', 'student-b', { targetKind: 'question', targetId: q, body: '评论' });
+    const comment = await h.api('POST', '/comments', 'student-b', { targetKind: 'question', targetId: q, body: doc('评论') });
     for (const id of [a, comment.data.id]) {
         assert.equal((await h.api('GET', `/contents/${id}`)).data.tags, null);
         for (const tags of ['[]', '["标签"]']) await assert.rejects(() => h.database.prepare('UPDATE contents SET tags=? WHERE id=?').bind(tags, id).run(), /contents_tags/);
@@ -71,18 +71,13 @@ test('tags are nullable and only questions/materials may store a JSON array', as
     }
 });
 
-test('moderation and award explanations live in their history records and roll back with failed mutations', async () => {
+test('moderation explanations and score revocations roll back with failed mutations', async () => {
     await h.policy(); const q = await h.postQuestion(), a = await h.postAnswer(q); await h.accept(q, a);
-    const adjusted = await h.api('PATCH', `/questions/${q}/award`, 'teacher-a', { revision: await h.revision(q), bonusPoints: 3, reason: '补充了完整证明' });
-    assert.equal(adjusted.status, 200);
-    const reasons = (await h.database.prepare('SELECT reason FROM bonus_ledger ORDER BY id DESC LIMIT 2').all()).results;
-    assert.deepEqual(reasons, [{ reason: 'award.adjusted: 补充了完整证明' }, { reason: 'award.adjusted: 补充了完整证明' }]);
     const count = await h.database.prepare('SELECT count(*) AS n FROM bonus_ledger').first('n');
     await h.database.prepare("CREATE TRIGGER fail_content_update BEFORE UPDATE ON contents BEGIN SELECT RAISE(ABORT,'simulated_failure'); END").run();
-    assert.equal((await h.api('PATCH', `/questions/${q}/award`, 'teacher-a', { revision: await h.revision(q), bonusPoints: 4, reason: '失败操作的理由' })).status, 500);
-    assert.equal(await h.database.prepare('SELECT count(*) AS n FROM bonus_ledger').first('n'), count);
     assert.equal((await h.api('PUT', `/contents/${a}/moderation`, 'teacher-a', { revision: 1, action: 'hide', reason: '广告需要下架' })).status, 500);
     assert.equal(await h.database.prepare('SELECT count(*) AS n FROM moderation_actions').first('n'), 0);
+    assert.equal(await h.database.prepare('SELECT count(*) AS n FROM bonus_ledger').first('n'), count);
     await h.database.prepare('DROP TRIGGER fail_content_update').run();
     assert.equal((await h.api('PUT', `/contents/${a}/moderation`, 'teacher-a', { revision: 1, action: 'hide', reason: '广告需要下架' })).status, 200);
     assert.equal(await h.database.prepare('SELECT reason FROM moderation_actions').first('reason'), '广告需要下架');

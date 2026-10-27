@@ -73,11 +73,7 @@ export async function runAdministratorCommand(args, {
         if (state) output.write(`管理员 ID：${state.id}\n状态：${state.status}；凭据版本：${state.version ?? '未初始化'}\n`);
         else output.write('当前数据库尚无管理员。\n');
         if (options.action === 'status') {
-            const audit = state && await binding.prepare(`SELECT id, action, created_at AS createdAt FROM account_audit
-                WHERE target_id = ? AND action IN ('admin.initialize', 'admin.password.reset')
-                ORDER BY created_at DESC, rowid DESC LIMIT 1`).bind(state.id).first();
-            if (audit) output.write(`最近运维审计：${audit.id}；${audit.action}；Unix 时间：${audit.createdAt}\n`);
-            return { state, audit };
+            return { state };
         }
         if (options.action === 'init' && state?.version != null) throw new HttpError(409, 'ADMIN_EXISTS', '管理员已初始化，不能覆盖密码；需要恢复时使用 admin:reset');
         if (state && (state.status !== 'active' || state.schoolNumber !== null)) throw new HttpError(409, 'ADMIN_UNAVAILABLE', '管理员状态异常，请先检查数据库');
@@ -90,7 +86,7 @@ export async function runAdministratorCommand(args, {
         const result = options.action === 'init'
             ? await initializeAdministrator(binding, password)
             : await resetAdministratorPassword(binding, password, { id: state.id, version: state.version });
-        output.write(`管理员${options.action === 'init' ? '初始化' : '密码重置'}完成。审计记录：${result.receipt}\n`);
+        output.write(`管理员${options.action === 'init' ? '初始化' : '密码重置'}完成。账号：${result.id}\n`);
         return result;
     } finally {
         await platform?.dispose();

@@ -8,7 +8,7 @@ const courseId = stableId('course');
 const members = [
     { number: 'T0001', role: 'teacher', name: '演示教师' },
     ...Array.from({ length: 100 }, (_, i) => ({ number: `S${String(i + 1).padStart(4, '0')}`, role: 'student', name: `演示同学 ${String(i + 1).padStart(3, '0')}` })),
-].map((member) => ({ ...member, id: stableId(member.number), auditId: stableId(`account:${member.number}`) }));
+].map((member) => ({ ...member, id: stableId(member.number) }));
 const teacher = members[0];
 const conflict = (message) => new HttpError(409, 'DEMO_CONFLICT', message);
 
@@ -18,8 +18,7 @@ export async function prepareDemoData(binding, { dryRun = false, course: request
     const numbers = JSON.stringify(members.map((m) => m.number));
     const ids = JSON.stringify(members.map((m) => m.id));
     const [accountResult, termResult, courseResult] = await binding.batch([
-        binding.prepare(`SELECT a.id, a.school_number AS number, a.must_change_password, a.role,
-            (SELECT id FROM account_audit WHERE target_id = a.id AND action = 'demo.initialize') AS auditId
+        binding.prepare(`SELECT a.id, a.school_number AS number, a.must_change_password, a.role
             FROM accounts a WHERE a.id IN (SELECT value FROM json_each(?)) OR a.school_number IN (SELECT value FROM json_each(?))`).bind(ids, numbers),
         binding.prepare(`SELECT id, name FROM terms WHERE current = 1`),
         requestedCourse
@@ -29,7 +28,7 @@ export async function prepareDemoData(binding, { dryRun = false, course: request
     const expected = new Map(members.map((m) => [m.id, m]));
     for (const row of accountResult.results) {
         const member = expected.get(row.id);
-        if (!member || row.number !== member.number || row.role !== member.role || row.auditId !== member.auditId) {
+        if (!member || row.number !== member.number || row.role !== member.role) {
             throw conflict('演示学工号或账号 ID 已被其他数据使用，或演示账号身份已变化；未覆盖任何账号。');
         }
     }
@@ -64,12 +63,10 @@ export async function prepareDemoData(binding, { dryRun = false, course: request
         insertMembers(`INSERT INTO accounts (id, nickname, role, school_number, password, name, must_change_password)
             SELECT value ->> '$.id', value ->> '$.name', value ->> '$.role', value ->> '$.number',
                 value ->> '$.hash', value ->> '$.name', 0 FROM json_each(?)`),
-        insertMembers(`INSERT INTO account_audit (id, actor_id, target_id, action, fields)
-            SELECT value ->> '$.auditId', NULL, value ->> '$.id', 'demo.initialize', '["role","schoolNumber","password"]' FROM json_each(?)`),
         binding.prepare(`INSERT INTO enrollments (course_id, term_id, account_id) SELECT ?, ?, ? WHERE ${guard}
             ON CONFLICT(course_id, term_id, account_id) DO NOTHING`).bind(selectedCourse.id, selectedTerm, teacher.id, currentTerm.id),
-        ...(!courseResult.results.length ? [binding.prepare(`INSERT INTO courses (id, name, created_by, updated_by)
-            SELECT ?, ?, ?, ? WHERE ${guard}`).bind(selectedCourse.id, selectedCourse.name, teacher.id, teacher.id, currentTerm.id)] : []),
+        ...(!courseResult.results.length ? [binding.prepare(`INSERT INTO courses (id, name, code, created_by, updated_by, request_key, request_hash)
+            SELECT ?, ?, ?, ?, ?, ?, ? WHERE ${guard}`).bind(selectedCourse.id, selectedCourse.name, 'DEMO-DATABASE', teacher.id, teacher.id, 'demo-course', stableId('course-request'), currentTerm.id)] : []),
         binding.prepare(`INSERT INTO enrollments (course_id, term_id, account_id)
             SELECT ?, ?, value FROM json_each(?) WHERE ${guard}
             ON CONFLICT(course_id, term_id, account_id) DO NOTHING`)

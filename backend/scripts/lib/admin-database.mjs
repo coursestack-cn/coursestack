@@ -28,7 +28,7 @@ export function remoteAdminDatabase(target, token, request = fetch) {
             });
             payload = await response.json();
         } catch {
-            throw new HttpError(503, 'REMOTE_RESULT_UNKNOWN', '未能确认远程操作结果，请先核对管理员状态和审计记录，不要直接重复写入');
+            throw new HttpError(503, 'REMOTE_RESULT_UNKNOWN', '未能确认远程操作结果，请先核对管理员状态及凭据版本，不要直接重复写入');
         }
         if (response.status === 401 || response.status === 403) {
             throw new HttpError(403, 'CLOUDFLARE_FORBIDDEN', 'Cloudflare 拒绝访问，请检查账号、数据库和 API Token 的 D1 权限');
@@ -37,7 +37,7 @@ export function remoteAdminDatabase(target, token, request = fetch) {
             || payload.result.length !== statements.length
             || payload.result.some((result) => result.success !== true || !Array.isArray(result.results) || !result.meta)) {
             // Provider errors can include SQL or parameters. Never print them.
-            throw new HttpError(503, 'D1_OPERATION_FAILED', 'D1 操作未确认成功，请核对迁移、管理员状态和审计记录；未自动重试');
+            throw new HttpError(503, 'D1_OPERATION_FAILED', 'D1 操作未确认成功，请核对数据库结构、管理员状态及凭据版本；未自动重试');
         }
         return payload.result;
     }

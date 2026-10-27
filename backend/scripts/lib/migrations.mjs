@@ -3,8 +3,7 @@ import { readFile, readdir } from 'node:fs/promises';
 export const migrationsDirectory = new URL('../../migrations/', import.meta.url);
 
 export function splitMigration(source) {
-    // Preserve the original migrations while accepting Drizzle Kit's generated delimiter.
-    return source.split(/-->? statement-breakpoint(?:\r?\n|$)/).map((sql) => sql.trim()).filter(Boolean);
+    return source.split(/--> statement-breakpoint(?:\r?\n|$)/).map((sql) => sql.trim()).filter(Boolean);
 }
 
 export async function readMigrations(directory = migrationsDirectory) {

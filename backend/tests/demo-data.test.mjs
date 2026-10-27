@@ -32,7 +32,6 @@ test('demo preparation creates 100 students and a teacher, enrolls the current t
         assert.equal(repeat.existingAccounts, 101);
         const preserved = await db.prepare("SELECT password, must_change_password, nickname, status FROM accounts WHERE school_number = 'S0001'").first();
         assert.deepEqual(preserved, { password: changedHash, must_change_password: 1, nickname: '用户改过名称', status: 'disabled' });
-        assert.equal(await db.prepare("SELECT count(*) AS n FROM account_audit WHERE action = 'demo.initialize'").first('n'), 101);
         const switchingTerm = {
             prepare: db.prepare.bind(db),
             async batch(statements) {

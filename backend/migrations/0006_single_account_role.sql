@@ -1,1 +1,0 @@
-CREATE UNIQUE INDEX `account_roles_account_unique` ON `account_roles` (`account_id`);

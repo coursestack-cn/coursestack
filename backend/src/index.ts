@@ -10,6 +10,7 @@ import { authenticate } from './auth/middleware.ts';
 import { courseRoutes } from './courses/routes.ts';
 import { discussionRoutes } from './discussions/routes.ts';
 import { acceptanceRoutes } from './discussions/acceptance.ts';
+import { bonusRoutes } from './discussions/bonus.ts';
 import { moderationRoutes } from './moderation/routes.ts';
 import { internalRoutes, personalRoutes } from './integration/routes.ts';
 import { openapi } from './openapi.ts';
@@ -53,6 +54,7 @@ api.use('*', authenticate);
 api.route('/', courseRoutes);
 api.route('/', discussionRoutes);
 api.route('/', acceptanceRoutes);
+api.route('/', bonusRoutes);
 api.route('/', moderationRoutes);
 api.route('/', personalRoutes);
 app.route('/api', api);
@@ -67,7 +69,7 @@ app.onError((error, c) => {
         causes.push(cause.message);
     }
     const detail = causes.join(' ');
-    if (/invalid_(answer_parent|comment_target|content_target|reply|file_version|acceptance|enrollment_identity)/.test(detail)) {
+    if (/invalid_(content_target|acceptance|enrollment_identity)/.test(detail)) {
         return failure(409, 'INVALID_TARGET', '关联对象不可用、跨课程或状态已改变');
     }
     if (/course_requires_teacher|enrollment_teacher_required|enrollment_teacher_unique|current_term_required|enrollment_instance_immutable/.test(detail)) return failure(409, 'COURSE_MEMBERSHIP_CONFLICT', '课程必须有且只有一位教师，且新课程实例只能建立在当前学期');

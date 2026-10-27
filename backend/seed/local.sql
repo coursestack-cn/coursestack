@@ -14,16 +14,17 @@ UPDATE terms SET current = 1 WHERE id = 'demo-current' AND NOT EXISTS (SELECT 1 
 INSERT INTO enrollments (course_id, term_id, account_id)
 SELECT 'demo-course', id, 'demo-teacher' FROM terms WHERE current=1
 ON CONFLICT(course_id, term_id, account_id) DO NOTHING;
-INSERT INTO courses (id, name) VALUES ('demo-course', '演示课程') ON CONFLICT(id) DO NOTHING;
+INSERT INTO courses (id, name, code, created_by, updated_by, request_key, request_hash)
+VALUES ('demo-course', '演示课程', 'DEMO-COURSE', 'demo-teacher', 'demo-teacher', 'seed-course', 'seed-course') ON CONFLICT(id) DO NOTHING;
 INSERT INTO enrollments (course_id, term_id, account_id)
 SELECT 'demo-course', id, 'demo-student' FROM terms WHERE current=1
 ON CONFLICT(course_id, term_id, account_id) DO NOTHING;
 
 -- Metadata only. The discussion examples do not create R2 objects or download links.
-INSERT INTO contents (id, kind, course_id, author_id, title, body, updated_by) VALUES
-    ('demo-material', 'material', 'demo-course', 'demo-teacher', '演示讲义', '', 'demo-teacher')
+INSERT INTO contents (id, kind, course_id, author_id, title, body, updated_by, request_key, request_hash) VALUES
+    ('demo-material', 'material', 'demo-course', 'demo-teacher', '演示讲义', NULL, 'demo-teacher', 'seed-material', 'seed-material')
 ON CONFLICT(id) DO NOTHING;
-INSERT INTO file_versions (id, material_id, filename, version, status) VALUES
-    ('demo-version-1', 'demo-material', '演示讲义-v1.pdf', 1, 'visible'),
-    ('demo-version-2', 'demo-material', '演示讲义-v2.pdf', 2, 'visible')
-ON CONFLICT(id) DO NOTHING;
+INSERT INTO file_versions (material_id, version, filename, status, uploaded_by, updated_by) VALUES
+    ('demo-material', 1, '演示讲义-v1.pdf', 'visible', 'demo-teacher', 'demo-teacher'),
+    ('demo-material', 2, '演示讲义-v2.pdf', 'visible', 'demo-teacher', 'demo-teacher')
+ON CONFLICT(material_id, version) DO NOTHING;

@@ -32,22 +32,17 @@ export async function authRoutes(request: Request, env: Env): Promise<Response |
         const body = await readJson(request);
         allowFields(body, ['role', 'schoolNumber', 'nickname', 'name', 'password', 'department', 'major', 'grade']);
         if (body.role !== 'student' && body.role !== 'teacher') throw new HttpError(400, 'INVALID_ROLE', '只能创建学生或教师账号');
-        const schoolNumber = stringField(body, 'schoolNumber', 64), nickname = stringField(body, 'nickname');
+        const schoolNumber = stringField(body, 'schoolNumber', 64);
         const profile = profileValues(body);
         if (body.role === 'student' && !profile.name) throw new HttpError(400, 'STUDENT_IDENTITY_REQUIRED', '学生需要姓名和学号');
         const passwordHash = await hashPassword(passwordField(body.password)), id = crypto.randomUUID();
         try {
-            const results = await env.DB.batch([
-                env.DB.prepare(`INSERT INTO accounts (id, nickname, role, school_number, password, name, department, major, grade)
-                    SELECT ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (
-                        SELECT 1 FROM accounts WHERE id = ? AND data_generation = ? AND status <> 'deleted')`)
-                    .bind(id, nickname, body.role, schoolNumber, passwordHash, profile.name ?? null, profile.department ?? null,
-                        profile.major ?? null, profile.grade ?? null, session.id, session.dataGeneration),
-                env.DB.prepare(`INSERT INTO account_audit (id, actor_id, target_id, action, fields)
-                    SELECT ?, ?, id, 'account.create', ? FROM accounts WHERE id = ?`)
-                    .bind(crypto.randomUUID(), session.id, JSON.stringify(Object.keys(body).filter(key => key !== 'password')), id),
-            ]);
-            if (results[0].meta.changes !== 1) throw new HttpError(409, 'ACCOUNT_RETIRED', '操作者身份已变更');
+            const result = await env.DB.prepare(`INSERT INTO accounts (id, nickname, role, school_number, password, name, department, major, grade)
+                SELECT ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (
+                    SELECT 1 FROM accounts WHERE id = ? AND status <> 'deleted')`)
+                .bind(id, profile.nickname ?? null, body.role, schoolNumber, passwordHash, profile.name ?? null, profile.department ?? null,
+                    profile.major ?? null, profile.grade ?? null, session.id).run();
+            if (result.meta.changes !== 1) throw new HttpError(409, 'ACCOUNT_DELETED', '操作者身份已变更');
         } catch (error) { conflict(error); }
         return json({ data: await accountDetail(env.DB, id) }, 201);
     }

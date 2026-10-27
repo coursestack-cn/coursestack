@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { setCurrentTerm } from './discussions-helpers.mjs';
 import { before, beforeEach, after, test } from 'node:test';
 import { readMigrations } from '../scripts/lib/migrations.mjs';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
@@ -19,7 +18,9 @@ INSERT INTO enrollments(course_id,term_id,account_id) VALUES ('course','past','t
 UPDATE terms SET current=0;
 UPDATE terms SET current=1 WHERE id='current';
 INSERT INTO enrollments(course_id,term_id,account_id) VALUES ('course','current','teacher'),('other-course','current','teacher');
-INSERT INTO courses (id, name) VALUES ('course', '当前课程'), ('other-course', '其他课程');
+INSERT INTO courses (id, name, code, created_by, updated_by, request_key, request_hash) VALUES
+('course', '当前课程', 'COURSE', 'teacher', 'teacher', 'fixture-course', 'fixture'),
+('other-course', '其他课程', 'OTHER', 'teacher', 'teacher', 'fixture-other', 'fixture');
 INSERT INTO enrollments (course_id, term_id, account_id) VALUES ('course', 'current', 'student'), ('course', 'past', 'other');
 `;
 
@@ -41,8 +42,8 @@ after(async () => { await runtime?.dispose(); });
 beforeEach(async () => {
     await binding.batch(`
 PRAGMA defer_foreign_keys=ON;
+DELETE FROM business_events;
 DELETE FROM courses;
-DELETE FROM account_audit;
 DELETE FROM sessions;
 DELETE FROM login_attempts;
 DELETE FROM enrollments WHERE account_id IN (SELECT id FROM accounts WHERE role='student');
@@ -108,24 +109,20 @@ test('private changes synchronize school numbers and names, revoke sessions and 
     assert.equal(profile.schoolNumber, '0009'); assert.equal(profile.department, '计算机学院'); assert.equal(profile.major, '软件工程'); assert.equal(profile.grade, '2024级'); assert.equal('email' in profile, false);
     assert.deepEqual(await binding.prepare("SELECT school_number, name FROM accounts WHERE id = 'student'").first(), { school_number: '0009', name: '更正姓名' });
     assert.equal((await call('/api/auth/me', { cookie: member })).status, 401);
-    const teacherRead = await data(await call('/api/courses/course/students/student/academic-record', { cookie: await cookie('teacher') }));
-    assert.equal(teacherRead.name, '更正姓名'); assert.equal(teacherRead.schoolNumber, '0009');
-    assert.equal('email' in teacherRead, false);
     assert.equal((await call('/api/auth/login', { method: 'POST', body: { schoolNumber: '001', password } })).status, 401);
+    assert.equal((await call('/api/courses/course/students/student/academic-record', { cookie: await cookie('teacher') })).status, 404);
     assert.equal((await call('/api/auth/login', { method: 'POST', body: { schoolNumber: '0009', password } })).status, 200);
 });
 
-test('duplicate identifiers roll back all fields and audit records', async () => {
+test('duplicate identifiers roll back all fields', async () => {
     const admin = await cookie('admin');
     for (const change of [{ schoolNumber: '002' }]) {
         assert.equal((await patch('student', { name: '不应保存', ...change }, admin)).status, 409);
     }
-    assert.equal(await binding.prepare("SELECT data_generation FROM accounts WHERE id = 'student'").first('data_generation'), 1);
     assert.equal(await binding.prepare("SELECT name FROM accounts WHERE id = 'student'").first('name'), '虚构甲');
-    assert.equal(await binding.prepare('SELECT count(*) AS n FROM account_audit').first('n'), 0);
 });
 
-test('role changes retire the old identity, preserve relationships and return a new ID', async () => {
+test('role changes mark the old identity deleted, preserve relationships and return a new ID', async () => {
     const admin = await cookie('admin'), oldSession = await cookie('teacher');
     const enrollmentBefore = (await binding.prepare('SELECT * FROM enrollments').all()).results;
     for (const [id, role] of [['teacher', 'student'], ['student', 'teacher'], ['other', 'teacher']]) {
@@ -133,7 +130,7 @@ test('role changes retire the old identity, preserve relationships and return a 
         assert.equal(response.status, 200, await response.clone().text());
         const result = await data(response);
         assert.notEqual(result.id, id); assert.equal(result.previousId, id); assert.equal(result.role, role);
-        assert.equal(await binding.prepare('SELECT data_generation FROM accounts WHERE id = ?').bind(id).first('data_generation'), 2);
+        assert.equal(await binding.prepare('SELECT status FROM accounts WHERE id = ?').bind(id).first('status'), 'deleted');
         assert.deepEqual(await data(await call('/api/profiles/' + id)), { id, nickname: '已删除', avatarUrl: null, isDeleted: true });
         assert.equal((await call('/api/admin/accounts/' + id, { cookie: admin })).status, 404);
         const login = await data(await memberLogin(result.schoolNumber, password));
@@ -154,9 +151,6 @@ test('concurrent ordinary edits need no revision and update only submitted field
     assert.equal((await patch('student', { name: '最后姓名' }, admin)).status, 200);
     profile = await data(await call('/api/admin/accounts/student', { cookie: admin }));
     assert.equal(profile.name, '最后姓名'); assert.equal(profile.department, '新院系');
-    const audit = await data(await call('/api/admin/accounts/student/audit', { cookie: admin }));
-    assert.equal(audit.total, 3); assert.ok(!JSON.stringify(audit).includes('新姓名'));
-    assert.equal(await binding.prepare("SELECT data_generation FROM accounts WHERE id = 'student'").first('data_generation'), 1);
 });
 
 test('self editing permits only public fields; public profiles never expose academic/contact identity', async () => {
@@ -169,16 +163,6 @@ test('self editing permits only public fields; public profiles never expose acad
     assert.equal((await call('/api/me/profile', { method: 'PATCH', cookie: member, body: { nickname: '新名称' } })).status, 200);
     assert.deepEqual(await data(await call('/api/profiles/student')), { id: 'student', nickname: '新名称', avatarUrl: null, isDeleted: false });
     assert.equal((await call('/api/admin/accounts/student', { cookie: member })).status, 403);
-});
-
-test('academic HTTP endpoint enforces current-course/current-term privacy', async () => {
-    const teacher = await cookie('teacher');
-    assert.equal((await call('/api/courses/course/students/student/academic-record', { cookie: teacher })).status, 200);
-    assert.equal((await call('/api/courses/course/students/other/academic-record', { cookie: teacher })).status, 404);
-    assert.equal((await call('/api/courses/other-course/students/student/academic-record', { cookie: teacher })).status, 404);
-    assert.equal((await call('/api/courses/course/students/student/academic-record', { cookie: await cookie('other') })).status, 404);
-    await setCurrentTerm(binding, 'past');
-    assert.equal((await call('/api/courses/course/students/student/academic-record', { cookie: teacher })).status, 404);
 });
 
 // A 1x1 PNG. No real user images are used.
@@ -216,9 +200,6 @@ test('administrator resets a member password, revoking sessions and clearing tha
     assert.equal(await binding.prepare('SELECT count(*) AS n FROM login_attempts').first('n'), 1);
     assert.equal((await memberLogin('001', password)).status, 401);
     assert.equal((await memberLogin('001', nextPassword)).status, 200);
-    const audit = await data(await call('/api/admin/accounts/student/audit', { cookie: admin }));
-    assert.equal(audit.items[0].action, 'password.reset'); assert.deepEqual(audit.items[0].fields, ['password', 'mustChangePassword']);
-    assert.equal(audit.items[0].actorId, 'admin'); assert.ok(!JSON.stringify(audit).includes(nextPassword));
 });
 
 test('member password reset is admin-only and same-origin and never targets the administrator', async () => {
@@ -236,7 +217,6 @@ test('member password reset is admin-only and same-origin and never targets the 
     const results = await Promise.all([nextPassword, 'fictional-third-password-789'].map((newPassword) => resetPassword('student', { newPassword }, admin)));
     assert.deepEqual(results.map((r) => r.status).sort(), [200, 200]);
     assert.equal(await binding.prepare("SELECT credential_version FROM accounts WHERE id = 'student'").first('credential_version'), 3);
-    assert.equal(await binding.prepare("SELECT count(*) AS n FROM account_audit WHERE action = 'password.reset'").first('n'), 2);
 });
 
 test('profile-only changes keep sessions valid and email is no longer an account field', async () => {
@@ -278,7 +258,7 @@ test('deletion is admin-only, same-origin and protects the administrator', async
     assert.equal((await call('/api/admin/accounts/admin', { method: 'DELETE', cookie: admin })).status, 403);
 });
 
-test('avatar work is attached to waitUntil and retirement cleans an upload awaiting its database write', async () => {
+test('avatar work is attached to waitUntil and account deletion cleans an upload awaiting its database write', async () => {
     const member = await cookie('student'), admin = await cookie('admin'), background = [];
     const target = { ...env, FILES: { ...bucket, put: async (...args) => {
         const object = await bucket.put(...args);
@@ -294,34 +274,37 @@ test('avatar work is attached to waitUntil and retirement cleans an upload await
     assert.equal(await binding.prepare("SELECT avatar_key FROM accounts WHERE id='student'").first('avatar_key'), null);
 });
 
-test('failed role replacement rolls back the new account, old login and audit', async () => {
+test('failed role replacement rolls back the new account and old login', async () => {
     const admin = await cookie('admin'), member = await cookie('student');
     const before = (await binding.prepare('SELECT * FROM accounts ORDER BY id').all()).results;
     const response = await patch('student', { role: 'teacher', schoolNumber: '002' }, admin);
     assert.equal(response.status, 409);
     assert.deepEqual((await binding.prepare('SELECT * FROM accounts ORDER BY id').all()).results, before);
-    assert.equal(await binding.prepare('SELECT count(*) AS n FROM account_audit').first('n'), 0);
     assert.equal((await call('/api/auth/me', { cookie: member })).status, 200);
 });
 
-test('an admitted academic read survives disable, while subsequent requests are denied', async () => {
-    const teacher = await cookie('teacher');
-    let intercepted = false;
-    const wrap = (statement, sql) => new Proxy(statement, { get(target, key) {
-        if (key === 'bind') return (...values) => wrap(target.bind(...values), sql);
-        if (['first', 'all', 'raw'].includes(key)) return async (...args) => {
-            if (!intercepted && sql.includes('inner join "enrollments"')) {
-                intercepted = true;
-                await binding.prepare("UPDATE accounts SET status='disabled',credential_version=credential_version+1 WHERE id='teacher'").run();
-                await binding.prepare("DELETE FROM sessions WHERE account_id='teacher'").run();
-            }
-            return target[key](...args);
-        };
-        const value = target[key]; return typeof value === 'function' ? value.bind(target) : value;
-    } });
-    const delayed = { ...env, DB: { prepare(sql) { return wrap(binding.prepare(sql), sql); } } };
-    const result = await call('/api/courses/course/students/student/academic-record', { cookie: teacher }, delayed);
-    assert.equal(intercepted, true); assert.equal(result.status, 200);
-    assert.equal((await data(result)).name, '虚构甲');
-    assert.equal((await call('/api/courses/course/students/student/academic-record', { cookie: teacher })).status, 401);
+test('nickname can be omitted or cleared without exposing private identity as a fallback', async () => {
+    const admin = await cookie('admin');
+    const created = await call('/api/admin/accounts', { method: 'POST', cookie: admin,
+        body: { role: 'student', schoolNumber: 'NULL-NICK', name: '私有姓名', password } });
+    assert.equal(created.status, 201, await created.clone().text());
+    const profile = await data(created);
+    assert.equal(profile.nickname, null);
+    assert.equal((await data(await memberLogin('NULL-NICK', password))).nickname, null);
+    assert.deepEqual(await data(await call('/api/profiles/' + profile.id)), { id: profile.id, nickname: null, avatarUrl: null, isDeleted: false });
+    assert.equal((await data(await call('/api/admin/accounts?q=NULL-NICK', { cookie: admin }))).items[0].id, profile.id);
+    const member = await cookie('student');
+    for (const nickname of [null, '   ']) {
+        const changed = await call('/api/me/profile', { method: 'PATCH', cookie: member, body: { nickname } });
+        assert.equal(changed.status, 200); assert.equal((await data(changed)).nickname, null);
+    }
+    assert.equal((await patch('student', { nickname: '重新设置' }, admin)).status, 200);
+    assert.equal((await patch('student', { nickname: null }, admin)).status, 200);
+    assert.equal((await data(await call('/api/admin/accounts/student', { cookie: admin }))).nickname, null);
+});
+
+test('account audit endpoint and data generation no longer exist', async () => {
+    assert.equal((await call('/api/admin/accounts/student/audit', { cookie: await cookie('admin') })).status, 404);
+    assert.equal(await binding.prepare("SELECT count(*) AS n FROM sqlite_master WHERE name='account_audit'").first('n'), 0);
+    assert.equal((await binding.prepare('PRAGMA table_info(accounts)').all()).results.some(c => c.name === 'data_generation'), false);
 });

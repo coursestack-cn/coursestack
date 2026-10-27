@@ -1,6 +1,6 @@
 import { afterEach, beforeEach, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { start, internalToken, tokenFor } from './discussions-helpers.mjs';
+import { start, internalToken, tokenFor, doc, linkDoc } from './discussions-helpers.mjs';
 let h;
 beforeEach(async () => { h = await start(); });
 afterEach(async () => { await h?.dispose(); });
@@ -14,7 +14,7 @@ test('内部服务凭据与用户会话隔离，普通用户和裸 Token 不能�
 });
 test('事务事件稳定分页、载明直接通知对象；确认可重试且不删除事件', async () => {
     const q = await h.postQuestion(), a = await h.postAnswer(q);
-    await h.api('POST', '/comments', 'teacher-a', { targetKind: 'answer', targetId: a, body: '教师评论' });
+    await h.api('POST', '/comments', 'teacher-a', { targetKind: 'answer', targetId: a, body: doc('教师评论') });
     const first = await internal('GET', '/internal/events?after=0&limit=2');
     assert.equal(first.data.items.length, 2); assert.equal(first.data.hasMore, true);
     const second = await internal('GET', `/internal/events?after=${first.data.nextCursor}&limit=100`);
@@ -30,12 +30,12 @@ test('事务事件稳定分页、载明直接通知对象；确认可重试且�
     assert.equal((await internal('GET', `/internal/events?after=${first.data.nextCursor}`)).data.items.length, ids.length);
 });
 test('搜索快照提供可见课程、资料和问答；文件不可用不丢失讨论文档', async () => {
-    const q = await h.postQuestion('student-a', { body: '[讲义](/materials/material-a/versions/version-a1)' }), a = await h.postAnswer(q);
+    const q = await h.postQuestion('student-a', { body: linkDoc('讲义', '/materials/material-a/versions/1') }), a = await h.postAnswer(q);
     const page1 = await internal('GET', '/internal/documents?limit=1'); assert.equal(page1.data.hasMore, true);
     const page2 = await internal('GET', '/internal/documents?limit=100&after=' + encodeURIComponent(page1.data.nextCursor));
     const ids = [...page1.data.items, ...page2.data.items].map((x     ) => x.id);
     assert.ok([q, a, 'material-a', 'material-b'].every(id => ids.includes(id))); assert.equal(new Set(ids).size, ids.length);
-    await h.database.prepare("UPDATE file_versions SET status='hidden' WHERE id='version-a1'").run();
+    await h.database.prepare("UPDATE file_versions SET status='hidden' WHERE material_id='material-a' AND version=1").run();
     assert.equal((await internal('GET', `/internal/contents/${q}`)).data.available, true);
     await h.api('PUT', `/contents/${q}/moderation`, 'teacher-a', { revision: 1, action: 'hide', reason: '下架讨论内容' });
     assert.equal((await internal('GET', `/internal/contents/${q}`)).data.available, false);
@@ -48,8 +48,8 @@ test('个人空间限定本人，教师加分报表限定课程且支持学期�
     assert.equal((await h.api('GET', '/me/activity?kind=answer', 'student-a')).data.items.length, 0);
     assert.equal((await h.api('GET', '/me/activity?kind=answer', 'student-b')).data.items[0].id, a);
     assert.equal((await h.api('GET', '/me/bonus-ledger', 'student-a')).data.items.length, 0);
-    assert.equal((await h.api('GET', '/me/bonus-ledger', 'student-b')).data.items[0].deltaPoints, 2);
-    assert.equal((await h.api('GET', '/courses/course-a/bonus-summary?termId=term-active', 'teacher-a')).data.items[0].totalPoints, 2);
+    assert.equal((await h.api('GET', '/me/bonus-ledger', 'student-b')).data.items[0].deltaPoints, 50);
+    assert.equal((await h.api('GET', '/courses/course-a/bonus-summary?termId=term-active', 'teacher-a')).data.items[0].totalPoints, 50);
     assert.equal((await h.api('GET', '/courses/course-a/bonus-ledger?termId=term-old', 'teacher-a')).data.items.length, 0);
     assert.equal((await h.api('GET', '/courses/course-a/bonus-summary', 'teacher-b')).status, 403);
 });
@@ -74,19 +74,19 @@ test('删除问题撤销奖励并阻止后续回答，管理员可以跨课程�
     await h.policy(); const q = await h.postQuestion(), a = await h.postAnswer(q); await h.accept(q, a);
     assert.equal((await h.api('GET', `/moderation/contents/${q}`, 'admin')).status, 200);
     assert.equal((await h.api('DELETE', `/contents/${q}`, 'student-a', { revision: await h.revision(q) })).status, 200);
-    assert.equal((await h.api('POST', `/questions/${q}/answers`, 'student-b', { body: '删除后回复' })).status, 404);
-    assert.equal(await h.database.prepare('SELECT SUM(delta_cents) AS n FROM bonus_ledger').first('n'), 0);
+    assert.equal((await h.api('POST', `/questions/${q}/answers`, 'student-b', { body: doc('删除后回复') })).status, 404);
+    assert.equal(await h.database.prepare('SELECT SUM(delta_points) AS n FROM bonus_ledger').first('n'), 0);
     assert.equal((await h.api('GET', `/contents/${q}`)).data.status, 'deleted');
 });
 test('数据库拒绝跨问题采纳及内容身份迁移', async () => {
     const q1 = await h.postQuestion(), q2 = await h.postQuestion(), a = await h.postAnswer(q1);
-    await assert.rejects(() => h.database.prepare("UPDATE contents SET accepted_answer_id=?,accepted_by='teacher-a',accepted_at=1792540800,accepted_term_id='term-active',acceptance_id='test-accept' WHERE id=?").bind(a, q2).run(), /invalid_acceptance/);
+    await assert.rejects(() => h.database.prepare("INSERT INTO acceptances(answer_id,question_id,operator_id) VALUES (?,?,'teacher-a')").bind(a, q2).run(), /invalid_acceptance/);
     await assert.rejects(() => h.database.prepare("UPDATE contents SET course_id='course-b' WHERE id=?").bind(q1).run(), /content_identity_immutable/);
 });
 test('无效加分小数和过大正文被拒绝，报错不返回SQL或令牌', async () => {
-    const invalid = await h.api('PUT', '/courses/course-a/bonus-policy', 'teacher-a', { revision: 1, enabled: true, bonusPoints: 2.345 });
+    const invalid = await h.api('PUT', '/courses/course-a/bonus-policy', 'teacher-a', { revision: 1, questionPoints: 0, answerPoints: 2.345, acceptancePoints: 0, commentPoints: 0, materialPoints: 0, materialPerVersion: false });
     assert.equal(invalid.status, 400);
-    const large = await h.api('POST', '/courses/course-a/questions', 'student-a', { title: '过大正文', body: '中'.repeat(50000) });
+    const large = await h.api('POST', '/courses/course-a/questions', 'student-a', { title: '过大正文', body: doc('中'.repeat(50000)) });
     assert.equal(large.status, 413);
     for (const r of [invalid, large]) assert.ok(!JSON.stringify(r.data).includes('local-teacher-a-token'));
 });

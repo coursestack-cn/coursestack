@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import { passwordField, newPasswordField } from '../src/auth/crypto.ts';
-import { start } from './discussions-helpers.mjs';
+import { start, doc } from './discussions-helpers.mjs';
 
 const cookieOf = (response) => response.headers.get('set-cookie')?.split(';')[0];
 async function request(app, path, cookie, body) {
@@ -24,7 +24,7 @@ test('short temporary passwords force a real change, persist across logins, and 
         assert.equal((await first.json()).data.mustChangePassword, true);
         const auth = cookieOf(first), other = cookieOf(second);
         assert.equal((await (await request(app, '/auth/me', auth)).json()).data.mustChangePassword, true);
-        for (const [path, body] of [['/me/profile'], ['/courses/course-a/questions', { title: '不能绕过改密', body: '问题' }], ['/notifications']]) {
+        for (const [path, body] of [['/me/profile'], ['/courses/course-a/questions', { title: '不能绕过改密', body: doc('问题') }], ['/notifications']]) {
             const blocked = await request(app, path, auth, body);
             assert.equal(blocked.status, 403, path);
             assert.equal((await blocked.json()).error.code, 'PASSWORD_CHANGE_REQUIRED');
@@ -42,7 +42,7 @@ test('short temporary passwords force a real change, persist across logins, and 
         const newLogin = await login(app, '12345678');
         assert.equal((await newLogin.clone().json()).data.mustChangePassword, false);
         assert.equal((await request(app, '/me/profile', cookieOf(newLogin))).status, 200);
-        const question = await request(app, '/courses/course-a/questions', cookieOf(newLogin), { title: '改密后正常提问', body: '内容' });
+        const question = await request(app, '/courses/course-a/questions', cookieOf(newLogin), { title: '改密后正常提问', body: doc('内容') });
         assert.equal(question.status, 201);
     } finally { await app.dispose(); }
 });
@@ -59,7 +59,7 @@ test('omitted or empty reset passwords are generated once, optional flag is vali
         assert.equal((await same.json()).error.code, 'PASSWORD_UNCHANGED');
         assert.equal((await request(app, '/auth/logout', cookieOf(loggedIn), {})).status, 200);
         assert.equal((await (await login(app, first.data.generatedPassword)).json()).data.mustChangePassword, true);
-        for (const path of ['/admin/accounts/student-a', '/admin/accounts', '/admin/accounts/student-a/audit']) {
+        for (const path of ['/admin/accounts/student-a', '/admin/accounts']) {
             const response = await app.api('GET', path, 'admin');
             assert.ok(!JSON.stringify(response.data).includes(first.data.generatedPassword));
             assert.ok(!JSON.stringify(response.data).includes('generatedPassword'));

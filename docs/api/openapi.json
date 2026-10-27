@@ -1,9 +1,9 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "CourseStack 组员3：课程与互动后端",
-    "version": "2.0.0",
-    "description": "Markdown 原文由前端安全渲染。公开数据不包含学工号、姓名、院系、专业或年级。写入需登录，创建需幂等键，课程和内容编辑需当前 revision；账户修改不使用 revision。Cookie 写请求需可信 Origin。"
+    "title": "CourseStack 课程与讨论 API",
+    "version": "4.0.0",
+    "description": "正文使用 Tiptap / ProseMirror JSON 对象，由前端按编辑器扩展配置安全渲染。公开数据不包含学工号、姓名、院系、专业或年级。写入需登录，创建需幂等键，课程和内容编辑需当前 revision；账户修改和独立采纳关系不使用 revision；积分为课程、学期、学生维度的整数。Cookie 写请求需可信 Origin。"
   },
   "servers": [
     {
@@ -680,7 +680,7 @@
     },
     "/api/courses/{id}/bonus-policy": {
       "put": {
-        "summary": "配置采纳加分，历史采纳不重算",
+        "summary": "配置五类整数积分及资料版本计分，历史奖励不重算",
         "operationId": "put__api_courses_id_bonus_policy",
         "security": [
           {
@@ -720,20 +720,43 @@
                     "type": "integer",
                     "minimum": 1
                   },
-                  "enabled": {
-                    "type": "boolean"
-                  },
-                  "bonusPoints": {
-                    "type": "number",
+                  "questionPoints": {
+                    "type": "integer",
                     "minimum": 0,
-                    "maximum": 100,
-                    "multipleOf": 0.01
+                    "maximum": 9007199254740991
+                  },
+                  "answerPoints": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "acceptancePoints": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "commentPoints": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "materialPoints": {
+                    "type": "integer",
+                    "minimum": 0,
+                    "maximum": 9007199254740991
+                  },
+                  "materialPerVersion": {
+                    "type": "boolean"
                   }
                 },
                 "required": [
                   "revision",
-                  "enabled",
-                  "bonusPoints"
+                  "questionPoints",
+                  "answerPoints",
+                  "acceptancePoints",
+                  "commentPoints",
+                  "materialPoints",
+                  "materialPerVersion"
                 ],
                 "additionalProperties": false
               }
@@ -1476,7 +1499,7 @@
         }
       },
       "post": {
-        "summary": "发布问题，资料引用写入 Markdown 正文",
+        "summary": "发布问题，资料引用使用 ProseMirror JSON 正文中的链接",
         "operationId": "post__api_courses_id_questions",
         "security": [
           {
@@ -1529,9 +1552,7 @@
                     "maxLength": 200
                   },
                   "body": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 30000
+                    "$ref": "#/components/schemas/ProseMirrorDocument"
                   },
                   "tags": {
                     "type": [
@@ -2030,9 +2051,7 @@
                 "type": "object",
                 "properties": {
                   "body": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 30000
+                    "$ref": "#/components/schemas/ProseMirrorDocument"
                   }
                 },
                 "required": [
@@ -2404,9 +2423,7 @@
                     "pattern": "^[a-zA-Z0-9_-]+$"
                   },
                   "body": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 30000
+                    "$ref": "#/components/schemas/ProseMirrorDocument"
                   }
                 },
                 "required": [
@@ -2735,9 +2752,7 @@
                         "maxLength": 200
                       },
                       "body": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 30000
+                        "$ref": "#/components/schemas/ProseMirrorDocument"
                       },
                       "tags": {
                         "type": [
@@ -2766,9 +2781,7 @@
                         "minimum": 1
                       },
                       "body": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 30000
+                        "$ref": "#/components/schemas/ProseMirrorDocument"
                       }
                     },
                     "required": [
@@ -3309,10 +3322,6 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "revision": {
-                    "type": "integer",
-                    "minimum": 1
-                  },
                   "answerId": {
                     "anyOf": [
                       {
@@ -3328,7 +3337,6 @@
                   }
                 },
                 "required": [
-                  "revision",
                   "answerId"
                 ],
                 "additionalProperties": false
@@ -3354,35 +3362,6 @@
                           "properties": {
                             "changed": {
                               "type": "boolean"
-                            },
-                            "award": {
-                              "type": "object",
-                              "properties": {
-                                "points": {
-                                  "type": "number",
-                                  "minimum": 0,
-                                  "maximum": 100,
-                                  "multipleOf": 0.01
-                                },
-                                "termId": {
-                                  "anyOf": [
-                                    {
-                                      "type": "string",
-                                      "minLength": 1,
-                                      "maxLength": 100,
-                                      "pattern": "^[a-zA-Z0-9_-]+$"
-                                    },
-                                    {
-                                      "type": "null"
-                                    }
-                                  ]
-                                }
-                              },
-                              "required": [
-                                "points",
-                                "termId"
-                              ],
-                              "additionalProperties": false
                             }
                           },
                           "required": [
@@ -3493,10 +3472,10 @@
         }
       }
     },
-    "/api/questions/{id}/award": {
-      "patch": {
-        "summary": "有理由地调整已采纳学生加分，保留冲销及新奖分流水",
-        "operationId": "patch__api_questions_id_award",
+    "/api/courses/{id}/bonus-adjustments": {
+      "post": {
+        "summary": "当前课程教师或管理员为指定课程、学期、学生手动加减整数分",
+        "operationId": "post__api_courses_id_bonus_adjustments",
         "security": [
           {
             "sessionCookie": []
@@ -3522,6 +3501,17 @@
               "type": "string",
               "format": "uri"
             }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 100,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            }
           }
         ],
         "requestBody": {
@@ -3531,25 +3521,36 @@
               "schema": {
                 "type": "object",
                 "properties": {
-                  "revision": {
-                    "type": "integer",
-                    "minimum": 1
+                  "studentId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100,
+                    "pattern": "^[a-zA-Z0-9_-]+$"
                   },
-                  "bonusPoints": {
-                    "type": "number",
-                    "minimum": 0,
-                    "maximum": 100,
-                    "multipleOf": 0.01
+                  "termId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100,
+                    "pattern": "^[a-zA-Z0-9_-]+$"
+                  },
+                  "deltaPoints": {
+                    "type": "integer",
+                    "minimum": -9007199254740991,
+                    "maximum": 9007199254740991,
+                    "not": {
+                      "const": 0
+                    }
                   },
                   "reason": {
                     "type": "string",
-                    "minLength": 3,
+                    "minLength": 1,
                     "maxLength": 500
                   }
                 },
                 "required": [
-                  "revision",
-                  "bonusPoints",
+                  "studentId",
+                  "termId",
+                  "deltaPoints",
                   "reason"
                 ],
                 "additionalProperties": false
@@ -3558,7 +3559,7 @@
           }
         },
         "responses": {
-          "200": {
+          "201": {
             "description": "成功",
             "content": {
               "application/json": {
@@ -3566,35 +3567,7 @@
                   "type": "object",
                   "properties": {
                     "data": {
-                      "type": "object",
-                      "properties": {
-                        "id": {
-                          "type": "string",
-                          "minLength": 1,
-                          "maxLength": 100,
-                          "pattern": "^[a-zA-Z0-9_-]+$"
-                        },
-                        "changed": {
-                          "type": "boolean"
-                        },
-                        "revision": {
-                          "type": "integer",
-                          "minimum": 1
-                        },
-                        "bonusPoints": {
-                          "type": "number",
-                          "minimum": 0,
-                          "maximum": 100,
-                          "multipleOf": 0.01
-                        }
-                      },
-                      "required": [
-                        "id",
-                        "changed",
-                        "revision",
-                        "bonusPoints"
-                      ],
-                      "additionalProperties": false
+                      "$ref": "#/components/schemas/LedgerEntry"
                     }
                   },
                   "required": [
@@ -3770,34 +3743,19 @@
                             "type": "object",
                             "properties": {
                               "id": {
-                                "type": "integer"
-                              },
-                              "acceptanceId": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 100,
-                                "pattern": "^[a-zA-Z0-9_-]+$"
+                                "type": "integer",
+                                "minimum": 1
                               },
                               "operation": {
                                 "type": "string",
                                 "enum": [
                                   "award",
-                                  "revoke"
+                                  "revoke",
+                                  "restore",
+                                  "manual"
                                 ]
                               },
                               "courseId": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 100,
-                                "pattern": "^[a-zA-Z0-9_-]+$"
-                              },
-                              "questionId": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 100,
-                                "pattern": "^[a-zA-Z0-9_-]+$"
-                              },
-                              "answerId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 100,
@@ -3815,11 +3773,30 @@
                                 "maxLength": 100,
                                 "pattern": "^[a-zA-Z0-9_-]+$"
                               },
-                              "teacherId": {
+                              "deltaPoints": {
+                                "type": "integer",
+                                "minimum": -9007199254740991,
+                                "maximum": 9007199254740991,
+                                "not": {
+                                  "const": 0
+                                }
+                              },
+                              "sourceKind": {
+                                "type": "string",
+                                "enum": [
+                                  "question",
+                                  "answer",
+                                  "acceptance",
+                                  "comment",
+                                  "material",
+                                  "manual"
+                                ]
+                              },
+                              "sourceId": {
                                 "type": "string",
                                 "minLength": 1,
-                                "maxLength": 100,
-                                "pattern": "^[a-zA-Z0-9_-]+$"
+                                "maxLength": 160,
+                                "description": "内容 ID、采纳答案 ID、materialId@version 或手动调整幂等键"
                               },
                               "operatorId": {
                                 "type": "string",
@@ -3827,16 +3804,21 @@
                                 "maxLength": 100,
                                 "pattern": "^[a-zA-Z0-9_-]+$"
                               },
-                              "deltaCents": {
-                                "type": "integer"
-                              },
-                              "deltaPoints": {
-                                "type": "number"
-                              },
                               "reason": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 1000
+                              },
+                              "reversesId": {
+                                "anyOf": [
+                                  {
+                                    "type": "integer",
+                                    "minimum": 1
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
                               },
                               "createdAt": {
                                 "type": "integer",
@@ -3845,18 +3827,16 @@
                             },
                             "required": [
                               "id",
-                              "acceptanceId",
                               "operation",
                               "courseId",
-                              "questionId",
-                              "answerId",
                               "studentId",
                               "termId",
-                              "teacherId",
-                              "operatorId",
-                              "deltaCents",
                               "deltaPoints",
+                              "sourceKind",
+                              "sourceId",
+                              "operatorId",
                               "reason",
+                              "reversesId",
                               "createdAt"
                             ],
                             "additionalProperties": false
@@ -4063,8 +4043,10 @@
                                 "pattern": "^[a-zA-Z0-9_-]+$"
                               },
                               "nickname": {
-                                "type": "string",
-                                "minLength": 1,
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
                                 "maxLength": 80
                               },
                               "termId": {
@@ -4073,18 +4055,14 @@
                                 "maxLength": 100,
                                 "pattern": "^[a-zA-Z0-9_-]+$"
                               },
-                              "totalCents": {
-                                "type": "integer"
-                              },
                               "totalPoints": {
-                                "type": "number"
+                                "type": "integer"
                               }
                             },
                             "required": [
                               "studentId",
                               "nickname",
                               "termId",
-                              "totalCents",
                               "totalPoints"
                             ],
                             "additionalProperties": false
@@ -4285,34 +4263,19 @@
                             "type": "object",
                             "properties": {
                               "id": {
-                                "type": "integer"
-                              },
-                              "acceptanceId": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 100,
-                                "pattern": "^[a-zA-Z0-9_-]+$"
+                                "type": "integer",
+                                "minimum": 1
                               },
                               "operation": {
                                 "type": "string",
                                 "enum": [
                                   "award",
-                                  "revoke"
+                                  "revoke",
+                                  "restore",
+                                  "manual"
                                 ]
                               },
                               "courseId": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 100,
-                                "pattern": "^[a-zA-Z0-9_-]+$"
-                              },
-                              "questionId": {
-                                "type": "string",
-                                "minLength": 1,
-                                "maxLength": 100,
-                                "pattern": "^[a-zA-Z0-9_-]+$"
-                              },
-                              "answerId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 100,
@@ -4330,11 +4293,30 @@
                                 "maxLength": 100,
                                 "pattern": "^[a-zA-Z0-9_-]+$"
                               },
-                              "teacherId": {
+                              "deltaPoints": {
+                                "type": "integer",
+                                "minimum": -9007199254740991,
+                                "maximum": 9007199254740991,
+                                "not": {
+                                  "const": 0
+                                }
+                              },
+                              "sourceKind": {
+                                "type": "string",
+                                "enum": [
+                                  "question",
+                                  "answer",
+                                  "acceptance",
+                                  "comment",
+                                  "material",
+                                  "manual"
+                                ]
+                              },
+                              "sourceId": {
                                 "type": "string",
                                 "minLength": 1,
-                                "maxLength": 100,
-                                "pattern": "^[a-zA-Z0-9_-]+$"
+                                "maxLength": 160,
+                                "description": "内容 ID、采纳答案 ID、materialId@version 或手动调整幂等键"
                               },
                               "operatorId": {
                                 "type": "string",
@@ -4342,16 +4324,21 @@
                                 "maxLength": 100,
                                 "pattern": "^[a-zA-Z0-9_-]+$"
                               },
-                              "deltaCents": {
-                                "type": "integer"
-                              },
-                              "deltaPoints": {
-                                "type": "number"
-                              },
                               "reason": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 1000
+                              },
+                              "reversesId": {
+                                "anyOf": [
+                                  {
+                                    "type": "integer",
+                                    "minimum": 1
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
                               },
                               "createdAt": {
                                 "type": "integer",
@@ -4360,18 +4347,16 @@
                             },
                             "required": [
                               "id",
-                              "acceptanceId",
                               "operation",
                               "courseId",
-                              "questionId",
-                              "answerId",
                               "studentId",
                               "termId",
-                              "teacherId",
-                              "operatorId",
-                              "deltaCents",
                               "deltaPoints",
+                              "sourceKind",
+                              "sourceId",
+                              "operatorId",
                               "reason",
+                              "reversesId",
                               "createdAt"
                             ],
                             "additionalProperties": false
@@ -5407,8 +5392,14 @@
                           ]
                         },
                         "body": {
-                          "type": "string",
-                          "maxLength": 30000
+                          "anyOf": [
+                            {
+                              "$ref": "#/components/schemas/ProseMirrorDocument"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
                         },
                         "status": {
                           "type": "string",
@@ -5577,7 +5568,7 @@
     },
     "/api/contents/{id}/moderation": {
       "put": {
-        "summary": "下架或恢复；恢复不自动恢复采纳与加分",
+        "summary": "下架撤回相应积分；恢复后按原值、原学期补回并恢复采纳可见性",
         "operationId": "put__api_contents_id_moderation",
         "security": [
           {
@@ -6012,7 +6003,7 @@
     },
     "/api/internal/events": {
       "get": {
-        "summary": "组员4拉取事务内业务事件，按 eventId 去重",
+        "summary": "内部服务拉取事务内业务事件，按 eventId 去重",
         "operationId": "get__api_internal_events",
         "security": [
           {
@@ -6474,7 +6465,24 @@
                                 ]
                               },
                               "body": {
-                                "type": "string"
+                                "anyOf": [
+                                  {
+                                    "type": "string"
+                                  },
+                                  {
+                                    "$ref": "#/components/schemas/ProseMirrorDocument"
+                                  },
+                                  {
+                                    "type": "null"
+                                  }
+                                ]
+                              },
+                              "format": {
+                                "type": "string",
+                                "enum": [
+                                  "text",
+                                  "prosemirror"
+                                ]
                               },
                               "tags": {
                                 "type": [
@@ -6534,6 +6542,7 @@
                               "courseId",
                               "title",
                               "body",
+                              "format",
                               "tags",
                               "targetKind",
                               "targetId",
@@ -6880,6 +6889,216 @@
         ],
         "additionalProperties": false
       },
+      "ProseMirrorMark": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "minLength": 1
+          },
+          "attrs": {
+            "type": "object",
+            "additionalProperties": true
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "additionalProperties": false
+      },
+      "ProseMirrorNode": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "type": "string",
+            "minLength": 1
+          },
+          "attrs": {
+            "type": "object",
+            "additionalProperties": true
+          },
+          "text": {
+            "type": "string",
+            "minLength": 1
+          },
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProseMirrorNode"
+            }
+          },
+          "marks": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProseMirrorMark"
+            }
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "additionalProperties": false
+      },
+      "ProseMirrorDocument": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/ProseMirrorNode"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "doc"
+              }
+            }
+          }
+        ],
+        "description": "JSON 序列化后最多 30000 字符、节点最多嵌套 64 层。text 节点须包含非空 text 且不能有 content；其他节点不含 text。具体节点、标记和属性由 Tiptap 扩展配置确定。"
+      },
+      "BonusPolicy": {
+        "type": "object",
+        "properties": {
+          "questionPoints": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "answerPoints": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "acceptancePoints": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "commentPoints": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "materialPoints": {
+            "type": "integer",
+            "minimum": 0,
+            "maximum": 9007199254740991
+          },
+          "materialPerVersion": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "questionPoints",
+          "answerPoints",
+          "acceptancePoints",
+          "commentPoints",
+          "materialPoints",
+          "materialPerVersion"
+        ],
+        "additionalProperties": false
+      },
+      "LedgerEntry": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "operation": {
+            "type": "string",
+            "enum": [
+              "award",
+              "revoke",
+              "restore",
+              "manual"
+            ]
+          },
+          "courseId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "pattern": "^[a-zA-Z0-9_-]+$"
+          },
+          "studentId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "pattern": "^[a-zA-Z0-9_-]+$"
+          },
+          "termId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "pattern": "^[a-zA-Z0-9_-]+$"
+          },
+          "deltaPoints": {
+            "type": "integer",
+            "minimum": -9007199254740991,
+            "maximum": 9007199254740991,
+            "not": {
+              "const": 0
+            }
+          },
+          "sourceKind": {
+            "type": "string",
+            "enum": [
+              "question",
+              "answer",
+              "acceptance",
+              "comment",
+              "material",
+              "manual"
+            ]
+          },
+          "sourceId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 160,
+            "description": "内容 ID、采纳答案 ID、materialId@version 或手动调整幂等键"
+          },
+          "operatorId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "pattern": "^[a-zA-Z0-9_-]+$"
+          },
+          "reason": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 1000
+          },
+          "reversesId": {
+            "anyOf": [
+              {
+                "type": "integer",
+                "minimum": 1
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "createdAt": {
+            "type": "integer",
+            "description": "Unix 秒"
+          }
+        },
+        "required": [
+          "id",
+          "operation",
+          "courseId",
+          "studentId",
+          "termId",
+          "deltaPoints",
+          "sourceKind",
+          "sourceId",
+          "operatorId",
+          "reason",
+          "reversesId",
+          "createdAt"
+        ],
+        "additionalProperties": false
+      },
       "Course": {
         "type": "object",
         "properties": {
@@ -6906,14 +7125,8 @@
             "type": "string",
             "maxLength": 5000
           },
-          "bonusEnabled": {
-            "type": "boolean"
-          },
-          "bonusPoints": {
-            "type": "number",
-            "minimum": 0,
-            "maximum": 100,
-            "multipleOf": 0.01
+          "bonusPolicy": {
+            "$ref": "#/components/schemas/BonusPolicy"
           },
           "revision": {
             "type": "integer",
@@ -6932,8 +7145,7 @@
           "code",
           "department",
           "introduction",
-          "bonusEnabled",
-          "bonusPoints",
+          "bonusPolicy",
           "revision",
           "createdAt",
           "updatedAt"
@@ -6985,8 +7197,10 @@
                 "pattern": "^[a-zA-Z0-9_-]+$"
               },
               "nickname": {
-                "type": "string",
-                "minLength": 1,
+                "type": [
+                  "string",
+                  "null"
+                ],
                 "maxLength": 80
               },
               "isDeleted": {
@@ -7015,11 +7229,17 @@
             ]
           },
           "body": {
-            "type": "string",
-            "maxLength": 30000
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/ProseMirrorDocument"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "format": {
-            "const": "markdown"
+            "const": "prosemirror"
           },
           "tags": {
             "type": [

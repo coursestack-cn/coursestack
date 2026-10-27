@@ -12,10 +12,12 @@ const uid = () => crypto.randomUUID();
 const courseInput = z.object({ name: z.string().trim().min(1).max(120), code: z.string().trim().min(1).max(40),
     department: z.string().trim().max(120).default(''), introduction: z.string().trim().max(5000).default('') }).strict();
 type Course = { id: string; name: string; code: string; department: string; introduction: string;
-    bonus_enabled: number; bonus_cents: number; revision: number; created_at: number; updated_at: number | null; request_hash: string };
+    question_points: number; answer_points: number; acceptance_points: number; comment_points: number; material_points: number; material_per_version: number; revision: number; created_at: number; updated_at: number; request_hash: string };
 export const courseDto = (r: Course) => ({ id: r.id, name: r.name, code: r.code, department: r.department,
-    introduction: r.introduction, bonusEnabled: Boolean(r.bonus_enabled), bonusPoints: r.bonus_cents / 100,
-    revision: r.revision, createdAt: r.created_at, updatedAt: r.updated_at ?? r.created_at });
+    introduction: r.introduction, bonusPolicy: { questionPoints: r.question_points, answerPoints: r.answer_points,
+        acceptancePoints: r.acceptance_points, commentPoints: r.comment_points, materialPoints: r.material_points,
+        materialPerVersion: Boolean(r.material_per_version) },
+    revision: r.revision, createdAt: r.created_at, updatedAt: r.updated_at });
 export async function getCourse(c: Ctx, id: string) {
     const r = await createDatabase(c.env.DB).get<Course>(sql`SELECT * FROM courses WHERE id=${id}`);
     if (!r) throw new HttpError(404, 'COURSE_NOT_FOUND', '课程不存在');
@@ -76,8 +78,10 @@ courseRoutes.patch('/courses/:id', async c => {
 });
 courseRoutes.put('/courses/:id/bonus-policy', async c => {
     const id = c.req.param('id'), a = await requireManagement(c, id);
-    const data = await input(c, z.object({ revision: revisionSchema, enabled: z.boolean(), bonusPoints: pointsSchema }).strict());
-    const result = await createDatabase(c.env.DB).run(sql`UPDATE courses SET bonus_enabled=${Number(data.enabled)},bonus_cents=${Math.round(data.bonusPoints * 100)},
+    const data = await input(c, z.object({ revision: revisionSchema, questionPoints: pointsSchema, answerPoints: pointsSchema,
+        acceptancePoints: pointsSchema, commentPoints: pointsSchema, materialPoints: pointsSchema, materialPerVersion: z.boolean() }).strict());
+    const result = await createDatabase(c.env.DB).run(sql`UPDATE courses SET question_points=${data.questionPoints},answer_points=${data.answerPoints},
+        acceptance_points=${data.acceptancePoints},comment_points=${data.commentPoints},material_points=${data.materialPoints},material_per_version=${Number(data.materialPerVersion)},
         revision=revision+1,updated_by=${a.id},updated_at=${now()} WHERE id=${id} AND revision=${data.revision} AND ${management(a, sql`courses.id`)}`);
     assertChanged(result); return respond(c, courseDto(await getCourse(c, id)));
 });
@@ -87,7 +91,7 @@ courseRoutes.get('/courses/:id/entry', async c => {
     const canManage = viewer ? Boolean(await createDatabase(c.env.DB).get(sql`SELECT 1 WHERE ${management(viewer, sql`${id}`)}`)) : false;
     const summary = await createDatabase(c.env.DB).get<{ questions: number; unresolved: number; answers: number }>(sql`SELECT
         COUNT(CASE WHEN kind='question' THEN 1 END) AS questions,
-        COUNT(CASE WHEN kind='question' AND accepted_answer_id IS NULL THEN 1 END) AS unresolved,
+        COUNT(CASE WHEN kind='question' AND NOT EXISTS(SELECT 1 FROM public_acceptances a WHERE a.question_id=public_contents.id) THEN 1 END) AS unresolved,
         COUNT(CASE WHEN kind='answer' THEN 1 END) AS answers FROM public_contents WHERE course_id=${id}`);
     return respond(c, { course: courseDto(course), summary, permissions: { canManage },
         links: { questions: `/api/courses/${id}/questions`, activity: `/api/courses/${id}/activity`,

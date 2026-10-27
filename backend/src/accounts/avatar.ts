@@ -69,7 +69,7 @@ export async function avatarRoutes(request: Request, env: Env, waitUntil?: (work
                 key = `avatars/${session.id}/${crypto.randomUUID()}`;
                 await env.FILES.put(key, bytes, { httpMetadata: { contentType } });
             }
-            const result = await mutateAccount(env.DB, session, session.id, 'profile.avatar', ['avatar'], false, gate => [
+            const result = await mutateAccount(env.DB, session, session.id, false, gate => [
                 env.DB.prepare(`SELECT avatar_key FROM accounts WHERE id = ? AND ${gate}`).bind(session.id),
                 env.DB.prepare(`UPDATE accounts SET avatar_key = ? WHERE id = ? AND ${gate}`).bind(key, session.id),
             ]);
