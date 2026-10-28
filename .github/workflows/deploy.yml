@@ -7,6 +7,11 @@ on:
     branches:
       - main
   workflow_dispatch:
+    inputs:
+      reset_data:
+        description: Replace production D1 and R2 data with the demo data after deploying
+        type: boolean
+        default: true
 
 permissions:
   contents: read
@@ -49,6 +54,18 @@ jobs:
             exit 1
           fi
 
+      # Manual runs use the reset_data input; pushes use the RESET_DATA variable, true when unset.
+      - name: Resolve data reset
+        env:
+          RESET_DATA: ${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.reset_data) || vars.RESET_DATA || 'true' }}
+        run: |
+          if [[ "$RESET_DATA" != true && "$RESET_DATA" != false ]]; then
+            echo "::error::RESET_DATA must be true or false."
+            exit 1
+          fi
+          echo "RESET_DATA=$RESET_DATA" >> "$GITHUB_ENV"
+          echo "Reset production data after deploying: $RESET_DATA"
+
       - name: Set up pnpm and Node.js
         uses: pnpm/setup@fa36a5ef7dcdefc3a7cb25655c122e00cf6e636e # v3.1.2
         with:
@@ -80,7 +97,9 @@ jobs:
         working-directory: frontend
         run: pnpm build
 
+      # A data reset rebuilds the schema after deploying, so it skips this step.
       - name: Apply D1 migrations
+        if: env.RESET_DATA == 'false'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
@@ -91,6 +110,14 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: pnpm exec wrangler deploy --env "$DEPLOY_ENV"
+
+      # Drops all D1 tables and R2 objects, reapplies the schema and demo data, and keeps the admin credential.
+      - name: Reset production data to the demo set
+        if: env.RESET_DATA == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: pnpm demo:reset --confirm "$(jq --raw-output '.env.production.d1_databases[0].database_id' wrangler.json)"
 
       - name: Verify deployment
         run: |
@@ -110,6 +137,10 @@ jobs:
             echo "- Environment: $DEPLOY_ENV"
             echo "- Commit: $GITHUB_SHA"
             echo "- URL: $DEPLOY_URL"
-            echo "- D1: pending migrations applied"
+            if [[ "$RESET_DATA" == true ]]; then
+              echo "- Data: D1 and R2 reset to the demo data, admin credential kept"
+            else
+              echo "- D1: pending migrations applied, data unchanged"
+            fi
             echo "- Verification: API health and frontend request passed"
           } >> "$GITHUB_STEP_SUMMARY"

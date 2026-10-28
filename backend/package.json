@@ -11,6 +11,7 @@
         "check": "tsc --noEmit",
         "test": "node --experimental-strip-types --test tests/*.test.mjs",
         "demo:prepare": "node --experimental-strip-types scripts/prepare-demo.mjs",
+        "demo:reset": "node --experimental-strip-types scripts/reset-demo.mjs",
         "admin:init:local": "node --experimental-strip-types scripts/init-admin.mjs",
         "admin:init": "node --experimental-strip-types scripts/admin.mjs init",
         "admin:reset": "node --experimental-strip-types scripts/admin.mjs reset",

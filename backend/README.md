@@ -43,7 +43,7 @@ curl.exe --fail http://127.0.0.1:8787/api/health
 
 ## 开题演示账号
 
-独立脚本 `scripts/prepare-demo.mjs` 创建学生 **S0001–S0100** 和教师 **T0001**，新增账号初始密码同账号，均不要求首次改密。全部姓名为虚构名称，不导入真实学生信息。学生加入“数据库系统原理”的当前学期，教师建立同课程同学期的授课关系。
+独立脚本 `scripts/prepare-demo.mjs` 创建学生 **S0001–S0100** 和教师 **T0001**，新增账号初始密码同账号，均不要求首次改密。全部姓名为虚构名称，不导入真实学生信息。学生均为计算机学院、计算机科学与技术专业、2024 级，教师为计算机学院、计算机科学与技术，不填年级。学生加入“数据库系统原理”的当前学期，教师建立同课程同学期的授课关系。
 
 先初始化当前结构并配置当前学期，再预览和执行（全新本地库可先运行 `pnpm db:setup:local`）：
 
@@ -65,6 +65,14 @@ pnpm demo:prepare --remote --config .local/admin-production.json
 远程写入需在交互终端输入 `PREPARE <databaseId>`。脚本不执行迁移或部署。重复执行只补缺失的演示账号和关系，保留已有密码、昵称、账号状态、强制改密标记和业务内容；学工号被其他账号占用时拒绝覆盖。写入使用单次 D1 batch，当前学期并发变化时整批不写入，不保存密码明文或账户审计记录。
 
 这些是供课堂体验的共享测试账号，初始密码公开，不承载真实个人资料。脚本不会创建或重置平台管理员。自动化测试仅在临时库验证，不代表已经向生产库写入。
+
+部署工作流开启数据重置时，发布后执行 `scripts/reset-demo.mjs`，把 production 整体换成演示数据：
+
+```sh
+pnpm demo:reset --confirm <production D1 ID>
+```
+
+脚本删除 production D1 的全部表和视图（含 `d1_migrations`）及 R2 桶全部文件，再用 Wrangler 应用初始化 SQL 和 `seed/local.sql`，最后写入上述演示数据。已初始化管理员的 ID、昵称和密码散列保留，其余账号、会话、头像和业务内容全部删除。目标 D1 和 R2 桶读取 `wrangler.json` 的 production 环境，Account ID 来自 `CLOUDFLARE_ACCOUNT_ID`，Token 来自 `CLOUDFLARE_API_TOKEN` 或终端隐藏输入，需要 D1 与 R2 写权限。`--confirm` 必须等于目标 D1 ID，脚本不再交互确认；中途失败时 D1 可能已清空，修复后重新运行即可。开关与触发方式见[部署说明](../docs/deploy-dev.md#演示数据重置)。
 
 ## 文件与协作入口
 
