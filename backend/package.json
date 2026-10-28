@@ -27,7 +27,6 @@
         "openapi:export": "node --experimental-strip-types scripts/check-openapi.mjs --export"
     },
     "dependencies": {
-        "bcryptjs": "3.0.3",
         "drizzle-orm": "0.45.4",
         "hono": "4.13.13",
         "zod": "4.6.7"

@@ -27,7 +27,7 @@ pnpm test
 
 `admin:init:local` 在交互终端输入两次密码且不回显；初始化唯一管理员，再次执行会拒绝覆盖现有密码。管理员运维设置的密码允许短密码，但不能为空，UTF-8 不超过 72 字节；用户自行改密时新密码至少 8 个字符。不要通过命令行参数或提交文件传入密码。没有预置密码，不需要首次登录强制改密。自动化测试使用隔离的虚构账号，不替你设置日常数据库的管理员密码。
 
-管理员密码保存在 D1 的 bcrypt 散列中，不使用 Worker 环境变量或 Secret 作为登录密码。初始化、状态查询和外部重置命令见[管理员初始化与恢复](../docs/管理员操作.md)。本地重置使用 `pnpm admin:reset:local`；通用命令必须明确选择 `--local` 或 `--remote --config <目标配置>`。写入前显示目标并要求输入确认文字。远程命令直接调用 Cloudflare D1 API，不依赖网站登录或维护用 Worker，需具备目标 D1 的写权限。
+管理员密码保存在 D1 的 PBKDF2 散列中，不使用 Worker 环境变量或 Secret 作为登录密码。初始化、状态查询和外部重置命令见[管理员初始化与恢复](../docs/管理员操作.md)。本地重置使用 `pnpm admin:reset:local`；通用命令必须明确选择 `--local` 或 `--remote --config <目标配置>`。写入前显示目标并要求输入确认文字。远程命令直接调用 Cloudflare D1 API，不依赖网站登录或维护用 Worker，需具备目标 D1 的写权限。
 
 种子仅创建两个演示学期，不创建账号、课程或资料。首次种子将未配置的当前学期设为演示当前学期，重复执行不覆盖已选学期。演示账号和课程由下文的 `demo:prepare` 创建；种子不是正式账号导入工具。
 
@@ -186,4 +186,4 @@ pnpm openapi:check
 
 网站不发送邮件。普通成员忘记密码时联系管理员，由管理员在系统外核实身份后通过管理接口重置；唯一管理员忘记密码时，由具备数据库权限的运维人员使用外部重置命令。头像在替换或删除时立即清理，不复用、不保留历史，无头像登记表或定时清理命令。
 
-参考：[Drizzle D1](https://orm.drizzle.team/docs/get-started/d1-new)、[D1 外键](https://developers.cloudflare.com/d1/sql-api/foreign-keys/)、[Wrangler 配置](https://developers.cloudflare.com/workers/wrangler/configuration/)、[bcrypt.js 的 72 字节限制](https://github.com/dcodeIO/bcrypt.js#security-considerations)。
+参考：[Drizzle D1](https://orm.drizzle.team/docs/get-started/d1-new)、[D1 外键](https://developers.cloudflare.com/d1/sql-api/foreign-keys/)、[Wrangler 配置](https://developers.cloudflare.com/workers/wrangler/configuration/)、[Workers CPU 限制](https://developers.cloudflare.com/workers/platform/limits/#cpu-time)。
