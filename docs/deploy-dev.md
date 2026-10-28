@@ -21,7 +21,7 @@ Wrangler 管理的绑定、变量、路由和可观测性在部署时由配置�
 在 **Settings > Environments** 配置 production：
 
 - 部署分支只允许 main。开启 Required reviewers 时，每次 main 更新都要等待批准后才发布。
-- 设置 `CLOUDFLARE_API_TOKEN` 和 `CLOUDFLARE_ACCOUNT_ID` Secrets。Token 需有目标 Worker、绑定资源、Custom Domain 与 D1 写入所需权限，开启[演示数据重置](#演示数据重置)时还需 R2 写入权限，并限制到项目账号及区域。
+- 设置 `CLOUDFLARE_API_TOKEN` 和 `CLOUDFLARE_ACCOUNT_ID` Secrets。Token 需有目标 Worker、绑定资源、Custom Domain 与 D1 写入所需权限，开启[演示数据重置](#演示数据重置)时还需账号级 Workers R2 Storage Write（桶级 Bucket Item Write 不能调用 R2 REST 接口），并限制到项目账号及区域。
 - 环境配置完成后移除同名仓库级 Secrets，避免其他分支取得部署凭据。不要依赖首次运行自动创建的无保护环境。
 
 工作流须先合入默认分支。推送或合并到 main 即触发生产发布；需要重新发布当前 main 时，打开 **Actions > Deploy Workers > Run workflow** 并选择 main。其他分支被工作流条件和环境规则共同限制。
@@ -35,7 +35,7 @@ Wrangler 管理的绑定、变量、路由和可观测性在部署时由配置�
 - true：发布后运行 `pnpm demo:reset`，删除生产 D1 的全部表和视图（含迁移记录）及 R2 桶的全部文件，重新应用初始化 SQL、`seed/local.sql` 的演示学期和[开题演示数据](../backend/README.md#开题演示账号)。已初始化管理员的 ID、昵称和密码散列保留，其会话、头像以及其他账号和业务数据全部删除。
 - false：发布前只应用尚未执行的迁移，不修改云端数据和文件。
 
-手动运行时在 **Run workflow** 中勾选或取消 `reset_data`；推送触发时读取 production 环境或仓库的 Actions 变量 `RESET_DATA`（**Settings > Secrets and variables > Actions > Variables**），未设置视为 true，只接受 `true` 或 `false`。重置在发布之后执行，期间新 Worker 可能短暂面对旧结构或空库；中途失败时 D1 可能已被清空，修复后重新运行工作流即可恢复。
+手动运行时在 **Run workflow** 中勾选或取消 `reset_data`；推送触发时读取 production 环境或仓库的 Actions 变量 `RESET_DATA`（**Settings > Secrets and variables > Actions > Variables**），未设置视为 true，只接受 `true` 或 `false`。重置在发布之后执行，期间新 Worker 可能短暂面对旧结构或空库。重置先清理 R2，失败时不改动 D1；删除 D1 后若迁移失败，库为空且管理员丢失，可用 `wrangler d1 time-travel restore DB --env production --timestamp <重置前时间>` 恢复，或修复后重新运行工作流再初始化管理员。
 
 ## 数据库结构变更
 

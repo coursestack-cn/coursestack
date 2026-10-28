@@ -15,7 +15,8 @@ const usage = `重置 production 为演示数据（在 backend 目录执行，�
 重新应用初始化 SQL、seed/local.sql 的演示学期和开题演示数据。
 保留已初始化管理员的 ID、昵称和密码散列；会话及其他业务数据全部删除。
 目标 D1 和 R2 桶读取 wrangler.json 的 production 环境；Account ID 从 CLOUDFLARE_ACCOUNT_ID 读取，
-Token 从 CLOUDFLARE_API_TOKEN 或终端隐藏输入读取，需要 D1 与 R2 写权限。
+Token 从 CLOUDFLARE_API_TOKEN 或终端隐藏输入读取，需要 D1 写权限和账号级 Workers R2 Storage Write。
+先清理 R2，失败时不改动 D1。
 --confirm 必须与目标 D1 ID 一致，不会交互确认。`;
 const backend = fileURLToPath(new URL('..', import.meta.url));
 
