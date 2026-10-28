@@ -21,20 +21,29 @@ Wrangler 管理的绑定、变量、路由和可观测性在部署时由配置�
 在 **Settings > Environments** 配置 production：
 
 - 部署分支只允许 main。开启 Required reviewers 时，每次 main 更新都要等待批准后才发布。
-- 设置 `CLOUDFLARE_API_TOKEN` 和 `CLOUDFLARE_ACCOUNT_ID` Secrets。Token 需有目标 Worker、绑定资源、Custom Domain 与 D1 写入所需权限，并限制到项目账号及区域。
+- 设置 `CLOUDFLARE_API_TOKEN` 和 `CLOUDFLARE_ACCOUNT_ID` Secrets。Token 需有目标 Worker、绑定资源、Custom Domain 与 D1 写入所需权限，开启[演示数据重置](#演示数据重置)时还需 R2 写入权限，并限制到项目账号及区域。
 - 环境配置完成后移除同名仓库级 Secrets，避免其他分支取得部署凭据。不要依赖首次运行自动创建的无保护环境。
 
 工作流须先合入默认分支。推送或合并到 main 即触发生产发布；需要重新发布当前 main 时，打开 **Actions > Deploy Workers > Run workflow** 并选择 main。其他分支被工作流条件和环境规则共同限制。
 
-流程依次安装锁定依赖、检查后端类型与初始化 SQL、运行后端测试、检查并构建前端，通过后初始化生产 D1、发布 Worker 与前端资源，再验证 `/api/health` 和 `/`。发布串行排队，新的推送不取消正在运行的发布。
+流程依次安装锁定依赖、检查后端类型与初始化 SQL、运行后端测试、检查并构建前端，通过后发布 Worker 与前端资源，并按下述开关处理生产数据，再验证 `/api/health` 和 `/`。发布串行排队，新的推送不取消正在运行的发布。
+
+### 演示数据重置
+
+布尔开关 `RESET_DATA` 默认为 true，用于每次发布后直接在生产端查看演示数据：
+
+- true：发布后运行 `pnpm demo:reset`，删除生产 D1 的全部表和视图（含迁移记录）及 R2 桶的全部文件，重新应用初始化 SQL、`seed/local.sql` 的演示学期和[开题演示数据](../backend/README.md#开题演示账号)。已初始化管理员的 ID、昵称和密码散列保留，其会话、头像以及其他账号和业务数据全部删除。
+- false：发布前只应用尚未执行的迁移，不修改云端数据和文件。
+
+手动运行时在 **Run workflow** 中勾选或取消 `reset_data`；推送触发时读取 production 环境或仓库的 Actions 变量 `RESET_DATA`（**Settings > Secrets and variables > Actions > Variables**），未设置视为 true，只接受 `true` 或 `false`。重置在发布之后执行，期间新 Worker 可能短暂面对旧结构或空库；中途失败时 D1 可能已被清空，修复后重新运行工作流即可恢复。
 
 ## 数据库结构变更
 
 当前原型只支持当前数据模型，`schema.ts` 与 `rules.sql` 生成单份 `migrations/0000_schema.sql`。结构变更在合入前生成、检查并审查，见[后端开发说明](../backend/README.md#数据库结构与迁移)。
 
-生产结构变化后须先准备空的生产 D1，包括清除旧迁移执行记录；合入 main 会立即触发发布，需与合并时间协调。工作流只应用初始化 SQL，不升级旧库或自动重置。Wrangler 会跳过已经记录的同名文件，单纯再次部署不会应用该文件的新内容。
+开启演示数据重置时，每次发布都删除全部表并重新应用当前初始化 SQL，结构变化随之生效。关闭重置时，生产结构变化后须先准备空的生产 D1，包括清除旧迁移执行记录；合入 main 会立即触发发布，需与合并时间协调。此时工作流只应用初始化 SQL，不升级旧库；Wrangler 会跳过已经记录的同名文件，单纯再次部署不会应用该文件的新内容。
 
-允许结构与 Worker 替换期间短暂不可用，不要求新结构兼容旧 Worker。需要维护窗口时由部署环境控制流量，验证后恢复；应用没有关闭网站 API。初始化成功后，即使发布失败也不会回滚数据库。CI 不导入云端种子、不初始化管理员、不重置账户。
+允许结构与 Worker 替换期间短暂不可用，不要求新结构兼容旧 Worker。需要维护窗口时由部署环境控制流量，验证后恢复；应用没有关闭网站 API。初始化成功后，即使发布失败也不会回滚数据库。CI 不初始化管理员；关闭演示数据重置时也不导入云端种子、不重置账户。
 
 ## 域名与 R2 CORS
 
@@ -64,7 +73,7 @@ Cloudflare Token 不进入仓库、前端、VITE 变量、PR 或日志。CI 使�
 
 内部供数另用 Worker Secret `INTERNAL_API_TOKEN`，至少 24 字符，与 Cloudflare 管理 Token 分开；缺少时内部接口返回 503，配置约定见[事件供数](./课程与讨论.md#事件搜索与通知供数)。
 
-生产数据库初始化结构后，由运维单独交互初始化管理员，见[管理员操作](./管理员操作.md)。目标配置只含 Account ID 和 D1 ID，后者从 production Wrangler 环境核对，例如：
+生产数据库初始化结构后，由运维单独交互初始化管理员，见[管理员操作](./管理员操作.md)。演示数据重置保留已初始化的管理员，只有重置前尚无管理员时才需另行初始化。目标配置只含 Account ID 和 D1 ID，后者从 production Wrangler 环境核对，例如：
 
 ```sh
 pnpm admin:init --remote --config .local/admin-production.json
@@ -87,6 +96,6 @@ pnpm exec wrangler deployments list --env production
 pnpm exec wrangler rollback --env production
 ```
 
-回滚只恢复 Worker 代码和资源，不恢复 D1 结构或数据；结构已变化时需另行准备匹配数据库。下一次 main 更新或手动发布会再次替换回滚版本。
+回滚只恢复 Worker 代码和资源，不恢复 D1 结构或数据；结构已变化时需另行准备匹配数据库。下一次 main 更新或手动发布会再次替换回滚版本，开启演示数据重置时还会再次清空数据。
 
 生产实地部署、凭据权限、CPU 配额以及真实文件上传仍需在生产环境验证，仓库配置不代表云端已完成设置。

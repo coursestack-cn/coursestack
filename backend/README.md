@@ -66,6 +66,14 @@ pnpm demo:prepare --remote --config .local/admin-production.json
 
 这些是供课堂体验的共享测试账号，初始密码公开，不承载真实个人资料。脚本不会创建或重置平台管理员。自动化测试仅在临时库验证，不代表已经向生产库写入。
 
+部署工作流开启数据重置时，发布后执行 `scripts/reset-demo.mjs`，把 production 整体换成演示数据：
+
+```sh
+pnpm demo:reset --confirm <production D1 ID>
+```
+
+脚本删除 production D1 的全部表和视图（含 `d1_migrations`）及 R2 桶全部文件，再用 Wrangler 应用初始化 SQL 和 `seed/local.sql`，最后写入上述演示数据。已初始化管理员的 ID、昵称和密码散列保留，其余账号、会话、头像和业务内容全部删除。目标 D1 和 R2 桶读取 `wrangler.json` 的 production 环境，Account ID 来自 `CLOUDFLARE_ACCOUNT_ID`，Token 来自 `CLOUDFLARE_API_TOKEN` 或终端隐藏输入，需要 D1 与 R2 写权限。`--confirm` 必须等于目标 D1 ID，脚本不再交互确认；中途失败时 D1 可能已清空，修复后重新运行即可。开关与触发方式见[部署说明](../docs/deploy-dev.md#演示数据重置)。
+
 ## 文件与协作入口
 
 | 路径 | 用途 |
