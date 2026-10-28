@@ -228,7 +228,7 @@
         {
             "type": "image",
             "attrs": {
-                "src": "/favicon.svg",
+                "src": "/favicon-black-trs.ico",
                 "alt": "课栈标志"
             }
         }

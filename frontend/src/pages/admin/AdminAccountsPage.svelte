@@ -14,10 +14,9 @@
     import Checkbox from "$lib/components/ui/Checkbox.svelte";
     import Dialog from "$lib/components/ui/Dialog.svelte";
     import Pagination from "$lib/components/ui/Pagination.svelte";
+    import AccountEditDialog, { type Account } from "./AccountEditDialog.svelte";
+    import AdminNav from "./AdminNav.svelte";
 
-    type Account = { id: string; nickname: string | null; schoolNumber: string | null; role: Role;
-        status: "active" | "disabled"; mustChangePassword: boolean; name: string | null;
-        department: string | null; major: string | null; grade: string | null };
     type AccountList = { items: Account[]; page: number; pageSize: number; total: number };
     const roleNames: Record<Role, string> = { admin: "管理员", student: "学生", teacher: "教师" };
     let { params: _params }: PageProps = $props();
@@ -41,6 +40,8 @@
     let generatedPassword = $state("");
     let copied = $state(false);
     let copyError = $state("");
+    let editOpen = $state(false);
+    let editing = $state.raw<Account | null>(null);
     let alive = true;
     onDestroy(() => { alive = false; });
     $effect(() => { query = activeQuery; });
@@ -59,6 +60,11 @@
         }).finally(() => { if (!controller.signal.aborted) loading = false; });
         return () => controller.abort();
     });
+
+    function startEdit(account: Account) {
+        editing = account;
+        editOpen = true;
+    }
 
     function startReset(account: Account) {
         selected = account;
@@ -110,15 +116,16 @@
     }
 </script>
 
-<PageLayout title="账号管理" subtitle="为学生和教师重置登录密码。">
+<PageLayout title="账号管理" subtitle="编辑学生和教师的账号信息，重置登录密码。">
     {#if !session.hasRole("admin")}
         <p role="alert">需要管理员权限才能查看账号。</p>
     {:else}
+        <AdminNav />
         <Card padding="lg">
             <form class="search" onsubmit={(event) => { event.preventDefault(); void updateQuery({ q: String(query).trim() || null, page: null }); reload++; }}>
                 <Field label="查找账号" help="支持学工号、昵称、姓名、院系、专业或年级。">
                     {#snippet children({ id, describedBy, invalid })}
-                        <TextInput {id} {invalid} aria-describedby={describedBy} type="search" maxlength={100} bind:value={query} />
+                        <TextInput {id} {invalid} aria-describedby={describedBy} type="search" clearable maxlength={100} bind:value={query} />
                     {/snippet}
                 </Field>
                 <Button type="submit" disabled={loading}>搜索</Button>
@@ -130,17 +137,20 @@
             <div class="table-scroll">
                 <table>
                     <caption class="sr-only">账号列表</caption>
-                    <thead><tr><th>学工号</th><th>昵称</th><th>身份</th><th>状态</th><th>密码要求</th><th>操作</th></tr></thead>
+                    <thead><tr><th>学工号</th><th>昵称</th><th>身份</th><th>状态</th><th>需改密</th><th>操作</th></tr></thead>
                     <tbody>
                         {#each result.items as account (account.id)}
                             <tr>
                                 <td>{account.schoolNumber ?? "—"}</td><td>{account.nickname ?? "—"}</td>
                                 <td>{roleNames[account.role]}</td>
                                 <td>{account.status === "active" ? "正常" : "已禁用"}</td>
-                                <td>{account.mustChangePassword ? "登录后需改密" : "—"}</td>
-                                <td>{#if account.role !== "admin" && account.schoolNumber}
-                                    <Button size="sm" onclick={() => startReset(account)} aria-label={`重置 ${account.schoolNumber} 的密码`}>重置密码</Button>
-                                {:else}—{/if}</td>
+                                <td>{account.mustChangePassword ? "需改密" : "—"}</td>
+                                <td>{#if account.role !== "admin"}<div class="row-actions">
+                                    <Button size="sm" onclick={() => startEdit(account)} aria-label={`编辑 ${account.schoolNumber ?? account.nickname ?? "该账号"}`}>编辑</Button>
+                                    {#if account.schoolNumber}
+                                        <Button size="sm" onclick={() => startReset(account)} aria-label={`重置 ${account.schoolNumber} 的密码`}>重置密码</Button>
+                                    {/if}
+                                </div>{:else}—{/if}</td>
                             </tr>
                         {/each}
                     </tbody>
@@ -184,6 +194,10 @@
     {/if}
 </Dialog>
 
+<AccountEditDialog bind:open={editOpen} account={editing} onfailed={() => { reload++; }} onsaved={(saved) => {
+    if (result) result = { ...result, items: result.items.map((item) => item.id === saved.id ? saved : item) };
+}} />
+
 <style>
     .search { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-4); }
     .search :global(.field) { flex: 1; min-width: min(100%, 16rem); }
@@ -192,6 +206,7 @@
     th, td { padding: var(--space-4); border-bottom: 1px solid var(--color-border); white-space: nowrap; }
     th { color: var(--color-text-secondary); font-size: var(--font-size-sm); font-weight: var(--font-weight-medium); }
     tr:last-child td { border-bottom: 0; }
+    .row-actions { display: flex; gap: var(--space-2); }
     .reset-form { display: grid; gap: var(--space-4); }
     .actions { display: flex; flex-wrap: wrap; gap: var(--space-3); justify-content: flex-end; }
     .hint { color: var(--color-text-secondary); font-size: var(--font-size-sm); }

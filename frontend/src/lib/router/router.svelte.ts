@@ -3,6 +3,7 @@ import { routes, notFoundRoute } from "$lib/router/routes";
 import { matchRoute, normalizePath } from "$lib/router/match";
 import { confirmLeave, hasUnsavedChanges } from "$lib/router/leave.svelte.js";
 import { isAppUrl } from "$lib/router/urls";
+import { normalizeContentHash } from "$lib/router/ids";
 
 type ScrollPosition = { x: number; y: number };
 type Entry = { index: number; scroll: ScrollPosition };
@@ -87,8 +88,9 @@ function saveScroll(): void {
 function normalizeLocation(): void {
     const url = new URL(window.location.href);
     const pathname = normalizePath(url.pathname);
-    if (pathname !== url.pathname) {
-        window.history.replaceState(window.history.state, "", `${pathname}${url.search}${url.hash}`);
+    const hash = normalizeContentHash(url.hash);
+    if (pathname !== url.pathname || hash !== url.hash) {
+        window.history.replaceState(window.history.state, "", `${pathname}${url.search}${hash}`);
     }
 }
 
@@ -110,7 +112,7 @@ function commit(url: URL, options: NavigationOptions = {}, automatic = false): v
     const scroll = pathname === current.pathname && options.scroll !== "top"
         ? { x: window.scrollX, y: window.scrollY } : zeroScroll();
     entry = { index: entry.index + (options.replace ? 0 : 1), scroll };
-    const href = `${pathname}${url.search}${url.hash}`;
+    const href = `${pathname}${url.search}${normalizeContentHash(url.hash)}`;
     if (options.replace) writeEntry(entry, href);
     else window.history.pushState({ [stateKey]: entry }, "", href);
     publish(automatic && kind === "initial" && completed < 0 ? "initial" : options.replace ? "replace" : "push", options.scroll === "top");
@@ -125,6 +127,7 @@ export async function navigate(href: string, options: NavigationOptions = {}): P
         return true;
     }
     url.pathname = normalizePath(url.pathname);
+    url.hash = normalizeContentHash(url.hash);
     if (navigating || popPending) return false;
     if (`${url.pathname}${url.search}${url.hash}` === current.href) {
         if (options.scroll === "top") window.scrollTo({ top: 0, left: 0, behavior: "instant" });
@@ -137,7 +140,7 @@ export async function navigate(href: string, options: NavigationOptions = {}): P
     }
     navigating = true;
     try {
-        if (url.pathname !== current.pathname && !await confirmLeave()) return false;
+        if (!await confirmLeave(url.pathname === current.pathname)) return false;
         commit(url, options);
         return true;
     } finally {
@@ -187,14 +190,15 @@ async function popstate(): Promise<void> {
         return;
     }
     const delta = target.index - entry.index;
-    if (delta && normalizePath(window.location.pathname) !== current.pathname && hasUnsavedChanges()) {
+    const samePage = normalizePath(window.location.pathname) === current.pathname;
+    if (delta && hasUnsavedChanges(samePage)) {
         // Restore the current entry before asking; cancellation preserves the forward stack.
         popPending = true;
         await new Promise<void>((resolve) => {
             restored = resolve;
             window.history.go(-delta);
         });
-        if (await confirmLeave()) {
+        if (await confirmLeave(samePage)) {
             approvedPop = target.index;
             window.history.go(delta);
         } else {

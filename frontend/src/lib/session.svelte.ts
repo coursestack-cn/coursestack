@@ -60,6 +60,15 @@ export const session = {
         authenticate("/api/auth/login", { schoolNumber, password }, signal),
     adminLogin: (password: string, signal?: AbortSignal) =>
         authenticate("/api/auth/admin/login", { password }, signal),
+    async changeNickname(nickname: string | null, signal?: AbortSignal): Promise<string | null | undefined> {
+        const requestRevision = revision;
+        const accountId = user?.id;
+        const result = await api.patch<Pick<User, "id" | "nickname">>("/api/me/profile", { nickname }, { signal });
+        if (signal?.aborted || requestRevision !== revision || status !== "authenticated"
+            || !user || user.id !== accountId || result.id !== accountId) return;
+        user = { ...user, nickname: result.nickname };
+        return result.nickname;
+    },
     async changePassword(oldPassword: string, newPassword: string): Promise<void> {
         const requestRevision = ++revision;
         await api.post("/api/auth/password", { oldPassword, newPassword });

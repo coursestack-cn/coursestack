@@ -1,6 +1,6 @@
 <script lang="ts">
     import { onMount } from "svelte";
-    import { Bell, Search, SunMoon, Menu as MenuIcon, ChevronDown } from "@lucide/svelte";
+    import { Bell, Search, SunMoon, ChevronDown } from "@lucide/svelte";
     import logoSource from "../../../assets/coursestack-logo.svg?raw";
     import { sm } from "../../../styles/breakpoints";
     import Button from "$lib/components/ui/Button.svelte";
@@ -33,11 +33,10 @@
         checked: theme === option.value,
         onselect: () => { theme = option.value; setThemePreference(theme); }
     })));
-    const courseItem = $derived({ label: "课程", href: "/courses", current: inCourses });
+    const courseItem = $derived({ label: "全部课程", href: "/courses", current: inCourses });
     const userItems = $derived.by(() => {
         const items: MenuItem[] = [
             ...(narrow ? [courseItem, { type: "separator" as const }] : []),
-            { label: "我的课程", href: "/me" },
             { label: "我的收藏", href: "/me/favorites" },
             { label: "个人设置", href: "/settings" }
         ];
@@ -84,9 +83,11 @@
             <Link href="/" class="shell-brand" aria-label="课栈首页">
                 <span class="logo" aria-hidden="true">{@html logo}</span><span>课栈</span>
             </Link>
-            <nav class="desktop-navigation" aria-label="主导航">
-                <Link href="/courses" class="shell-nav-link" aria-current={inCourses ? "page" : undefined}>课程</Link>
-            </nav>
+            {#if session.status === "authenticated"}
+                <nav class="desktop-navigation" aria-label="主导航">
+                    <Link href="/courses" class="shell-nav-link" aria-current={inCourses ? "page" : undefined}>全部课程</Link>
+                </nav>
+            {/if}
         </div>
         <div class="desktop-search" role="search" aria-label="站内搜索">
             <SearchInput bind:value={search} aria-label="搜索课程、资料和问题" placeholder="搜索课程、资料和问题"
@@ -117,17 +118,13 @@
             {:else}
                 <Button href={loginHref(router.href)}>登录</Button>
             {/if}
-            {#if narrow && session.status !== "authenticated"}
-                <Menu items={[courseItem]}>
-                    {#snippet trigger(props)}<Button {...props} variant="ghost" iconOnly aria-label="主导航"><MenuIcon size="1em" /></Button>{/snippet}
-                </Menu>
-            {/if}
         </div>
     </div>
 </header>
 
 <style>
-    .app-header { border-bottom: 1px solid var(--color-border); background: var(--color-surface); }
+    :global(html) { scroll-padding-top: calc(var(--space-8) * 2 + 1px); }
+    .app-header { position: sticky; top: 0; z-index: var(--z-sticky); border-bottom: 1px solid var(--color-border); background: var(--color-surface); }
     .header-inner { width: 100%; max-width: var(--width-page); min-width: 0; min-height: calc(var(--space-8) * 2); margin-inline: auto; padding: var(--space-3) var(--space-6); display: flex; align-items: center; gap: var(--space-6); }
     .brand-navigation { display: flex; align-items: center; gap: var(--space-6); flex-shrink: 0; }
     :global(.shell-brand) { display: inline-flex; align-items: center; gap: var(--space-2); color: var(--color-text); font-size: var(--font-size-xl); font-weight: var(--font-weight-bold); white-space: nowrap; border-radius: var(--radius-sm); }

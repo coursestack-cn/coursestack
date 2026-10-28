@@ -356,7 +356,7 @@
     .toolbar { display: flex; flex-wrap: wrap; gap: var(--space-1); padding: var(--space-2); border-bottom: 1px solid var(--color-border); }
     .toolbar :global([aria-pressed="true"]) { background: var(--color-accent-soft); color: var(--color-accent-soft-text); }
     .mount { min-width: 0; }
-    .mount :global(.editor-document) { padding: var(--space-4); min-height: calc(var(--space-12) * 3); outline: none; }
+    .mount :global(.editor-document) { padding: var(--space-4); min-height: calc(var(--space-12) * 3); outline: none; white-space: pre-wrap; }
     .mount :global(.editor-document:focus-visible) { outline: 2px solid var(--color-focus-ring); outline-offset: -2px; }
     .mount :global(.is-editor-empty:first-child::before) { content: attr(data-placeholder); float: left; color: var(--color-text-muted); pointer-events: none; height: 0; }
     .mount :global(.image-upload-placeholder) { display: inline-block; padding: var(--space-2); border: 1px dashed var(--color-border-strong); color: var(--color-text-secondary); }

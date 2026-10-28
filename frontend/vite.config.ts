@@ -45,6 +45,7 @@ export default defineConfig(({ mode }) => {
             host: "127.0.0.1",
             port: 5173,
             strictPort: true,
+            fs: { allow: [fileURLToPath(new URL("..", import.meta.url))] },
             proxy: {
                 "^/api(?:[/?]|$)": {
                     target: env.DEV_API_TARGET || "http://127.0.0.1:8787",

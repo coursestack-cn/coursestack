@@ -1,8 +1,7 @@
 <script lang="ts">
-    import PagePlaceholder from "$lib/components/shell/PagePlaceholder.svelte";
+    import MyDiscussionPage from "../questions/MyDiscussionPage.svelte";
     import type { PageProps } from "$lib/router/types";
-
-    let { params }: PageProps = $props();
+    let {}: PageProps = $props();
 </script>
 
-<PagePlaceholder {params} />
+<MyDiscussionPage kind="question" />

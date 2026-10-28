@@ -65,7 +65,7 @@
             { type: "codeBlock", attrs: { language: "python" }, content: [{ type: "text", text: "def square(x):\n    return x ** 2\n\nprint(square(5))" }] },
             { type: "blockMath", attrs: { latex: "\\int_0^1 x^2\\,dx = \\frac{1}{3}" } },
             { type: "horizontalRule" },
-            { type: "image", attrs: { src: "/favicon.svg", alt: "课栈标志" } }
+            { type: "image", attrs: { src: "/favicon-black-trs.ico", alt: "课栈标志" } }
         ]
     };
     let full = $state<RichTextDoc | null>(structuredClone(sample));
@@ -81,7 +81,7 @@
             signal.addEventListener("abort", abort, { once: true });
         });
         if (failImage) throw new Error("Preview upload failure");
-        return { src: "/favicon.svg", alt: "模拟上传的课栈标志" };
+        return { src: "/favicon-black-trs.ico", alt: "模拟上传的课栈标志" };
     }
 
     const now = Math.floor(Date.now() / 1000);

@@ -1,8 +1,8 @@
 <script lang="ts">
-    import PagePlaceholder from "$lib/components/shell/PagePlaceholder.svelte";
+    import ContentRedirect from "./ContentRedirect.svelte";
     import type { PageProps } from "$lib/router/types";
 
     let { params }: PageProps = $props();
 </script>
 
-<PagePlaceholder {params} />
+<ContentRedirect id={params.answerId!} kind="answer" />

@@ -1,14 +1,21 @@
 # 页面接入约定
 
-页面地址以 [前端路由](../../../docs/前端路由.md) 为准。新增地址先登记文档，再在 `src/lib/router/routes.ts` 中登记路径、动态导入、登录要求和标题。页面放入相应模块目录，命名为 `<Name>Page.svelte`。`/admin` 与 `/admin/*` 暂时共用管理端占位页。
+页面地址以 [前端路由](../../../docs/前端路由.md) 为准。新增地址先登记文档，再在 `src/lib/router/routes.ts` 中登记路径、动态导入、登录要求和标题。页面放入相应模块目录，命名为 `<Name>Page.svelte`。管理端页面放在 `pages/admin/`，页面内容顶部使用同目录的 `AdminNav` 切换账号管理与课程管理；未实现的 `/admin/*` 暂时共用管理端占位页。
 
 ## 页面属性与布局
 
-- 页面接收 `PageProps` 中的 `params: Record<string, string>`。参数已按路径段解码，业务 ID 仍按不透明字符串处理；拼接链接和 API 路径时使用 `encodeURIComponent`。
-- 页面根节点使用 `PageLayout`，它提供必需的 `h1`、可选 `subtitle`、`breadcrumbs`、`actions` snippet 和 `width="page" | "prose"`。不要再嵌套 `main` 或另建全局 Toaster。
-- 课程内页面使用 `CourseNav`，传入接口返回的 `courseName`、`courseId`。仅在接口确认有管理权限时传入 `showManage`，组件自身不请求数据。
-- 当前 `PagePlaceholder` 为占位页复用布局、空状态及参数展示。实现业务页时用该页自己的 `PageLayout` 和内容替换它。
-- 路径变化时页面重新挂载；只变更查询参数或锚点时保留页面实例。
+- 页面接收 `PageProps` 中的 `params: Record<string, string>`。参数已按路径段解码；课程页面使用 `params.courseCode`，其他业务 ID 仍按不透明字符串处理。拼接链接和 API 路径时使用 `encodeURIComponent`。
+- 普通页面根节点使用 `PageLayout`，它提供必需的 `h1`、可选 `subtitle`、`breadcrumbs`、`actions` snippet 和 `width="page" | "prose"`。可用 `heading` snippet 替换默认标题区，但须提供一个 `h1`。不要再嵌套 `main` 或另建全局 Toaster。
+- 课程主页、资料、问答和现有课程管理页在路由中声明 `layout: "course"`，由路由出口提供 `CourseLayout` 和 `CourseNav`。这些页面只渲染正文，不再嵌套 `PageLayout` 或重复查询课程信息；初始化时通过 `CourseLayout.svelte` 导出的 `getCourse()` 读取共享的课程资源。独立的提问表单仍使用自己的布局。课程名称作为唯一 `h1` 显示，管理入口只依据当前用户的服务端权限。
+- 当前 `PagePlaceholder` 为占位页复用布局及空状态；处于课程布局内时只显示正文占位。实现业务页时按所属布局替换它。
+- 首页在会话确认后按登录态切换：未登录复用 `CourseListPage`，已登录使用 `MyCoursesPage` 展示本人的课程，按账号 ID 重新挂载以隔离不同账号的数据。首页通过 `setTitle()` 更新浏览器标题；动态尚未接入。
+- 路径变化时正文页面重新挂载；同一课程的 tab 切换保留课程布局、导航节点与课程数据，只有首次进入或更换课程时显示导航骨架。只变更查询参数或锚点时保留页面实例。
+
+`CourseListPage` 通过 `GET /api/courses` 获取课程，每页 12 门，使用 `q` 和 `page` 保存搜索与分页状态，按接口提供的创建时间倒序显示。卡片使用 `currentTeacher` 展示本学期教师的公开昵称；为空时显示“本学期未开课”，不据此推导管理权限。请求通过 `resource` 取消过期加载并保留刷新中的旧结果；页面覆盖空课程、搜索无结果、失败重试与页码超界回退。教师和管理员的新建入口只负责导航，创建权限由对应接口校验。
+
+`MyCoursesPage` 通过 `GET /api/me/courses` 获取本人修读或授课的课程，首页 `tab=current|history` 对应接口 `scope`，默认本学期，每页 12 门，按课程编号排序。切换分类重置页码，历史记录按课程去重并展示本人参与的学期；课程卡片继续用编号导航。空课程、当前学期未设置和请求失败分别反馈，管理员不自动获得全部课程作为“我的课程”。关注课程及动态暂不显示，不请求动态接口。
+
+课程页面地址使用唯一课程编号，例如 `/courses/MATH101`；`CourseLayout` 通过 `GET /api/courses?code=MATH101&pageSize=1` 定位课程，再读取 `/api/courses/:id/entry` 获取课程信息和管理权限。同一课程的 tab 切换不重复这两个请求，问答筛选仅重载问题列表；当前用户变化时刷新课程资源，离开课程布局后释放资源。`code` 是独立于模糊搜索 `q` 的可选过滤条件，不改变原列表响应结构；课程写入和讨论接口继续使用返回的内部 `id`。修改课程编号后，页面地址随之改变。
 
 ```svelte
 <script lang="ts">
@@ -43,7 +50,7 @@
 </ResourceState>
 ```
 
-`ResourceState` 延迟 200ms 展示首次加载状态；刷新时保留内容，设置 `aria-busy` 并在内容上方显示细进度条，不遮挡内容或改变布局。它将 401、403、404 映射为登录要求、无权限、页面未找到，其他错误通过 `userMessage` 展示前端文案与重试。401 的登录链接自动带回当前地址。下架内容的状态码和业务错误码尚未确定，暂不按猜测映射为 `unavailable`。
+`ResourceState` 延迟 200ms 展示首次加载状态；刷新时保留内容，设置 `aria-busy` 并在内容上方显示细进度条，不遮挡内容或改变布局。它将 401、403、404 映射为登录要求、无权限、页面未找到，其他错误通过 `userMessage` 展示前端文案与重试。401 的登录链接自动带回当前地址。问答页面通过模块内的 `ContentState` 将 `404 CONTENT_UNAVAILABLE` 映射为不可用状态；普通未知地址仍显示 404。
 
 ## 导航与页面标题
 
@@ -72,8 +79,8 @@
 if (!isAborted(error)) {
     toast.error(userMessage(error, {
         STATE_CONFLICT: "内容状态已变化，刷新后重试。",
-        429: "尝试次数过多，稍后再试。",
-        default: "保存失败，稍后重试。"
+        429: "尝试次数过多，请稍后再试。",
+        default: "保存失败，请稍后重试。"
     }));
 }
 ```
@@ -85,6 +92,8 @@ if (!isAborted(error)) {
 ## 会话与权限
 
 从 `src/lib/session.svelte.js` 引入 `session`，读取 `status`、`user`，调用 `login(schoolNumber, password, signal?)`、`adminLogin(password, signal?)`、`logout()`、`hasRole(role)`。App 启动时调用一次 `initialize()`。启动请求因网络或服务器错误失败时，身份仍保持待确认，`error` 暴露原因，`retry()` 可重试；不要把连接故障当成已退出登录。
+
+个人设置通过 `GET /api/me/profile` 读取本人资料，身份、学工号、姓名、院系、专业、年级和最近登录时间只读展示。`session.changeNickname(nickname, signal?)` 只向 `PATCH /api/me/profile` 提交昵称，保存成功后同步当前会话中的昵称；完整学籍资料只保留在设置页。昵称去首尾空白，最多 80 个字符，留空保存为 null；未保存修改由统一离开确认保护。修改密码继续进入 `/settings/password`，成功后注销全部会话。
 
 登录态只存在内存和服务端 HttpOnly Cookie 中，不读取或持久化令牌。头像地址为 `/api/profiles/:id/avatar`，编码用户 ID 后传给 `Avatar`，由它负责加载失败时的首字回退。
 
@@ -98,4 +107,16 @@ if (!isAborted(error)) {
 onBeforeLeave(() => !dirty);
 ```
 
-改变路径的站内链接、程序导航和前进后退均经过确认；同页查询或锚点变化保留草稿，不询问。关闭标签页、刷新和离开站点使用浏览器原生 `beforeunload` 提示，其文案和展示条件由浏览器控制。会话失效时的登录重定向立即生效。编辑问题占位页演示了这套机制，文本不会保存或提交。
+改变路径的站内链接、程序导航和前进后退均经过确认；同页查询或锚点变化保留草稿，不询问。关闭标签页、刷新和离开站点使用浏览器原生 `beforeunload` 提示，其文案和展示条件由浏览器控制。会话失效时的登录重定向立即生效。问答发布和编辑表单已接入真实保存。位于回答分页内的编辑和评论表单使用 `onBeforeLeave(callback, { samePage: true })`，在查询参数或锚点变化可能替换分页内容时也确认未保存修改；其他页面保持默认只检查路径变化。评论区收起后仍保留其表单。
+
+## 问答接入
+
+`pages/questions/` 的 `data.ts` 定义 DTO 适配、权限视图、分页定位和创建请求的幂等键。相同提交失败后重试复用键，改变请求内容或账号则更换；成功后清空表单。组件中的能力开关只控制入口，服务端继续授权。
+
+页面 URL 的 UUID 使用 32 位无横杠格式，生成路径和锚点时用 `lib/router/ids.ts` 的 `urlId`。路由匹配将 ID 参数转换回接口格式；手动解析锚点时用 `entityId`。内容视图的 DOM ID 同样使用无横杠格式，接口请求与业务比较继续使用 DTO 中的原始 ID。旧 URL 的规范化保留查询与锚点，不修改正文保存的历史链接。
+
+课程问答从共享课程布局取得内部 id，再请求问答接口；详情页按当前课程入口的 canManage 控制采纳与下架。普通提问者不能采纳。问题评论与回答评论分别加载，删除评论保留有回复的占位。
+
+回答和评论锚点在内容加载后定位，目标不在首页时分页查找，取消旧请求；父级链由 /api/contents/:id 逐级读取。当前接口没有直接返回目标排名，长讨论的深分页定位会产生多次只读请求。资料页仍为占位，中转可生成资料锚点但需资料页后续接入。
+
+正文校验使用 shared/rich-text，编辑器绑定值为 null 或 onstatechange.valid=false 时不可提交。表单拒绝空白正文；正文图片上传尚未接入，链接、公式与代码可用。资料、搜索、通知和课程管理页面不在此次问答实现范围内。

@@ -40,7 +40,7 @@
             if (!controller.signal.aborted && !isAborted(cause)) {
                 const invalid = admin ? "密码不正确。" : "学工号或密码不正确。";
                 error = userMessage(cause, {
-                    400: invalid, 401: invalid, 429: "尝试次数过多，稍后再试。", default: "登录失败，稍后重试。"
+                    400: invalid, 401: invalid, 429: "尝试次数过多，稍后再试。", default: "登录失败，请稍后重试。"
                 });
             }
         } finally {

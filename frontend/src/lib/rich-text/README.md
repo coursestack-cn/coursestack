@@ -1,6 +1,6 @@
 # 正文 JSON 契约
 
-问题、回答、评论及资料简介共用这份 ProseMirror JSON 白名单。`index.ts` 和 `types.ts` 不依赖 DOM、Svelte 或 Tiptap；运行时无其他模块依赖，可以直接用支持 TypeScript 类型擦除的 Node 运行。后端迁移校验时，以本文件、`validateDoc` 及 `fixtures/manifest.json` 一起作为契约，不要只校验根节点或 JSON 字符串长度。
+问题、回答、评论及资料简介共用这份 ProseMirror JSON 白名单。实现位于仓库共用的 `shared/rich-text/index.ts` 与 `types.ts`，不依赖 DOM、Svelte 或 Tiptap；本目录保留原导入入口。后端正文校验与前端直接复用同一个 `validateDoc`，OpenAPI 的结构白名单位于 `shared/rich-text/schema.ts`。本文件和 `fixtures/manifest.json` 记录协议，后端定向测试同时覆盖这些样例。
 
 ## 白名单
 
@@ -65,7 +65,7 @@
 
 语义计数规则如下：`text.text` 按 Unicode 码点数计；公式按 `attrs.latex` 的码点数计；`image`、`hardBreak`、`horizontalRule` 各计 1；其余结构和标记不计。`😀` 计 1；`e` 加组合重音 `\u0301` 计 2；`A😀é` 共计 4。此处不是 UTF-16 长度或用户感知字素数。
 
-字节数与 `new TextEncoder().encode(JSON.stringify(doc)).byteLength` 一致：无缩进、无结尾换行，中文不额外转成 `\u` 转义。传输 JSON 的空格不计入规范化后的正文大小，但 HTTP 请求本身仍须受后端请求体上限约束。讨论写请求预期整体上限为 384 KiB，剩余 16 KiB 用于标题、标签等；该整体上限不由本模块校验。
+字节数与 `new TextEncoder().encode(JSON.stringify(doc)).byteLength` 一致：无缩进、无结尾换行，中文不额外转成 `\u` 转义。传输 JSON 的空格不计入规范化后的正文大小，但 HTTP 请求本身仍须受后端请求体上限约束。内容写请求（问题、回答、评论和正文编辑）整体上限为 384 KiB，剩余 16 KiB 用于标题、标签等；该整体上限不由本模块校验。
 
 后端必须分别检查语义字符数和字节数。仅检查字符数无法限制大量空段落、长链接、标记或图片替代文本占用的空间。实际请求限制、授权、内容状态、图片访问及下架行为仍由服务端负责。
 

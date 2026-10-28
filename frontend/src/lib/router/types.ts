@@ -6,4 +6,5 @@ export type Route = {
     load: () => Promise<{ default: Component<PageProps> }>;
     requiresAuth: boolean;
     title: string;
+    layout?: "course";
 };

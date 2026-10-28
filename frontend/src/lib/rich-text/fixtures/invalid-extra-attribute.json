@@ -4,7 +4,7 @@
         {
             "type": "image",
             "attrs": {
-                "src": "/favicon.svg",
+                "src": "/favicon-black-trs.ico",
                 "alt": null,
                 "title": "多余字段"
             }

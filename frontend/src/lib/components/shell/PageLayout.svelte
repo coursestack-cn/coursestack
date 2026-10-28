@@ -8,6 +8,7 @@
         subtitle?: string;
         breadcrumbs?: BreadcrumbItem[];
         width?: "page" | "prose";
+        heading?: Snippet;
         actions?: Snippet;
         children?: Snippet;
     };
@@ -16,18 +17,20 @@
 <script lang="ts">
     import Breadcrumb from "$lib/components/ui/Breadcrumb.svelte";
 
-    let { title, subtitle, breadcrumbs = [], width = "page", actions, children, class: className = "", ...rest }: Props = $props();
+    let { title, subtitle, breadcrumbs = [], width = "page", heading, actions, children, class: className = "", ...rest }: Props = $props();
 </script>
 
 <section {...rest} class={`page-layout ${width} ${className}`}>
     {#if breadcrumbs.length}<Breadcrumb items={breadcrumbs} />{/if}
-    <header class="page-heading">
+    {#if heading}
+        {@render heading()}
+    {:else}<header class="page-heading">
         <div class="heading-copy">
             <h1 tabindex="-1">{title}</h1>
             {#if subtitle}<p class="subtitle">{subtitle}</p>{/if}
         </div>
         {#if actions}<div class="actions">{@render actions()}</div>{/if}
-    </header>
+    </header>{/if}
     <div class="page-body">{@render children?.()}</div>
 </section>
 
