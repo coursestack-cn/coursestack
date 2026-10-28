@@ -58,13 +58,13 @@ pnpm demo:prepare --local
 远程目标沿用管理员运维 JSON（只含 accountId、databaseId），Token 从环境变量或终端隐藏输入读取。先按部署文档应用迁移，再执行：
 
 ```sh
-pnpm demo:prepare --remote --config .local/admin-dev.json --dry-run
-pnpm demo:prepare --remote --config .local/admin-dev.json
+pnpm demo:prepare --remote --config .local/admin-production.json --dry-run
+pnpm demo:prepare --remote --config .local/admin-production.json
 ```
 
 远程写入需在交互终端输入 `PREPARE <databaseId>`。脚本不执行迁移或部署。重复执行只补缺失的演示账号和关系，保留已有密码、昵称、账号状态、强制改密标记和业务内容；学工号被其他账号占用时拒绝覆盖。写入使用单次 D1 batch，当前学期并发变化时整批不写入，不保存密码明文或账户审计记录。
 
-这些是供课堂体验的共享测试账号，初始密码公开，不承载真实个人资料。脚本不会创建或重置平台管理员。自动化测试仅在临时库验证，不代表已经向 dev 或生产库写入。
+这些是供课堂体验的共享测试账号，初始密码公开，不承载真实个人资料。脚本不会创建或重置平台管理员。自动化测试仅在临时库验证，不代表已经向生产库写入。
 
 ## 文件与协作入口
 
@@ -108,7 +108,7 @@ pnpm check
 
 schema 变化后，停止本地服务并重新创建本地 D1，再执行 `pnpm db:setup:local` 和管理员初始化。Wrangler 将同名 SQL 记录为已执行，单独重跑 `db:migrate:local` 不会更新旧库。不要删除整个 `.wrangler/state` 来重置 D1，以免同时清除 R2 数据；本轮代码修改不会自动清理现有本地状态。
 
-local、dev、production 使用同一份当前初始化 SQL。云端目标也必须先准备空 D1（含清除旧的迁移执行记录），由部署流程初始化；当前工作流不自动重置数据库。结构变更允许部署期间短暂不可用，详见[部署说明](../docs/deploy-dev.md)。数据库总体设计仍由组员 1 协调。
+local、production 使用同一份当前初始化 SQL。生产也必须先准备空 D1（含清除旧的迁移执行记录），由部署流程初始化；当前工作流不自动重置数据库。结构变更允许部署期间短暂不可用，详见[部署说明](../docs/deploy-dev.md)。数据库总体设计仍由组员 1 协调。
 
 ### 结构可视化
 
@@ -153,7 +153,7 @@ proxy: {
 
 前端使用 `/api` 代理调用接口，不直接跨域请求后端端口。
 
-普通业务写接口要求 `Origin` 与请求 URL 的 origin 完全一致；JSON 接口使用 `Content-Type: application/json`。Cookie 为 HttpOnly、SameSite=Strict，HTTPS 下加 Secure，不设置 `Domain`，仅发送到设置 Cookie 的主机，避免生产站点与 dev 子域名共享会话 Cookie。前端不用读取 token 或将其保存到 localStorage。curl 等客户端测试写接口也要提供匹配的 Origin。管理员登录页与普通成员登录页使用不同接口。
+普通业务写接口要求 `Origin` 与请求 URL 的 origin 完全一致；JSON 接口使用 `Content-Type: application/json`。Cookie 为 HttpOnly、SameSite=Strict，HTTPS 下加 Secure，不设置 `Domain`，仅发送到设置 Cookie 的主机。前端不用读取 token 或将其保存到 localStorage。curl 等客户端测试写接口也要提供匹配的 Origin。管理员登录页与普通成员登录页使用不同接口。
 
 讨论成功响应使用 `{data: ...}`，普通列表使用 items、page、pageSize、total，时间为 Unix 秒，作者字段为 nickname，学期字段为 termId。讨论 JSON 上限128 KiB，原账号 JSON 的8 KiB和头像的2 MiB限制保持独立。Hono 先转发原账号、头像、登录处理器，保留这些接口的405与 Allow 行为；后续将原处理器改写为 Hono 路由是另一项任务。
 
@@ -172,7 +172,7 @@ pnpm openapi:check
 
 ## 环境边界与未完成项
 
-`local` 的 D1 ID 是本地占位符，路由为空，不继承生产域名。云端 `dev` 使用 `https://dev.coursestack.cn`，`production` 使用 `https://coursestack.cn`；每套环境由同一 Worker 同源提供前端与 API，并绑定各自的 D1、R2 和前端静态资源。两套 Custom Domain 的 `workers_dev` 和 `preview_urls` 均关闭。GitHub Actions 在 `main` 更新时自动部署 dev，手动运行可选 dev 或 production；检查通过后自动应用目标环境的待执行迁移。凭据设置、运行方式和回滚边界见[部署说明](../docs/deploy-dev.md)。部署始终显式选择 `--env dev` 或 `--env production`；顶层配置只是名为 `coursestack-env-required` 的占位，没有入口、绑定和路由，不能直接部署。生产实地部署、Secrets 使用和 CPU 配额仍待验证。R2 目前只通过 Worker 绑定用于头像，尚无课程资料直传、下载接口；桶 CORS 是后续浏览器直传的配置，不影响当前同源头像接口。
+`local` 的 D1 ID 是本地占位符，路由为空，不继承生产域名。云端只有 `production`，使用 `https://coursestack.cn`，由同一 Worker 同源提供前端与 API，并绑定生产 D1、R2 和前端静态资源；Custom Domain 的 `workers_dev` 和 `preview_urls` 均关闭。GitHub Actions 在 `main` 每次更新时自动部署 production，也可手动对 main 重新运行；检查通过后自动应用待执行迁移。凭据设置、运行方式和回滚边界见[部署说明](../docs/deploy-dev.md)。部署始终显式选择 `--env production`；顶层配置只是名为 `coursestack-env-required` 的占位，没有入口、绑定和路由，不能直接部署。生产实地部署、Secrets 使用和 CPU 配额仍待验证。R2 目前只通过 Worker 绑定用于头像，尚无课程资料直传、下载接口；桶 CORS 是后续浏览器直传的配置，不影响当前同源头像接口。
 
 当前后端已提供账号管理、资料维护、管理员重置成员密码、课程与讨论管理接口；名单导入和授课管理接口仍待完成。当前学期用 `terms.current` 标记，切换时在同一事务中先清除旧标记、再设置新标记，历史关系保留；尚无学期切换管理接口或自动调度。内容下架与采纳由对应业务路由校验，文件下载授权仍由组员4实现。
 
