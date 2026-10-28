@@ -10,8 +10,8 @@ import { terminalPrompt } from './lib/admin-prompt.mjs';
 const usage = `开题演示数据（在 backend 目录执行）：
   pnpm demo:prepare --local --dry-run
   pnpm demo:prepare --local
-  pnpm demo:prepare --remote --config .local/admin-dev.json --dry-run
-  pnpm demo:prepare --remote --config .local/admin-dev.json
+  pnpm demo:prepare --remote --config .local/admin-production.json --dry-run
+  pnpm demo:prepare --remote --config .local/admin-production.json
 可选 --course-id <已有课程 ID>；--persist-to <目录> 仅用于隔离的本地数据库。
 学生 S0001–S0100、教师 T0001，初始密码同账号，不强制改密。
 使用当前学期；没有当前学期时新建“演示学期”。默认复用或新建“数据库系统原理”。

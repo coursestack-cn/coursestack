@@ -1,27 +1,18 @@
 name: Deploy Workers
 
-run-name: Deploy ${{ inputs.environment || 'dev' }} from ${{ github.ref_name }}
+run-name: Deploy production from ${{ github.ref_name }}
 
 on:
   push:
     branches:
       - main
   workflow_dispatch:
-    inputs:
-      environment:
-        description: Deployment environment
-        type: choice
-        required: true
-        default: dev
-        options:
-          - dev
-          - production
 
 permissions:
   contents: read
 
 concurrency:
-  group: deploy-workers-${{ inputs.environment || 'dev' }}
+  group: deploy-workers-production
   cancel-in-progress: false
 
 jobs:
@@ -30,14 +21,14 @@ jobs:
     if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
     timeout-minutes: 30
-    # The GitHub environment of the same name holds the Cloudflare secrets and admits only main.
+    # The production GitHub environment holds the Cloudflare secrets and admits only main.
     environment:
-      name: ${{ inputs.environment || 'dev' }}
-      url: ${{ inputs.environment == 'production' && 'https://coursestack.cn' || 'https://dev.coursestack.cn' }}
+      name: production
+      url: https://coursestack.cn
     env:
       CI: 'true'
-      DEPLOY_ENV: ${{ inputs.environment || 'dev' }}
-      DEPLOY_URL: ${{ inputs.environment == 'production' && 'https://coursestack.cn' || 'https://dev.coursestack.cn' }}
+      DEPLOY_ENV: production
+      DEPLOY_URL: https://coursestack.cn
     defaults:
       run:
         shell: bash
@@ -53,10 +44,6 @@ jobs:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: |
-          case "$DEPLOY_ENV" in
-            dev|production) ;;
-            *) echo "::error::Unsupported deployment environment"; exit 1 ;;
-          esac
           if [[ -z "$CLOUDFLARE_API_TOKEN" || -z "$CLOUDFLARE_ACCOUNT_ID" ]]; then
             echo "::error::Set CLOUDFLARE_API_TOKEN and CLOUDFLARE_ACCOUNT_ID as secrets of the $DEPLOY_ENV GitHub environment."
             exit 1
