@@ -6,7 +6,6 @@ import { mutateAccount, type Session } from '../accounts/mutations.ts';
 
 export const SESSION_SECONDS = 7 * 24 * 60 * 60;
 export const COOKIE_NAME = 'coursestack_session';
-let dummyHash: Promise<string> | undefined;
 const unauthorized = () => new HttpError(401, 'INVALID_CREDENTIALS', '登录凭据不正确或账号不可用');
 
 export function sessionCookie(request: Request, token: string, maxAge = SESSION_SECONDS) {
@@ -56,8 +55,7 @@ export async function login(binding: D1Database, password: string, schoolNumber:
             ? "role = 'admin' AND school_number IS NULL" : "role IN ('student','teacher') AND school_number = ?"}`)
         .bind(...(schoolNumber === null ? [] : [schoolNumber]))
         .first<{ id: string; password: string; version: number }>();
-    const fallback = await (dummyHash ??= hashPassword(randomToken()));
-    const valid = await verifyPassword(password, candidate?.password ?? fallback);
+    const valid = await verifyPassword(password, candidate?.password);
     if (!valid || !candidate) throw unauthorized();
     const token = randomToken(), tokenHash = await digest(token);
     // Creating a new session must use credentials that are still valid. Already
