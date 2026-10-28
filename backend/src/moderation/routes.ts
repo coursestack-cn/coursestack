@@ -10,6 +10,10 @@ import { rawContent, visibleContent } from '../discussions/service.ts';
 import { createDatabase, prepareStatement } from '../db/index.ts';
 const now = () => Math.floor(Date.now() / 1000);
 const uid = () => crypto.randomUUID();
+const reasonSchema = z.string().trim().refine(value => {
+    const length = Array.from(value).length;
+    return length >= 3 && length <= 1000;
+}, '理由须为3–1000个字符');
 
 type Report = { id: string; content_id: string; reporter_id: string; reason: string; status: string;
     created_at: number; resolution: string | null; handled_by: string | null;
@@ -20,7 +24,7 @@ const reportDto = (r: Report) => ({ id: r.id, contentId: r.content_id, reporterI
 export const moderationRoutes = new Hono<AppEnv>();
 moderationRoutes.post('/contents/:id/reports', async c => {
     const a = actor(c), target = await visibleContent(c, c.req.param('id'));
-    const data = await input(c, z.object({ reason: z.string().trim().min(3).max(1000) }).strict());
+    const data = await input(c, z.object({ reason: reasonSchema }).strict());
     const identity = await requestIdentity(c, data), id = uid();
     const previous = await createDatabase(c.env.DB).get<{ id: string; request_hash: string }>(sql`SELECT id,request_hash FROM reports
         WHERE reporter_id=${a.id} AND request_key=${identity.key}`);
@@ -54,7 +58,7 @@ moderationRoutes.patch('/moderation/reports/:id', async c => {
     if (!report) throw new HttpError(404, 'REPORT_NOT_FOUND', '举报不存在');
     await requireManagement(c, report.course_id);
     const data = await input(c, z.object({ status: z.enum(['resolved', 'dismissed']),
-        resolution: z.string().trim().min(3).max(1000) }).strict());
+        resolution: reasonSchema }).strict());
     const result = await createDatabase(c.env.DB).run(sql`UPDATE reports SET status=${data.status},resolution=${data.resolution},handled_by=${a.id},
         handled_at=${now()} WHERE id=${id} AND status='pending'
         AND EXISTS(SELECT 1 FROM contents t WHERE t.id=reports.content_id AND ${management(a, sql`t.course_id`)})`);
@@ -71,7 +75,7 @@ moderationRoutes.get('/moderation/contents/:id', async c => {
 moderationRoutes.put('/contents/:id/moderation', async c => {
     const row = await rawContent(c, c.req.param('id')), a = await requireManagement(c, row.course_id);
     const data = await input(c, z.object({ action: z.enum(['hide', 'restore']),
-        reason: z.string().trim().min(3).max(1000) }).strict());
+        reason: reasonSchema }).strict());
     if (row.status === 'deleted') throw new HttpError(409, 'DELETED_CONTENT', '作者已删除的内容不能恢复或下架');
     const desired = data.action === 'hide' ? 'hidden' : 'visible', at = now();
     const allowed = sql`id=${row.id} AND status<>'deleted' AND ${management(a, sql`contents.course_id`)}`;

@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { HttpError, respond, assertChanged, input, listResult, page, pointsSchema, requestIdentity, idSchema, queryPage } from '../http.ts';
+import { HttpError, respond, assertChanged, input, listResult, page, pointsSchema, requestIdentity, idSchema, queryPage, parsedEnum } from '../http.ts';
 import { activeUser, management, requireManagement } from '../permissions.ts';
 import { actor } from '../auth/middleware.ts';
 import type { AppEnv, Ctx } from '../discussions/types.ts';
@@ -12,13 +12,19 @@ const uid = () => crypto.randomUUID();
 const courseInput = z.object({ name: z.string().trim().min(1).max(120), code: z.string().trim().min(1).max(40),
     introduction: z.string().trim().max(5000).default('') }).strict();
 type Course = { id: string; name: string; code: string; introduction: string;
-    points_question: number; points_answer: number; points_acceptance: number; points_comment: number; points_material: number; points_material_version: number; created_at: number; updated_at: number; request_hash: string };
-const courseSelect = sql`SELECT c.*,r.points_question,r.points_answer,r.points_acceptance,r.points_comment,r.points_material,r.points_material_version
-    FROM courses c JOIN course_bonus_rules r ON r.id=c.id`;
+    points_question: number; points_answer: number; points_acceptance: number; points_comment: number; points_material: number; points_material_version: number; created_at: number; updated_at: number; request_hash: string;
+    teacher_id: string | null; teacher_name: string | null; teacher_deleted: number | null };
+// Each current-term instance has exactly one teacher, so the join adds at most one row per course.
+const courseSelect = sql`SELECT c.*,r.points_question,r.points_answer,r.points_acceptance,r.points_comment,r.points_material,r.points_material_version,
+    t.id AS teacher_id,CASE WHEN t.status='deleted' THEN '已删除' ELSE t.nickname END AS teacher_name,t.status='deleted' AS teacher_deleted
+    FROM courses c JOIN course_bonus_rules r ON r.id=c.id
+    LEFT JOIN (SELECT e.course_id,a.id,a.nickname,a.status FROM enrollments e JOIN terms s ON s.id=e.term_id AND s.current=1
+        JOIN accounts a ON a.id=e.account_id AND a.role='teacher') t ON t.course_id=c.id`;
 export const courseDto = (r: Course) => ({ id: r.id, name: r.name, code: r.code,
     introduction: r.introduction, bonusPolicy: { pointsQuestion: r.points_question, pointsAnswer: r.points_answer,
         pointsAcceptance: r.points_acceptance, pointsComment: r.points_comment, pointsMaterial: r.points_material,
         pointsMaterialVersion: r.points_material_version },
+    currentTeacher: r.teacher_id ? { id: r.teacher_id, nickname: r.teacher_name, isDeleted: Boolean(r.teacher_deleted) } : null,
     createdAt: r.created_at, updatedAt: r.updated_at });
 export async function getCourse(c: Ctx, id: string) {
     const r = await createDatabase(c.env.DB).get<Course>(sql`${courseSelect} WHERE c.id=${id}`);
@@ -26,11 +32,35 @@ export async function getCourse(c: Ctx, id: string) {
     return r;
 }
 export const courseRoutes = new Hono<AppEnv>();
+courseRoutes.get('/me/courses', async c => {
+    const a = actor(c), p = page(c);
+    const scope = parsedEnum(c.req.query('scope'), ['current', 'history'] as const, 'current')!;
+    const current = scope === 'current' ? 1 : 0;
+    const db = createDatabase(c.env.DB);
+    const [{ rows, total }, currentTerm] = await Promise.all([
+        queryPage<Course>(c, p, sql`${courseSelect}
+            WHERE EXISTS(SELECT 1 FROM enrollments e JOIN terms term ON term.id=e.term_id
+                WHERE e.course_id=c.id AND e.account_id=${a.id} AND term.current=${current})
+            ORDER BY c.code ASC,c.id ASC`),
+        db.get<{ id: string; name: string }>(sql`SELECT id,name FROM terms WHERE current=1`),
+    ]);
+    const memberships = rows.length ? await db.all<{ courseId: string; id: string; name: string; current: number }>(sql`
+        SELECT e.course_id AS courseId,term.id,term.name,term.current FROM enrollments e JOIN terms term ON term.id=e.term_id
+        WHERE e.account_id=${a.id} AND term.current=${current}
+            AND e.course_id IN (${sql.join(rows.map(row => sql`${row.id}`), sql`,`)})
+        ORDER BY term.name DESC,term.id DESC`) : [];
+    const items = rows.map(row => ({ course: courseDto(row), terms: memberships.filter(term => term.courseId === row.id)
+        .map(term => ({ id: term.id, name: term.name, current: Boolean(term.current) })) }));
+    return respond(c, { ...listResult(items, p, total), scope, currentTerm: currentTerm ?? null });
+});
 courseRoutes.get('/courses', async c => {
     const p = page(c), q = (c.req.query('q') ?? '').trim();
+    const code = c.req.query('code')?.trim();
     if (q.length > 100) throw new HttpError(400, 'INVALID_FILTER', '课程关键词最长 100 字');
+    if (code !== undefined && (!code || code.length > 40)) throw new HttpError(400, 'INVALID_FILTER', '课程编号需为 1–40 字');
     const { rows, total } = await queryPage<Course>(c, p, sql`${courseSelect}
-        WHERE instr(c.name,${q})>0 OR instr(c.code,${q})>0 ORDER BY c.created_at DESC,c.id ASC`);
+        WHERE ${code === undefined ? sql`1` : sql`c.code=${code}`} AND (instr(c.name,${q})>0 OR instr(c.code,${q})>0)
+        ORDER BY c.created_at DESC,c.id ASC`);
     return respond(c, listResult(rows.map(courseDto), p, total));
 });
 courseRoutes.post('/courses', async c => {

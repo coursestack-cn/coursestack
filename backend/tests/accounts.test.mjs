@@ -10,9 +10,9 @@ const password = 'fictional-test-password-123';
 const nextPassword = 'fictional-new-password-456';
 const fixture = `
 PRAGMA defer_foreign_keys=ON;
-INSERT INTO accounts (id, nickname, role, name) VALUES
-('admin', '管理员', 'admin', NULL), ('teacher', '公开教师', 'teacher', '虚构教师'),
-('student', '公开同学', 'student', '虚构甲'), ('other', '其他同学', 'student', '虚构乙'), ('free', '未修读同学', 'student', '虚构丙');
+INSERT INTO accounts (id, nickname, role, school_number, name) VALUES
+('admin', '管理员', 'admin', NULL, NULL), ('teacher', '公开教师', 'teacher', 'T01', '虚构教师'),
+('student', '公开同学', 'student', '001', '虚构甲'), ('other', '其他同学', 'student', '002', '虚构乙'), ('free', '未修读同学', 'student', '003', '虚构丙');
 INSERT INTO terms(id,name,current) VALUES ('current','当前学期',0),('past','历史学期',1);
 INSERT INTO enrollments(course_id,term_id,account_id) VALUES ('course','past','teacher');
 UPDATE terms SET current=0;
@@ -51,9 +51,7 @@ DELETE FROM accounts;
 DELETE FROM terms;
 `.split(';').filter(s => s.trim()).map(s => binding.prepare(s)));
     await binding.batch(fixture.split(';').filter(sql => sql.trim()).map(sql => binding.prepare(sql)));
-    for (const [id, number] of [['admin', null], ['teacher', 'T01'], ['student', '001'], ['other', '002'], ['free', '003']]) {
-        await binding.prepare('UPDATE accounts SET school_number = ?, password = ? WHERE id = ?').bind(number, passwordHash, id).run();
-    }
+    await binding.prepare('UPDATE accounts SET password = ?').bind(passwordHash).run();
     const objects = await bucket.list();
     if (objects.objects.length) await bucket.delete(objects.objects.map((o) => o.key));
 });
@@ -119,6 +117,15 @@ test('duplicate identifiers roll back all fields', async () => {
         assert.equal((await patch('student', { name: '不应保存', ...change }, admin)).status, 409);
     }
     assert.equal(await binding.prepare("SELECT name FROM accounts WHERE id = 'student'").first('name'), '虚构甲');
+});
+
+test('student names are optional when creating and editing accounts', async () => {
+    const admin = await cookie('admin');
+    assert.equal((await patch('student', { name: '' }, admin)).status, 200);
+    assert.equal(await binding.prepare("SELECT name FROM accounts WHERE id = 'student'").first('name'), null);
+    const created = await call('/api/admin/accounts', { method: 'POST', cookie: admin, body: { role: 'student', schoolNumber: 'NO-NAME', password } });
+    assert.equal(created.status, 201, await created.clone().text());
+    assert.equal((await data(created)).name, null);
 });
 
 test('role changes mark the old identity deleted, preserve relationships and return a new ID', async () => {

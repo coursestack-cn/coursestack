@@ -26,9 +26,11 @@ test('course creation requires a current-term teacher but no students; admin exp
     assert.deepEqual((await h.database.prepare('SELECT * FROM enrollments WHERE course_id=?').bind(made.data.id).all()).results,
         [{ course_id: made.data.id, term_id: 'term-active', account_id: 'teacher-b' }]);
     assert.equal(await h.database.prepare('SELECT created_by FROM courses WHERE id=?').bind(made.data.id).first('created_by'), 'admin');
+    assert.deepEqual((await h.api('GET', `/courses/${made.data.id}`)).data.currentTeacher, { id: 'teacher-b', nickname: '物理教师', isDeleted: false });
     await assert.rejects(() => h.database.prepare('DELETE FROM enrollments WHERE course_id=?').bind(made.data.id).run(), /course_requires_teacher/);
     await assert.rejects(() => h.database.prepare("INSERT INTO courses(id,name) VALUES ('orphan','无教师课程')").run(), /course_requires_teacher/);
     await setCurrentTerm(h.database, null);
+    assert.equal((await h.api('GET', `/courses/${made.data.id}`)).data.currentTeacher, null);
     assert.equal((await h.api('POST', '/courses', 'admin', { name: '未设置学期', code: 'NO_TERM', teacherId: 'teacher-a' })).status, 409);
 });
 

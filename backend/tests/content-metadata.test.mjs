@@ -95,9 +95,10 @@ test('authors and managers set Unix-second editedAt only for real title, body or
 });
 
 test('equal normalized values and reordered JSON object keys preserve both null and existing editedAt', async () => {
-    const body = { type: 'doc', attrs: { first: 1, second: { a: true, b: null } }, content: doc('正文').content };
-    const reordered = { content: [{ content: [{ text: '正文', type: 'text' }], type: 'paragraph' }],
-        attrs: { second: { b: null, a: true }, first: 1 }, type: 'doc' };
+    const body = { type: 'doc', content: [...doc('正文').content,
+        { type: 'image', attrs: { src: '/api/files/example', alt: '示意图' } }] };
+    const reordered = { content: [{ content: [{ text: '正文', type: 'text' }], type: 'paragraph' },
+        { attrs: { alt: '示意图', src: '/api/files/example' }, type: 'image' }], type: 'doc' };
     const q = await h.postQuestion('student-a', { title: '标题', body, tags: ['标签'] });
     const storedBody = JSON.stringify(body, null, 2);
     await h.database.prepare('UPDATE contents SET body=? WHERE id=?').bind(storedBody, q).run();
@@ -111,7 +112,8 @@ test('equal normalized values and reordered JSON object keys preserve both null 
     const emptyTags = await h.postQuestion();
     assert.equal((await edit(emptyTags, 'student-a', { tags: [] })).editedAt, null);
     assert.equal((await edit(emptyTags, 'student-a', { tags: null })).editedAt, null);
-    const changed = await edit(q, 'student-a', { body: { ...body, attrs: { ...body.attrs, first: 2 } } });
+    const changed = await edit(q, 'student-a', { body: { ...body, content: [...doc('正文').content,
+        { type: 'image', attrs: { src: '/api/files/example', alt: '新说明' } }] } });
     assert.ok(changed.editedAt > 1);
     await h.database.prepare('UPDATE contents SET edited_at=1 WHERE id=?').bind(q).run();
     assert.ok((await edit(q, 'student-a', { tags: null })).editedAt > 1);

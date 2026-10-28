@@ -32,7 +32,8 @@ CREATE TABLE `accounts` (
 	CONSTRAINT "accounts_role" CHECK("accounts"."role" IN ('student', 'teacher', 'admin')),
 	CONSTRAINT "accounts_status" CHECK("accounts"."status" IN ('active', 'disabled', 'deleted')),
 	CONSTRAINT "accounts_credential_version" CHECK("accounts"."credential_version" > 0),
-	CONSTRAINT "accounts_must_change_password" CHECK("accounts"."must_change_password" IN (0, 1))
+	CONSTRAINT "accounts_must_change_password" CHECK("accounts"."must_change_password" IN (0, 1)),
+	CONSTRAINT "accounts_school_number" CHECK("accounts"."status" = 'deleted' OR ("accounts"."role" = 'admin') = ("accounts"."school_number" IS NULL))
 ) STRICT;
 --> statement-breakpoint
 CREATE UNIQUE INDEX `accounts_school_number_unique` ON `accounts` (`school_number`) WHERE "accounts"."status" <> 'deleted';

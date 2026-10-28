@@ -45,18 +45,16 @@ test('health and unknown API preserve the main response contract', async () => {
     assert.equal(missing.status, 404); assert.equal(missing.data.error.code, 'NOT_FOUND');
 });
 
-test('local seed is repeatable without changing accounts, current term or edited courses', async () => {
+test('local seed is repeatable without changing accounts, courses or current term', async () => {
     const seed = await readFile(new URL('../seed/local.sql', import.meta.url), 'utf8');
     const statements = seed.replace(/^--.*$/gm, '').split(';').filter(s => s.trim());
     const apply = () => h.database.batch(statements.map(s => h.database.prepare(s)));
+    const count = table => h.database.prepare(`SELECT COUNT(*) AS n FROM ${table}`).first('n');
+    const before = [await count('accounts'), await count('courses')];
     await apply();
-    await h.database.prepare("UPDATE courses SET name='本地修改' WHERE id='demo-course'").run();
     await apply();
-    assert.equal(await h.database.prepare("SELECT name FROM courses WHERE id='demo-course'").first('name'), '本地修改');
+    assert.deepEqual([await count('accounts'), await count('courses')], before);
     assert.equal(await h.database.prepare('SELECT id FROM terms WHERE current=1').first('id'), 'term-active');
-    assert.equal(await h.database.prepare("SELECT COUNT(*) AS n FROM accounts WHERE id LIKE 'demo-%' AND password IS NOT NULL").first('n'), 0);
-    assert.equal(await h.database.prepare("SELECT COUNT(*) AS n FROM file_versions WHERE material_id='demo-material'").first('n'), 2);
-    assert.equal(await h.database.prepare("SELECT COUNT(*) AS n FROM course_bonus_rules WHERE id='demo-course'").first('n'), 1);
 });
 
 test('ordinary routes require Cookie and same-origin writes; service Bearer stays internal', async () => {

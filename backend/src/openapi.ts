@@ -1,3 +1,4 @@
+import { richTextSchemas } from '../../shared/rich-text/schema.ts';
 type Schema = Record<string, unknown>;
 const str = (maxLength = 100): Schema => ({ type: 'string', minLength: 1, maxLength });
 const id: Schema = { ...str(), pattern: '^[a-zA-Z0-9_-]+$' };
@@ -24,7 +25,9 @@ const paged = (item: Schema): Schema => object({ items: { type: 'array', items: 
 type Definition = { method: string; path: string; summary: string; auth?: 'optional' | 'session' | 'internal';
     request?: Schema; create?: boolean; parameters?: unknown[]; response?: Schema };
 const defs: Definition[] = [
-    { method: 'get', path: '/courses', summary: '课程列表', parameters: [...pagination, q('q')], response: ref('CoursePage') },
+    { method: 'get', path: '/me/courses', summary: '本人修读或授课的课程，区分当前学期与历史学期，同一课程去重', auth: 'session',
+        parameters: [...pagination, q('scope', { ...enumeration('current', 'history'), default: 'current' })], response: ref('MyCoursePage') },
+    { method: 'get', path: '/courses', summary: '课程列表；code 按唯一课程编号精确匹配', parameters: [...pagination, q('q'), q('code', str(40))], response: ref('CoursePage') },
     { method: 'post', path: '/courses', summary: '创建当前学期课程：教师任教，管理员须指定 teacherId', auth: 'session', create: true, request: object({ ...courseFields, teacherId: id }, ['name', 'code']) },
     { method: 'get', path: '/courses/{id}', summary: '课程详情', response: ref('Course') },
     { method: 'patch', path: '/courses/{id}', summary: '当前课程教师或管理员编辑课程', auth: 'session', request: object(courseFields, []), response: ref('Course') },
@@ -135,15 +138,12 @@ export const openapi = {
         },
         schemas: {
             Error: object({ error: object({ code: str(80), message: { type: 'string' } }) }),
-            ProseMirrorMark: object({ type: { type: 'string', minLength: 1 }, attrs: { type: 'object', additionalProperties: true } }, ['type']),
-            ProseMirrorNode: object({ type: { type: 'string', minLength: 1 }, attrs: { type: 'object', additionalProperties: true },
-                text: { type: 'string', minLength: 1 }, content: { type: 'array', items: ref('ProseMirrorNode') },
-                marks: { type: 'array', items: ref('ProseMirrorMark') } }, ['type']),
-            ProseMirrorDocument: { allOf: [ref('ProseMirrorNode'), { type: 'object', properties: { type: { const: 'doc' } } }],
-                description: 'JSON 序列化后最多 30000 字符、节点最多嵌套 64 层。text 节点须包含非空 text 且不能有 content；其他节点不含 text。具体节点、标记和属性由 Tiptap 扩展配置确定。' },
+            ...richTextSchemas,
             BonusPolicy: object(bonusPolicy),
             LedgerEntry: ledger,
-            Course: object({ id, ...courseFields, code: { type: 'string', maxLength: 40 }, bonusPolicy: ref('BonusPolicy'), createdAt: { type: 'integer' }, updatedAt: { type: 'integer' } }),
+            Course: object({ id, ...courseFields, code: { type: 'string', maxLength: 40 }, bonusPolicy: ref('BonusPolicy'),
+                currentTeacher: { anyOf: [object({ id, nickname, isDeleted: bool }), { type: 'null' }], description: '当前学期任课教师；未设置当前学期或本学期未开课时为 null' },
+                createdAt: { type: 'integer' }, updatedAt: { type: 'integer' } }),
             ReplyTo: object({ id, author: object({ nickname, isDeleted: bool }), isDeleted: bool }),
             Content: { type: 'object', required: ['id', 'kind', 'courseId', 'author', 'body', 'score', 'targetKind', 'targetId', ...Object.keys(contentMetadata)],
                 allOf: [questionCounts],
@@ -156,6 +156,10 @@ export const openapi = {
                 status: { const: 'deleted' }, body: { type: 'null' }, ...contentMetadata }),
             ContentPage: object({ items: { type: 'array', items: ref('Content') }, page: positiveInteger, pageSize: positiveInteger, total: { type: 'integer', minimum: 0 } }),
             CoursePage: object({ items: { type: 'array', items: ref('Course') }, page: positiveInteger, pageSize: positiveInteger, total: { type: 'integer', minimum: 0 } }),
+            MyCoursePage: object({ items: { type: 'array', items: object({ course: ref('Course'),
+                terms: { type: 'array', items: object({ id, name: { type: 'string' }, current: bool }) } }) },
+                page: positiveInteger, pageSize: positiveInteger, total: { type: 'integer', minimum: 0 }, scope: enumeration('current', 'history'),
+                currentTerm: { anyOf: [object({ id, name: { type: 'string' } }), { type: 'null' }] } }),
         },
     },
 };
