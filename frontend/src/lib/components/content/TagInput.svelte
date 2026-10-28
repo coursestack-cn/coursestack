@@ -21,7 +21,7 @@
     let {
         value = $bindable([]), id = generatedId, labelId, describedBy,
         invalid = false, disabled = false, required = false,
-        placeholder = "输入标签后按 Enter", class: className = "", ...rest
+        placeholder = "输入标签后按空格或 Enter", class: className = "", ...rest
     }: Props = $props();
     let draft = $state("");
     let error = $state<string>();
@@ -59,7 +59,7 @@
 
     function keydown(event: KeyboardEvent) {
         if (disabled || composing || event.isComposing || event.keyCode === 229) return;
-        if (event.key === "Enter" || event.key === "," || event.key === "，") {
+        if (event.key === " " || event.key === "Enter" || event.key === "," || event.key === "，") {
             event.preventDefault();
             commit();
         } else if (event.key === "Backspace" && draft === "" && value.length > 0) {
@@ -106,7 +106,7 @@
                 commitDelimited(draft);
             }} />
     </div>
-    <div class="hint-row"><p id={helpId} class="help">最多 {TAG_LIMITS.maxTags} 个，每个 1–{TAG_LIMITS.maxChars} 字；按 Enter 或逗号添加。</p><span class="count">{value.length}/{TAG_LIMITS.maxTags}</span></div>
+    <div class="hint-row"><p id={helpId} class="help">最多 {TAG_LIMITS.maxTags} 个，每个 1–{TAG_LIMITS.maxChars} 字；按空格、Enter 或逗号添加。</p><span class="count">{value.length}/{TAG_LIMITS.maxTags}</span></div>
     {#if feedback}<p id={errorId} class="error" role="alert">{feedback}</p>{/if}
     <span class="sr-only" role="status" aria-live="polite">{announcement}</span>
 </div>

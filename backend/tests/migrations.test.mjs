@@ -1,5 +1,4 @@
 import assert from 'node:assert/strict';
-import { readFile } from 'node:fs/promises';
 import { after, before, test } from 'node:test';
 import { generateSQLiteDrizzleJson, generateSQLiteMigration } from 'drizzle-kit/api';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
@@ -30,6 +29,17 @@ async function apply(db, history) {
 const rows = async (db, sql) => (await db.prepare(sql).all()).results;
 const identifier = (name) => `"${name.replaceAll('"', '""')}"`;
 const sorted = (values) => values.sort((a, b) => JSON.stringify(a).localeCompare(JSON.stringify(b)));
+
+// Minimal rows for constraint checks; the teacher enrollment must precede the course.
+const fixture = `PRAGMA defer_foreign_keys=ON;
+INSERT INTO accounts (id, nickname, role, school_number, name) VALUES
+    ('demo-teacher', '演示教师', 'teacher', 'DEMO-T01', NULL), ('demo-student', '演示同学', 'student', 'DEMO-001', '虚构学生甲');
+INSERT INTO terms (id, name, current) VALUES ('demo-current', '演示当前学期', 1);
+INSERT INTO enrollments (course_id, term_id, account_id) VALUES ('demo-course', 'demo-current', 'demo-teacher');
+INSERT INTO courses (id, name, code, created_by, updated_by, request_key, request_hash)
+VALUES ('demo-course', '演示课程', 'DEMO-COURSE', 'demo-teacher', 'demo-teacher', 'fixture-course', 'fixture-course');
+INSERT INTO contents (id, kind, course_id, author_id, title, updated_by, request_key, request_hash)
+VALUES ('demo-material', 'material', 'demo-course', 'demo-teacher', '演示讲义', 'demo-teacher', 'fixture-material', 'fixture-material');`;
 
 async function structure(db) {
     const tables = await rows(db, "SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' ORDER BY name");
@@ -92,8 +102,7 @@ test('SQL statement markers preserve trigger bodies containing semicolons', () =
 
 test('current rows require course identity, actors, timestamps and creation request identity', async () => {
     const db = await runtime.getD1Database('MIGRATED');
-    const seed = await readFile(new URL('../seed/local.sql', import.meta.url), 'utf8');
-    await db.batch(seed.split(';').filter(sql => sql.trim()).map(sql => db.prepare(sql)));
+    await db.batch(fixture.split(';').filter(sql => sql.trim()).map(sql => db.prepare(sql)));
     for (const field of ['code', 'created_by', 'updated_by', 'updated_at', 'request_key', 'request_hash']) {
         await assert.rejects(db.prepare(`UPDATE courses SET ${field}=NULL WHERE id='demo-course'`).run(), /NOT NULL constraint/);
     }

@@ -24,6 +24,7 @@
         "strict": true,
         "skipLibCheck": true,
         "noEmit": true,
+        "allowImportingTsExtensions": true,
         "noUnusedLocals": true,
         "noUnusedParameters": true,
         "forceConsistentCasingInFileNames": true

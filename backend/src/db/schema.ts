@@ -26,6 +26,8 @@ export const accounts = sqliteTable('accounts', {
     check('accounts_status', sql`${t.status} IN ('active', 'disabled', 'deleted')`),
     check('accounts_credential_version', sql`${t.credentialVersion} > 0`),
     check('accounts_must_change_password', sql`${t.mustChangePassword} IN (0, 1)`),
+    // Live students and teachers log in by school number; the administrator never has one.
+    check('accounts_school_number', sql`${t.status} = 'deleted' OR (${t.role} = 'admin') = (${t.schoolNumber} IS NULL)`),
     uniqueIndex('accounts_school_number_unique').on(t.schoolNumber).where(sql`${t.status} <> 'deleted'`),
     uniqueIndex('accounts_single_admin').on(t.role).where(sql`${t.role} = 'admin'`),
 ]);

@@ -66,19 +66,17 @@ export async function updateAccount(binding: D1Database, session: Session, id: s
     if (current.role === 'admin' && ['status', 'role', 'schoolNumber'].some(key => body[key] !== undefined)) {
         throw new HttpError(403, 'ADMIN_PROTECTED', '不能禁用、变更唯一管理员身份或设置管理员学工号');
     }
-    if ((body.role ?? current.role) === 'student' && (values.name === null || !(values.name ?? current.name) || !(values.schoolNumber ?? current.schoolNumber))) {
-        throw new HttpError(400, 'STUDENT_IDENTITY_REQUIRED', '学生需要姓名和学号');
-    }
     if (body.role && body.role !== current.role) {
         const replacementId = crypto.randomUUID();
         // Copy basic information to a new identity; business rows retain the deleted ID.
+        // Live members need a unique school number, so the new row holds its own ID until the old identity releases it.
         const copy = (key: string) => Object.hasOwn(values, key) ? '?' : columns[key];
         const copyKeys = ['nickname', 'status', 'name', 'department', 'major', 'grade'];
         const copied = `EXISTS (SELECT 1 FROM accounts WHERE id = '${replacementId}')`;
         await mutateAccount(binding, session, id, true, gate => [
             binding.prepare(`INSERT INTO accounts (id, nickname, role, status, school_number, password, must_change_password,
                 credential_version, name, department, major, grade, created_at, last_login_at, avatar_key)
-                SELECT ?, ${copy('nickname')}, ?, ${copy('status')}, NULL, password, must_change_password,
+                SELECT ?, ${copy('nickname')}, ?, ${copy('status')}, '${replacementId}', password, must_change_password,
                     credential_version + 1, ${copy('name')}, ${copy('department')}, ${copy('major')}, ${copy('grade')},
                     created_at, last_login_at, avatar_key FROM accounts WHERE id = ? AND ${gate}`)
                 .bind(replacementId, ...(Object.hasOwn(values, 'nickname') ? [values.nickname] : []), body.role as string,

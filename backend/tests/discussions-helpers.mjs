@@ -10,8 +10,8 @@ export const internalToken = 'fictional-test-internal-service-token';
 export const tokenFor = id => Buffer.from(id).toString('hex').padEnd(64, '0');
 const fixture = `
 PRAGMA defer_foreign_keys=ON;
-INSERT INTO accounts(id,nickname,role,name) VALUES ('student-a','学习者甲','student','虚构甲'),('student-b','学习者乙','student','虚构乙'),
-('visitor','旁听者','student','虚构丙'),('teacher-a','数学教师','teacher','虚构教师甲'),('teacher-b','物理教师','teacher','虚构教师乙'),('admin','管理员','admin',NULL);
+INSERT INTO accounts(id,nickname,role,school_number,name) VALUES ('student-a','学习者甲','student','student-a','虚构甲'),('student-b','学习者乙','student','student-b','虚构乙'),
+('visitor','旁听者','student','visitor','虚构丙'),('teacher-a','数学教师','teacher','teacher-a','虚构教师甲'),('teacher-b','物理教师','teacher','teacher-b','虚构教师乙'),('admin','管理员','admin',NULL,NULL);
 INSERT INTO terms(id,name,current) VALUES ('term-active','当前学期',0),('term-old','历史学期',1);
 INSERT INTO enrollments(course_id,account_id,term_id) VALUES ('course-a','teacher-b','term-old');
 UPDATE terms SET current=0;
@@ -45,8 +45,7 @@ export async function start(options = {}) {
         await database.batch(fixture.split(';').filter(s => s.trim()).map(s => database.prepare(s)));
         for (const id of ['student-a', 'student-b', 'visitor', 'teacher-a', 'teacher-b', 'admin']) {
             await database.batch([
-                database.prepare('UPDATE accounts SET school_number=?, password=? WHERE id=?')
-                    .bind(id === 'admin' ? null : id, 'fictional-unusable-password-hash', id),
+                database.prepare('UPDATE accounts SET password=? WHERE id=?').bind('fictional-unusable-password-hash', id),
                 database.prepare('INSERT INTO sessions(token_hash,account_id,credential_version,expires_at) VALUES (?,?,1,unixepoch()+3600)')
                     .bind(await digest(tokenFor(id)), id),
             ]);

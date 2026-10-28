@@ -1,3 +1,4 @@
+import { CONTENT_REQUEST_MAX_BYTES } from '../../../shared/rich-text/index.ts';
 import { Hono } from 'hono';
 import { sql } from 'drizzle-orm';
 import { z } from 'zod';
@@ -44,7 +45,7 @@ discussionRoutes.get('/courses/:id/questions', async c => {
     const sort = parsedEnum(c.req.query('sort'), ['newest', 'active', 'score'] as const, 'newest');
     const tag = c.req.query('tag');
     if (c.req.query('fileVersionId') !== undefined) throw new HttpError(400, 'INVALID_FILTER', '资料引用使用正文链接，不支持按文件版本筛选');
-    if (tag && tag.length > 30) throw new HttpError(400, 'INVALID_FILTER', '标签最长30字');
+    if (tag && Array.from(tag).length > 30) throw new HttpError(400, 'INVALID_FILTER', '标签最长30字');
     const stateFilter = state === 'solved' ? sql`AND accepted.answer_id IS NOT NULL`
         : state === 'unresolved' ? sql`AND accepted.answer_id IS NULL` : sql``;
     const order = sort === 'score' ? sql`score DESC,c.created_at DESC,c.id ASC` : sort === 'active'
@@ -61,7 +62,7 @@ discussionRoutes.get('/courses/:id/questions', async c => {
 });
 discussionRoutes.post('/courses/:id/questions', async c => {
     actor(c);
-    const data = await input(c, questionInput), courseId = c.req.param('id');
+    const data = await input(c, questionInput, CONTENT_REQUEST_MAX_BYTES), courseId = c.req.param('id');
     await getCourse(c, courseId);
     const id = await insertContent(c, { kind: 'question', courseId, ...data });
     c.header('Location', `/api/questions/${id}`); return respond(c, { id }, 201);
@@ -79,7 +80,7 @@ discussionRoutes.get('/questions/:id/answers', async c => {
 discussionRoutes.post('/questions/:id/answers', async c => {
     actor(c);
     const question = await visibleContent(c, c.req.param('id'), 'question');
-    const data = await input(c, z.object({ body: bodySchema }).strict());
+    const data = await input(c, z.object({ body: bodySchema }).strict(), CONTENT_REQUEST_MAX_BYTES);
     const id = await insertContent(c, { kind: 'answer', courseId: question.course_id, targetKind: 'question', targetId: question.id, body: data.body });
     c.header('Location', `/api/contents/${id}`); return respond(c, { id }, 201);
 });
@@ -103,7 +104,7 @@ discussionRoutes.get('/comments', async c => {
 discussionRoutes.post('/comments', async c => {
     actor(c);
     const data = await input(c, z.object({ targetKind: z.enum(['material', 'question', 'answer', 'comment']), targetId: idSchema,
-        body: bodySchema }).strict());
+        body: bodySchema }).strict(), CONTENT_REQUEST_MAX_BYTES);
     const courseId = (await visibleContent(c, data.targetId, data.targetKind)).course_id;
     const id = await insertContent(c, { kind: 'comment', courseId, ...data });
     c.header('Location', `/api/contents/${id}`); return respond(c, { id }, 201);
@@ -117,7 +118,7 @@ discussionRoutes.patch('/contents/:id', async c => {
     const row = await visibleContent(c, c.req.param('id')), a = await requireEditor(c, row);
     const schema = row.kind === 'question' || row.kind === 'material' ? questionInput.pick({ title: true, body: true }).partial()
         .extend({ tags: tagsSchema.nullable().optional() }).strict() : z.object({ body: bodySchema }).strict();
-    const data = await input(c, schema) as { title?: string; body?: ProseMirrorDocument; tags?: string[] | null };
+    const data = await input(c, schema, CONTENT_REQUEST_MAX_BYTES) as { title?: string; body?: ProseMirrorDocument; tags?: string[] | null };
     const body = data.body === undefined ? undefined : JSON.stringify(data.body);
     const tags = data.tags === undefined ? undefined : data.tags?.length ? JSON.stringify(data.tags) : null;
     const bodyChanged = body === undefined ? sql`0` : jsonChanged(sql`body`, body);

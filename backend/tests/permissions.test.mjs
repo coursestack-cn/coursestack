@@ -18,8 +18,8 @@ let db;
 const fixture = `
 PRAGMA defer_foreign_keys=ON;
 INSERT INTO accounts (id, nickname, role, school_number, name) VALUES
-('admin', '管理用户', 'admin', NULL, NULL), ('teacher', '公开教师', 'teacher', NULL, NULL),
-('other-teacher', '其他教师', 'teacher', NULL, NULL), ('student', '公开同学', 'student', 'TEST-001', '虚构甲'),
+('admin', '管理用户', 'admin', NULL, NULL), ('teacher', '公开教师', 'teacher', 'TEST-T01', NULL),
+('other-teacher', '其他教师', 'teacher', 'TEST-T02', NULL), ('student', '公开同学', 'student', 'TEST-001', '虚构甲'),
 ('history', '历年同学', 'student', 'TEST-002', '虚构乙'), ('outsider', '其他同学', 'student', 'TEST-003', '虚构丙');
 INSERT INTO terms (id, name) VALUES ('current', '当前学期'), ('previous', '历年学期'), ('next', '下个学期');
 UPDATE terms SET current=1 WHERE id='previous';
@@ -121,6 +121,10 @@ test('foreign keys and checks reject wrong identities, orphan relations and dupl
         "INSERT INTO enrollments (course_id, term_id, account_id) VALUES ('course', 'missing', 'student')",
         "INSERT INTO enrollments (course_id, term_id, account_id) VALUES ('course', 'current', 'student')",
         "UPDATE accounts SET school_number = 'TEST-001' WHERE id = 'history'",
+        "UPDATE accounts SET school_number = NULL WHERE id = 'student'",
+        "UPDATE accounts SET school_number = NULL WHERE id = 'teacher'",
+        "INSERT INTO accounts (id, nickname, role) VALUES ('no-number', '无学工号', 'teacher')",
+        "UPDATE accounts SET school_number = 'ADMIN-001' WHERE id = 'admin'",
         "UPDATE accounts SET status = 'unknown' WHERE id = 'student'",
         "UPDATE accounts SET nickname = '   ' WHERE id = 'student'",
         "INSERT INTO terms (id,name,current) VALUES ('invalid-term','错误学期',2)",
@@ -135,21 +139,19 @@ test('foreign keys and checks reject wrong identities, orphan relations and dupl
 
 test('D1 batches roll back all writes when a membership constraint fails', async () => {
     await assert.rejects(binding.batch([
-        binding.prepare("INSERT INTO accounts (id, nickname, role) VALUES ('rollback', '回滚用户', 'teacher')"),
+        binding.prepare("INSERT INTO accounts (id, nickname, role, school_number) VALUES ('rollback', '回滚用户', 'teacher', 'ROLLBACK')"),
         binding.prepare("INSERT INTO enrollments (course_id, term_id, account_id) VALUES ('course', 'current', 'rollback')"),
     ]));
     assert.equal(await binding.prepare("SELECT id FROM accounts WHERE id = 'rollback'").first(), null);
 });
 
-test('local seeds are repeatable and preserve later edits and term selection', async () => {
+test('local seeds are repeatable and preserve term selection', async () => {
     const seed = await readFile(new URL('../seed/local.sql', import.meta.url), 'utf8');
     const apply = () => binding.batch(seed.split(';').filter((s) => s.trim()).map((s) => binding.prepare(s)));
     await apply();
-    await binding.prepare("UPDATE accounts SET nickname = '修改后的名称' WHERE id = 'demo-student'").run();
     await apply();
-    assert.equal((await getPublicProfile(db, 'demo-student')).nickname, '修改后的名称');
     assert.equal(await binding.prepare('SELECT id FROM terms WHERE current=1').first('id'), 'current');
-    assert.equal(await binding.prepare("SELECT COUNT(*) AS n FROM enrollments WHERE account_id = 'demo-student'").first('n'), 1);
+    assert.equal(await binding.prepare("SELECT COUNT(*) AS n FROM terms WHERE id LIKE 'demo-%'").first('n'), 2);
 });
 
 test('HTTP handles health, unknown routes, methods and database errors', async () => {

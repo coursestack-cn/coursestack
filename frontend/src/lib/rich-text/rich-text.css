@@ -99,9 +99,7 @@
 }
 
 .rich-math:not(.rich-math-block) {
-    display: inline-block;
-    overflow-x: auto;
-    vertical-align: middle;
+    display: inline;
 }
 
 .rich-math-block {

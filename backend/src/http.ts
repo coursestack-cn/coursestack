@@ -64,9 +64,9 @@ export function stringField(body: Record<string, unknown>, name: string, max = 8
 
 export const idSchema = z.string().trim().min(1).max(100).regex(/^[a-zA-Z0-9_-]+$/);
 export const pointsSchema = z.number().int().min(0).max(Number.MAX_SAFE_INTEGER);
-export const tagsSchema = z.array(z.string().trim().min(1).max(30)).max(8).transform(v => [...new Set(v)]);
-export async function input<T extends z.ZodType>(c: Ctx, schema: T): Promise<z.output<T>> {
-    const value = await readJson(c.req.raw, 128 * 1024);
+export const tagsSchema = z.array(z.string().trim().min(1).refine(value => Array.from(value).length <= 30, '标签最长30字')).max(8).transform(v => [...new Set(v)]);
+export async function input<T extends z.ZodType>(c: Ctx, schema: T, maxBytes = 128 * 1024): Promise<z.output<T>> {
+    const value = await readJson(c.req.raw, maxBytes);
     const parsed = schema.safeParse(value);
     if (!parsed.success) throw new HttpError(400, 'VALIDATION_ERROR', parsed.error.issues.map(x => `${x.path.join('.')}: ${x.message}`).join('; '));
     return parsed.data;

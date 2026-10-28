@@ -34,7 +34,6 @@ export async function authRoutes(request: Request, env: Env): Promise<Response |
         if (body.role !== 'student' && body.role !== 'teacher') throw new HttpError(400, 'INVALID_ROLE', '只能创建学生或教师账号');
         const schoolNumber = stringField(body, 'schoolNumber', 64);
         const profile = profileValues(body);
-        if (body.role === 'student' && !profile.name) throw new HttpError(400, 'STUDENT_IDENTITY_REQUIRED', '学生需要姓名和学号');
         const passwordHash = await hashPassword(passwordField(body.password)), id = crypto.randomUUID();
         try {
             const result = await env.DB.prepare(`INSERT INTO accounts (id, nickname, role, school_number, password, name, department, major, grade)

@@ -235,7 +235,7 @@
 
     <section id="avatar">
         <div class="section-heading"><span>12</span><h2>Avatar <small>头像</small></h2></div>
-        <div class="row">{#each ["sm", "md", "lg"] as size}<Avatar name="课栈" src="/favicon.svg" size={size as "sm" | "md" | "lg"} /><Avatar name="林同学" size={size as "sm" | "md" | "lg"} />{/each}</div>
+        <div class="row">{#each ["sm", "md", "lg"] as size}<Avatar name="课栈" src="/favicon-black-trs.ico" size={size as "sm" | "md" | "lg"} /><Avatar name="林同学" size={size as "sm" | "md" | "lg"} />{/each}</div>
         <div class="row">{#each ["林", "陈", "周", "叶", "许", "👩🏽‍💻同学"] as name}<Avatar {name} />{/each}<Avatar name="加载失败" src="data:image/png;base64,AA==" /><Avatar name={longText} /><Avatar name="" alt="未设置名称" /></div>
         <p class="note">24 / 32 / 48 px；名称稳定映射柔和色。损坏图片回退到首个完整字符。</p>
     </section>

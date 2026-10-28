@@ -12,9 +12,168 @@
     }
   ],
   "paths": {
+    "/api/me/courses": {
+      "get": {
+        "summary": "本人修读或授课的课程，区分当前学期与历史学期，同一课程去重",
+        "operationId": "get__api_me_courses",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000,
+              "default": 1
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20
+            }
+          },
+          {
+            "name": "scope",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "current",
+                "history"
+              ],
+              "default": "current"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/MyCoursePage"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "登录失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "权限不足",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "内容不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "状态冲突或重复操作",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "正文过大",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "需要JSON",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "内部接口未配置",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/courses": {
       "get": {
-        "summary": "课程列表",
+        "summary": "课程列表；code 按唯一课程编号精确匹配",
         "operationId": "get__api_courses",
         "security": [
           {},
@@ -51,6 +210,16 @@
             "required": false,
             "schema": {
               "type": "string"
+            }
+          },
+          {
+            "name": "code",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40
             }
           }
         ],
@@ -6438,70 +6607,498 @@
         "additionalProperties": false
       },
       "ProseMirrorMark": {
-        "type": "object",
-        "properties": {
-          "type": {
-            "type": "string",
-            "minLength": 1
-          },
-          "attrs": {
-            "type": "object",
-            "additionalProperties": true
-          }
-        },
-        "required": [
-          "type"
-        ],
-        "additionalProperties": false
-      },
-      "ProseMirrorNode": {
-        "type": "object",
-        "properties": {
-          "type": {
-            "type": "string",
-            "minLength": 1
-          },
-          "attrs": {
-            "type": "object",
-            "additionalProperties": true
-          },
-          "text": {
-            "type": "string",
-            "minLength": 1
-          },
-          "content": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ProseMirrorNode"
-            }
-          },
-          "marks": {
-            "type": "array",
-            "items": {
-              "$ref": "#/components/schemas/ProseMirrorMark"
-            }
-          }
-        },
-        "required": [
-          "type"
-        ],
-        "additionalProperties": false
-      },
-      "ProseMirrorDocument": {
-        "allOf": [
+        "oneOf": [
           {
-            "$ref": "#/components/schemas/ProseMirrorNode"
+            "type": "object",
+            "properties": {
+              "type": {
+                "enum": [
+                  "bold",
+                  "italic",
+                  "strike",
+                  "code"
+                ]
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "additionalProperties": false
           },
           {
             "type": "object",
             "properties": {
               "type": {
-                "const": "doc"
+                "const": "link"
+              },
+              "attrs": {
+                "type": "object",
+                "properties": {
+                  "href": {
+                    "type": "string",
+                    "maxLength": 2048,
+                    "description": "完整 http(s) URL 或单斜杠开头的站内路径；拒绝空白、控制字符、反斜杠和其他协议。"
+                  }
+                },
+                "required": [
+                  "href"
+                ],
+                "additionalProperties": false
               }
+            },
+            "required": [
+              "type",
+              "attrs"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "ProseMirrorInline": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "text"
+              },
+              "text": {
+                "type": "string",
+                "minLength": 1
+              },
+              "marks": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ProseMirrorMark"
+                },
+                "minItems": 0,
+                "uniqueItems": true,
+                "description": "标记类型不可重复；code 必须独占，不与其他标记共存。"
+              }
+            },
+            "required": [
+              "type",
+              "text"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "hardBreak"
+              },
+              "marks": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ProseMirrorMark"
+                },
+                "minItems": 0,
+                "uniqueItems": true,
+                "description": "标记类型不可重复；code 必须独占，不与其他标记共存。"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "inlineMath"
+              },
+              "attrs": {
+                "type": "object",
+                "properties": {
+                  "latex": {
+                    "type": "string",
+                    "maxLength": 4000
+                  }
+                },
+                "required": [
+                  "latex"
+                ],
+                "additionalProperties": false
+              },
+              "marks": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ProseMirrorMark"
+                },
+                "minItems": 0,
+                "uniqueItems": true,
+                "description": "标记类型不可重复；code 必须独占，不与其他标记共存。"
+              }
+            },
+            "required": [
+              "type",
+              "attrs"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "ProseMirrorParagraph": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "const": "paragraph"
+          },
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProseMirrorInline"
+            },
+            "minItems": 0
+          }
+        },
+        "required": [
+          "type"
+        ],
+        "additionalProperties": false
+      },
+      "ProseMirrorListItem": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "const": "listItem"
+          },
+          "content": {
+            "type": "array",
+            "minItems": 1,
+            "prefixItems": [
+              {
+                "$ref": "#/components/schemas/ProseMirrorParagraph"
+              }
+            ],
+            "items": {
+              "$ref": "#/components/schemas/ProseMirrorBlock"
             }
           }
+        },
+        "required": [
+          "type",
+          "content"
         ],
-        "description": "JSON 序列化后最多 30000 字符、节点最多嵌套 64 层。text 节点须包含非空 text 且不能有 content；其他节点不含 text。具体节点、标记和属性由 Tiptap 扩展配置确定。"
+        "additionalProperties": false
+      },
+      "ProseMirrorBlock": {
+        "oneOf": [
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "paragraph"
+              },
+              "content": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ProseMirrorInline"
+                },
+                "minItems": 0
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "heading"
+              },
+              "attrs": {
+                "type": "object",
+                "properties": {
+                  "level": {
+                    "enum": [
+                      2,
+                      3,
+                      4
+                    ]
+                  }
+                },
+                "required": [
+                  "level"
+                ],
+                "additionalProperties": false
+              },
+              "content": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ProseMirrorInline"
+                },
+                "minItems": 0
+              }
+            },
+            "required": [
+              "type",
+              "attrs"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "bulletList"
+              },
+              "content": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ProseMirrorListItem"
+                },
+                "minItems": 1
+              }
+            },
+            "required": [
+              "type",
+              "content"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "orderedList"
+              },
+              "attrs": {
+                "type": "object",
+                "properties": {
+                  "start": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "start"
+                ],
+                "additionalProperties": false
+              },
+              "content": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ProseMirrorListItem"
+                },
+                "minItems": 1
+              }
+            },
+            "required": [
+              "type",
+              "attrs",
+              "content"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "blockquote"
+              },
+              "content": {
+                "type": "array",
+                "items": {
+                  "$ref": "#/components/schemas/ProseMirrorBlock"
+                },
+                "minItems": 1
+              }
+            },
+            "required": [
+              "type",
+              "content"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "codeBlock"
+              },
+              "attrs": {
+                "type": "object",
+                "properties": {
+                  "language": {
+                    "enum": [
+                      "c",
+                      "cpp",
+                      "java",
+                      "python",
+                      "javascript",
+                      "typescript",
+                      "sql",
+                      "bash",
+                      "json",
+                      "xml",
+                      "css",
+                      "go",
+                      "rust",
+                      "csharp",
+                      "matlab",
+                      null
+                    ]
+                  }
+                },
+                "required": [
+                  "language"
+                ],
+                "additionalProperties": false
+              },
+              "content": {
+                "type": "array",
+                "items": {
+                  "type": "object",
+                  "properties": {
+                    "type": {
+                      "const": "text"
+                    },
+                    "text": {
+                      "type": "string",
+                      "minLength": 1
+                    },
+                    "marks": {
+                      "type": "array",
+                      "maxItems": 0
+                    }
+                  },
+                  "required": [
+                    "type",
+                    "text"
+                  ],
+                  "additionalProperties": false
+                },
+                "minItems": 0
+              }
+            },
+            "required": [
+              "type",
+              "attrs"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "horizontalRule"
+              }
+            },
+            "required": [
+              "type"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "image"
+              },
+              "attrs": {
+                "type": "object",
+                "properties": {
+                  "src": {
+                    "type": "string",
+                    "maxLength": 2048,
+                    "pattern": "^/(?!/)",
+                    "description": "站内路径；拒绝反斜杠、原始空白及控制字符。文件访问另由服务端授权。"
+                  },
+                  "alt": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 300
+                  }
+                },
+                "required": [
+                  "src",
+                  "alt"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "type",
+              "attrs"
+            ],
+            "additionalProperties": false
+          },
+          {
+            "type": "object",
+            "properties": {
+              "type": {
+                "const": "blockMath"
+              },
+              "attrs": {
+                "type": "object",
+                "properties": {
+                  "latex": {
+                    "type": "string",
+                    "maxLength": 4000
+                  }
+                },
+                "required": [
+                  "latex"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "type",
+              "attrs"
+            ],
+            "additionalProperties": false
+          }
+        ]
+      },
+      "ProseMirrorDocument": {
+        "type": "object",
+        "properties": {
+          "type": {
+            "const": "doc"
+          },
+          "content": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/ProseMirrorBlock"
+            },
+            "minItems": 1
+          }
+        },
+        "required": [
+          "type",
+          "content"
+        ],
+        "additionalProperties": false,
+        "description": "严格节点、标记及属性白名单。最多 30000 个语义 Unicode 码点、紧凑 JSON UTF-8 368 KiB；列表与引用沿祖先链累计最多 16 层。内容写请求整体最多 384 KiB。规范空正文为含一个空段落的 doc。详细规则以 shared/rich-text/index.ts 的 validateDoc 为准。",
+        "x-max-semantic-code-points": 30000,
+        "x-max-json-bytes": 376832,
+        "x-max-nesting-depth": 16,
+        "x-max-request-bytes": 393216
+      },
+      "ProseMirrorNode": {
+        "anyOf": [
+          {
+            "$ref": "#/components/schemas/ProseMirrorDocument"
+          },
+          {
+            "$ref": "#/components/schemas/ProseMirrorBlock"
+          },
+          {
+            "$ref": "#/components/schemas/ProseMirrorInline"
+          },
+          {
+            "$ref": "#/components/schemas/ProseMirrorListItem"
+          }
+        ]
       },
       "BonusPolicy": {
         "type": "object",
@@ -6674,6 +7271,41 @@
           "bonusPolicy": {
             "$ref": "#/components/schemas/BonusPolicy"
           },
+          "currentTeacher": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100,
+                    "pattern": "^[a-zA-Z0-9_-]+$"
+                  },
+                  "nickname": {
+                    "type": [
+                      "string",
+                      "null"
+                    ],
+                    "maxLength": 80
+                  },
+                  "isDeleted": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "id",
+                  "nickname",
+                  "isDeleted"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ],
+            "description": "当前学期任课教师；未设置当前学期或本学期未开课时为 null"
+          },
           "createdAt": {
             "type": "integer"
           },
@@ -6687,6 +7319,7 @@
           "code",
           "introduction",
           "bonusPolicy",
+          "currentTeacher",
           "createdAt",
           "updatedAt"
         ],
@@ -7077,6 +7710,107 @@
           "page",
           "pageSize",
           "total"
+        ],
+        "additionalProperties": false
+      },
+      "MyCoursePage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "course": {
+                  "$ref": "#/components/schemas/Course"
+                },
+                "terms": {
+                  "type": "array",
+                  "items": {
+                    "type": "object",
+                    "properties": {
+                      "id": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 100,
+                        "pattern": "^[a-zA-Z0-9_-]+$"
+                      },
+                      "name": {
+                        "type": "string"
+                      },
+                      "current": {
+                        "type": "boolean"
+                      }
+                    },
+                    "required": [
+                      "id",
+                      "name",
+                      "current"
+                    ],
+                    "additionalProperties": false
+                  }
+                }
+              },
+              "required": [
+                "course",
+                "terms"
+              ],
+              "additionalProperties": false
+            }
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "pageSize": {
+            "type": "integer",
+            "minimum": 1
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "scope": {
+            "type": "string",
+            "enum": [
+              "current",
+              "history"
+            ]
+          },
+          "currentTerm": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100,
+                    "pattern": "^[a-zA-Z0-9_-]+$"
+                  },
+                  "name": {
+                    "type": "string"
+                  }
+                },
+                "required": [
+                  "id",
+                  "name"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "items",
+          "page",
+          "pageSize",
+          "total",
+          "scope",
+          "currentTerm"
         ],
         "additionalProperties": false
       }

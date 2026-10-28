@@ -1,5 +1,12 @@
+import { entityId, urlId } from "./ids.ts";
+
 export function normalizePath(path: string): string {
-    return path.replace(/\/+$/, "") || "/";
+    return path.replace(/^\/(questions|answers|comments|materials)\/([^/]+)/, (original, kind: string, segment: string) => {
+        try {
+            const id = decodeURIComponent(segment), compact = urlId(id);
+            return compact !== id ? `/${kind}/${compact}` : original;
+        } catch { return original; }
+    }).replace(/\/+$/, "") || "/";
 }
 
 export function matchRoute<T extends { path: string }>(pathname: string, routes: readonly T[]): {
@@ -27,7 +34,8 @@ export function matchRoute<T extends { path: string }>(pathname: string, routes:
                 score.push(0);
             } else if (part.startsWith(":")) {
                 if (!segments[index]) { matchesPath = false; break; }
-                params[part.slice(1)] = segments[index];
+                const name = part.slice(1);
+                params[name] = name.endsWith("Id") ? entityId(segments[index]!) : segments[index]!;
                 score.push(1);
             } else if (part === segments[index]) {
                 score.push(2);
