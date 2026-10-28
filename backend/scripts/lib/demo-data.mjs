@@ -5,9 +5,10 @@ import { HttpError } from '../../src/http.ts';
 const stableId = (name) => createHash('sha256').update(`coursestack-opening-demo-v1:${name}`).digest('hex').slice(0, 32);
 const courseName = '数据库系统原理';
 const courseId = stableId('course');
+const academic = { department: '计算机学院', major: '计算机科学与技术' };
 const members = [
-    { number: 'T0001', role: 'teacher', name: '演示教师' },
-    ...Array.from({ length: 100 }, (_, i) => ({ number: `S${String(i + 1).padStart(4, '0')}`, role: 'student', name: `演示同学 ${String(i + 1).padStart(3, '0')}` })),
+    { number: 'T0001', role: 'teacher', name: '演示教师', ...academic, grade: null },
+    ...Array.from({ length: 100 }, (_, i) => ({ number: `S${String(i + 1).padStart(4, '0')}`, role: 'student', name: `演示同学 ${String(i + 1).padStart(3, '0')}`, ...academic, grade: '2024 级' })),
 ].map((member) => ({ ...member, id: stableId(member.number) }));
 const teacher = members[0];
 const conflict = (message) => new HttpError(409, 'DEMO_CONFLICT', message);
@@ -60,13 +61,13 @@ export async function prepareDemoData(binding, { dryRun = false, course: request
     const statements = [
         binding.prepare('PRAGMA defer_foreign_keys=ON'),
         binding.prepare(`SELECT ${guard} AS ready`).bind(currentTerm.id),
-        insertMembers(`INSERT INTO accounts (id, nickname, role, school_number, password, name, must_change_password)
+        insertMembers(`INSERT INTO accounts (id, nickname, role, school_number, password, name, department, major, grade, must_change_password)
             SELECT value ->> '$.id', value ->> '$.name', value ->> '$.role', value ->> '$.number',
-                value ->> '$.hash', value ->> '$.name', 0 FROM json_each(?)`),
+                value ->> '$.hash', value ->> '$.name', value ->> '$.department', value ->> '$.major', value ->> '$.grade', 0 FROM json_each(?)`),
         binding.prepare(`INSERT INTO enrollments (course_id, term_id, account_id) SELECT ?, ?, ? WHERE ${guard}
             ON CONFLICT(course_id, term_id, account_id) DO NOTHING`).bind(selectedCourse.id, selectedTerm, teacher.id, currentTerm.id),
         ...(!courseResult.results.length ? [binding.prepare(`INSERT INTO courses (id, name, code, created_by, updated_by, request_key, request_hash)
-            SELECT ?, ?, ?, ?, ?, ?, ? WHERE ${guard}`).bind(selectedCourse.id, selectedCourse.name, 'DEMO-DATABASE', teacher.id, teacher.id, 'demo-course', stableId('course-request'), currentTerm.id)] : []),
+            SELECT ?, ?, ?, ?, ?, ?, ? WHERE ${guard}`).bind(selectedCourse.id, selectedCourse.name, '304208040', teacher.id, teacher.id, 'demo-course', stableId('course-request'), currentTerm.id)] : []),
         binding.prepare(`INSERT INTO enrollments (course_id, term_id, account_id)
             SELECT ?, ?, value FROM json_each(?) WHERE ${guard}
             ON CONFLICT(course_id, term_id, account_id) DO NOTHING`)

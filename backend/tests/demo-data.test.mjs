@@ -19,6 +19,11 @@ test('demo preparation creates 100 students and a teacher, enrolls the current t
         assert.equal(result.createdAccounts, 101);
         assert.equal(await db.prepare("SELECT count(*) AS n FROM enrollments WHERE course_id = ? AND term_id = ? AND account_id IN (SELECT id FROM accounts WHERE role='student')").bind(result.courseId, result.termId).first('n'), 100);
         assert.equal(await db.prepare("SELECT count(*) AS n FROM enrollments WHERE course_id = ? AND term_id = ? AND account_id IN (SELECT id FROM accounts WHERE role='teacher')").bind(result.courseId, result.termId).first('n'), 1);
+        assert.deepEqual((await db.prepare(`SELECT role, department, major, grade, count(*) AS n FROM accounts
+            WHERE school_number GLOB '[ST]0[0-9][0-9][0-9]' GROUP BY role, department, major, grade ORDER BY role`).all()).results, [
+            { role: 'student', department: '计算机学院', major: '计算机科学与技术', grade: '2024 级', n: 100 },
+            { role: 'teacher', department: '计算机学院', major: '计算机科学与技术', grade: null, n: 1 },
+        ]);
         for (const number of ['S0001', 'S0100', 'T0001']) {
             const authenticated = await login(db, number, number);
             assert.equal(authenticated.profile.mustChangePassword, false);
