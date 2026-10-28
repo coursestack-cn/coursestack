@@ -91,11 +91,30 @@ test('demo reset rebuilds the database with the demo set and keeps only the admi
         await app.policy({ pointsQuestion: 5 });
         await app.postQuestion();
         assert.ok(await db.prepare('SELECT count(*) AS n FROM bonus_ledger').first('n') > 0);
+        const tables = await db.prepare(objects).first('n');
         const steps = [];
+        const unreachable = async () => { steps.push('unreachable'); };
+        // A token without R2 access fails before anything in D1 changes.
+        const denied = { accountId: 'a'.repeat(32), bucket: 'coursestack-files', token: 'fictional-token' };
+        await assert.rejects(resetDemoData(db, {
+            clearFiles: () => clearBucket(denied, async () => Response.json({ success: false, errors: [{ code: 10000, message: 'Authentication error' }] }, { status: 403 })),
+            migrate: unreachable, seed: unreachable,
+        }), { code: 'R2_OPERATION_FAILED' });
+        assert.deepEqual(steps, []);
+        assert.equal(await db.prepare(objects).first('n'), tables);
+        assert.equal(await db.prepare("SELECT password FROM accounts WHERE id = 'admin'").first('password'), password);
         const result = await resetDemoData(db, {
-            async clearFiles() { steps.push('files'); assert.equal(await db.prepare(objects).first('n'), 0); return 2; },
-            async migrate() { steps.push('migrate'); for (const { statements } of await readMigrations()) await db.batch(statements.map((s) => db.prepare(s))); },
-            async seed() { steps.push('seed'); await db.prepare("INSERT INTO terms (id, name, current) VALUES ('demo-current', '演示当前学期', 1)").run(); },
+            async clearFiles() { steps.push('files'); assert.equal(await db.prepare(objects).first('n'), tables); return 2; },
+            async migrate() {
+                steps.push('migrate');
+                assert.equal(await db.prepare(objects).first('n'), 0);
+                for (const { statements } of await readMigrations()) await db.batch(statements.map((s) => db.prepare(s)));
+            },
+            async seed() {
+                steps.push('seed');
+                assert.equal(await db.prepare("SELECT id FROM accounts WHERE role = 'admin'").first('id'), 'admin');
+                await db.prepare("INSERT INTO terms (id, name, current) VALUES ('demo-current', '演示当前学期', 1)").run();
+            },
         });
         assert.deepEqual(steps, ['files', 'migrate', 'seed']);
         assert.equal(result.deletedFiles, 2);
@@ -133,9 +152,15 @@ test('demo reset lists every R2 page before deleting each object', async () => {
         `DELETE ${base}/avatars/a/1`,
         `DELETE ${base}/a%20b/c%3Fd`,
     ]);
-    await assert.rejects(clearBucket(target, async () => Response.json({ success: false }, { status: 403 })), { code: 'R2_OPERATION_FAILED' });
+    // Failures name the request, status and numeric error codes, never the provider message.
+    const denied = await clearBucket(target, async () => Response.json({ success: false, errors: [{ code: 10000, message: 'Authentication error' }] }, { status: 403 }))
+        .then(() => assert.fail('expected R2 failure'), (error) => error);
+    assert.equal(denied.code, 'R2_OPERATION_FAILED');
+    assert.match(denied.message, /GET HTTP 403，Cloudflare 错误 10000/);
+    assert.doesNotMatch(denied.message, /Authentication error/);
     await assert.rejects(clearBucket(target, async (url, init) => init.method === 'GET'
-        ? Response.json({ success: true, result: [{ key: 'kept' }] }) : new Response(null, { status: 500 })), { code: 'R2_OPERATION_FAILED' });
+        ? Response.json({ success: true, result: [{ key: 'kept' }] }) : new Response(null, { status: 500 })), { code: 'R2_OPERATION_FAILED', message: /DELETE HTTP 500）/ });
+    await assert.rejects(clearBucket(target, async () => { throw new TypeError('network'); }), { message: /GET 未收到响应/ });
 });
 
 test('demo reset command requires the target D1 ID and rejects credentials in arguments', () => {
