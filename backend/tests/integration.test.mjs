@@ -78,9 +78,12 @@ test('数据库拒绝跨问题采纳及内容身份迁移', async () => {
 test('无效加分小数和过大正文被拒绝，报错不返回SQL或令牌', async () => {
     const invalid = await h.api('PUT', '/courses/course-a/bonus-policy', 'teacher-a', { pointsQuestion: 0, pointsAnswer: 2.345, pointsAcceptance: 0, pointsComment: 0, pointsMaterial: 0, pointsMaterialVersion: 0 });
     assert.equal(invalid.status, 400);
-    const large = await h.api('POST', '/courses/course-a/questions', 'student-a', { title: '过大正文', body: doc('中'.repeat(50000)) });
+    const long = await h.api('POST', '/courses/course-a/questions', 'student-a', { title: '过长正文', body: doc('中'.repeat(50000)) });
+    assert.equal(long.status, 400);
+    // Exceeds the 384 KiB content request limit before validation runs.
+    const large = await h.api('POST', '/courses/course-a/questions', 'student-a', { title: '过大正文', body: doc('中'.repeat(140000)) });
     assert.equal(large.status, 413);
-    for (const r of [invalid, large]) assert.ok(!JSON.stringify(r.data).includes('local-teacher-a-token'));
+    for (const r of [invalid, long, large]) assert.ok(!JSON.stringify(r.data).includes('local-teacher-a-token'));
 });
 
 test('课程动态直接列出当前可见内容，编辑后仍只出现一次并按更新时间排序', async () => {
