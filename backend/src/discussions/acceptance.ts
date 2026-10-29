@@ -22,7 +22,7 @@ acceptanceRoutes.put('/questions/:id/acceptance', async c => {
         assertChanged(result[1]);
     } else {
         const answer = await visibleContent(c, data.answerId, 'answer');
-        if (answer.target_kind !== 'question' || answer.target_id !== q.id) throw new HttpError(400, 'ANSWER_QUESTION_MISMATCH', '答案不属于此问题');
+        if (answer.target_id !== q.id) throw new HttpError(400, 'ANSWER_QUESTION_MISMATCH', '答案不属于此问题');
         const term = await createDatabase(c.env.DB).get<{ id: string }>(sql`SELECT id FROM terms WHERE current=1`);
         if (!term) throw new HttpError(409, 'NO_CURRENT_TERM', '采纳需指定当前学期');
         const result = await createDatabase(c.env.DB).run(sql`INSERT INTO acceptances(question_id,answer_id,operator_id,created_at)

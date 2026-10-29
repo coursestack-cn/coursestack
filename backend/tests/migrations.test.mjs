@@ -85,6 +85,7 @@ test('fresh D1 initialization makes every application table STRICT and matches D
     await target.batch(statements.map((sql) => target.prepare(sql)));
     const expected = await structure(target);
     assert.equal(expected.some(table => table.name === 'business_events'), false);
+    assert.equal(expected.find(table => table.name === 'contents').columns.some(column => column.name === 'target_kind'), false);
     for (const table of expected) assert.equal(table.columns.some(column => column.name === 'revision'), false, table.name);
     assert.deepEqual(await structure(migrated), expected);
     const tableModes = new Map((await rows(migrated, 'PRAGMA table_list'))

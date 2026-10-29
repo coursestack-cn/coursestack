@@ -16,7 +16,7 @@ import { getCourse } from '../courses/routes.ts';
 const questionInput = z.object({ title: z.string().trim().min(1).max(200), body: bodySchema,
     tags: tagsSchema.nullable().default(null) }).strict();
 type NewContent = { kind: ContentRow['kind']; courseId: string; body: ProseMirrorDocument; title?: string;
-    tags?: string[] | null; targetKind?: ContentRow['kind']; targetId?: string };
+    tags?: string[] | null; targetId?: string };
 async function insertContent(c: Ctx, data: NewContent) {
     const a = actor(c), identity = await requestIdentity(c, data);
     const old = await createDatabase(c.env.DB).get<{ id: string; request_hash: string }>(sql`SELECT id,request_hash FROM contents WHERE author_id=${a.id} AND request_key=${identity.key}`);
@@ -25,10 +25,10 @@ async function insertContent(c: Ctx, data: NewContent) {
         c.header('Idempotency-Replayed', 'true'); return old.id;
     }
     const id = uid(), at = now();
-    await createDatabase(c.env.DB).run(sql`INSERT INTO contents(id,kind,course_id,author_id,title,body,tags,target_kind,target_id,
+    await createDatabase(c.env.DB).run(sql`INSERT INTO contents(id,kind,course_id,author_id,title,body,tags,target_id,
         created_at,updated_at,updated_by,request_key,request_hash)
         SELECT ${id},${data.kind},${data.courseId},${a.id},${data.title ?? null},${JSON.stringify(data.body)},${data.tags?.length ? JSON.stringify(data.tags) : null},
-        ${data.targetKind ?? null},${data.targetId ?? null},
+        ${data.targetId ?? null},
         ${at},${at},${a.id},${identity.key},${identity.fingerprint} WHERE ${activeUser(a)}
         ON CONFLICT(author_id,request_key) DO NOTHING`);
     const made = await createDatabase(c.env.DB).get<{ id: string; request_hash: string }>(sql`SELECT id,request_hash FROM contents WHERE author_id=${a.id} AND request_key=${identity.key}`);
@@ -73,7 +73,7 @@ discussionRoutes.get('/questions/:id', async c => {
 });
 discussionRoutes.get('/questions/:id/answers', async c => {
     const question = await visibleContent(c, c.req.param('id'), 'question'), p = page(c);
-    const { rows, total } = await queryPage<PublicRow>(c, p, sql`${publicSelect(c)} WHERE c.kind='answer' AND c.target_kind='question' AND c.target_id=${question.id}
+    const { rows, total } = await queryPage<PublicRow>(c, p, sql`${publicSelect(c)} WHERE c.kind='answer' AND c.target_id=${question.id}
         ORDER BY (c.id=${question.acceptedAnswerId}) DESC,score DESC,c.created_at ASC,c.id ASC`);
     return respond(c, listResult(rows.map(r => ({ ...contentDto(r), isAccepted: r.id === question.acceptedAnswerId })), p, total));
 });
@@ -81,7 +81,7 @@ discussionRoutes.post('/questions/:id/answers', async c => {
     actor(c);
     const question = await visibleContent(c, c.req.param('id'), 'question');
     const data = await input(c, z.object({ body: bodySchema }).strict(), CONTENT_REQUEST_MAX_BYTES);
-    const id = await insertContent(c, { kind: 'answer', courseId: question.course_id, targetKind: 'question', targetId: question.id, body: data.body });
+    const id = await insertContent(c, { kind: 'answer', courseId: question.course_id, targetId: question.id, body: data.body });
     c.header('Location', `/api/contents/${id}`); return respond(c, { id }, 201);
 });
 discussionRoutes.get('/comments', async c => {
@@ -90,7 +90,7 @@ discussionRoutes.get('/comments', async c => {
     await accessibleContent(c, targetId, kind);
     const p = page(c), sort = parsedEnum(c.req.query('sort'), ['oldest', 'score'] as const, 'oldest');
     const { rows, total } = await queryPage<PublicRow>(c, p, sql`WITH RECURSIVE thread(id) AS (
-        SELECT id FROM accessible_contents WHERE kind='comment' AND target_kind=${kind} AND target_id=${targetId}
+        SELECT id FROM accessible_contents WHERE kind='comment' AND target_id=${targetId}
         UNION ALL SELECT child.id FROM accessible_contents child JOIN thread parent ON child.target_id=parent.id WHERE child.kind='comment'
     ) ${publicSelect(c, true)} WHERE c.id IN (SELECT id FROM thread)
         AND (c.status='visible' OR EXISTS(WITH RECURSIVE below(id,status) AS (
@@ -106,7 +106,7 @@ discussionRoutes.post('/comments', async c => {
     const data = await input(c, z.object({ targetKind: z.enum(['material', 'question', 'answer', 'comment']), targetId: idSchema,
         body: bodySchema }).strict(), CONTENT_REQUEST_MAX_BYTES);
     const courseId = (await visibleContent(c, data.targetId, data.targetKind)).course_id;
-    const id = await insertContent(c, { kind: 'comment', courseId, ...data });
+    const id = await insertContent(c, { kind: 'comment', courseId, targetId: data.targetId, body: data.body });
     c.header('Location', `/api/contents/${id}`); return respond(c, { id }, 201);
 });
 discussionRoutes.get('/contents/:id', async c => {

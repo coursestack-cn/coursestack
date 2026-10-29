@@ -81,7 +81,6 @@ CREATE TABLE `contents` (
 	`title` text,
 	`body` text,
 	`tags` text,
-	`target_kind` text,
 	`target_id` text,
 	`status` text DEFAULT 'visible' NOT NULL,
 	`created_at` integer DEFAULT (unixepoch()) NOT NULL,
@@ -98,18 +97,16 @@ CREATE TABLE `contents` (
 	CONSTRAINT "contents_deleted_payload" CHECK("contents"."status" <> 'deleted' OR ("contents"."title" IS NULL AND "contents"."body" IS NULL AND "contents"."tags" IS NULL)),
 	CONSTRAINT "contents_kind" CHECK("contents"."kind" IN ('material', 'question', 'answer', 'comment')),
 	CONSTRAINT "contents_tags" CHECK("contents"."tags" IS NULL OR ("contents"."kind" IN ('question', 'material') AND json_valid("contents"."tags") AND json_type("contents"."tags") = 'array')),
-	CONSTRAINT "contents_target_kind" CHECK("contents"."target_kind" IN ('material', 'question', 'answer', 'comment')),
 	CONSTRAINT "contents_status" CHECK("contents"."status" IN ('visible', 'hidden', 'deleted')),
-	CONSTRAINT "contents_shape" CHECK(("contents"."kind" IN ('material', 'question') AND ("contents"."title" IS NOT NULL OR "contents"."status" = 'deleted') AND "contents"."target_kind" IS NULL AND "contents"."target_id" IS NULL)
-        OR ("contents"."kind" = 'answer' AND "contents"."title" IS NULL AND "contents"."target_kind" IS 'question' AND "contents"."target_id" IS NOT NULL)
-        OR ("contents"."kind" = 'comment' AND "contents"."title" IS NULL AND "contents"."target_kind" IS NOT NULL AND "contents"."target_id" IS NOT NULL))
+	CONSTRAINT "contents_shape" CHECK(("contents"."kind" IN ('material', 'question') AND ("contents"."title" IS NOT NULL OR "contents"."status" = 'deleted') AND "contents"."target_id" IS NULL)
+        OR ("contents"."kind" IN ('answer', 'comment') AND "contents"."title" IS NULL AND "contents"."target_id" IS NOT NULL))
 ) STRICT;
 --> statement-breakpoint
 CREATE UNIQUE INDEX `contents_request_unique` ON `contents` (`author_id`,`request_key`);
 --> statement-breakpoint
 CREATE INDEX `contents_course_kind_time` ON `contents` (`course_id`,`kind`,`status`,`created_at`,`id`);
 --> statement-breakpoint
-CREATE INDEX `contents_target` ON `contents` (`target_kind`,`target_id`,`status`);
+CREATE INDEX `contents_target` ON `contents` (`target_id`,`status`);
 --> statement-breakpoint
 CREATE INDEX `contents_author` ON `contents` (`author_id`,`kind`,`created_at`,`id`);
 --> statement-breakpoint
@@ -298,13 +295,14 @@ BEGIN SELECT RAISE(ABORT, 'replace_account_identity'); END;
 --> statement-breakpoint
 CREATE TRIGGER content_identity_immutable BEFORE UPDATE ON contents
 WHEN NEW.id<>OLD.id OR NEW.kind<>OLD.kind OR NEW.course_id<>OLD.course_id OR NEW.author_id<>OLD.author_id
-    OR NEW.target_kind IS NOT OLD.target_kind OR NEW.target_id IS NOT OLD.target_id
+    OR NEW.target_id IS NOT OLD.target_id
 BEGIN SELECT RAISE(ABORT,'content_identity_immutable'); END;
 --> statement-breakpoint
 CREATE TRIGGER content_insert_guard BEFORE INSERT ON contents
 WHEN NEW.target_id IS NOT NULL BEGIN
     SELECT RAISE(ABORT,'invalid_content_target') WHERE NOT EXISTS (
-        SELECT 1 FROM public_contents p WHERE p.id=NEW.target_id AND p.kind=NEW.target_kind AND p.course_id=NEW.course_id);
+        SELECT 1 FROM public_contents p WHERE p.id=NEW.target_id AND p.course_id=NEW.course_id
+            AND (NEW.kind<>'answer' OR p.kind='question'));
 END;
 --> statement-breakpoint
 CREATE TRIGGER course_bonus_rules_created AFTER INSERT ON courses BEGIN
@@ -385,7 +383,7 @@ CREATE TRIGGER acceptance_insert_guard BEFORE INSERT ON acceptances BEGIN
   SELECT RAISE(ABORT,'invalid_acceptance') WHERE NOT EXISTS(
     SELECT 1 FROM public_contents q JOIN public_contents a ON a.id=NEW.answer_id
     WHERE q.id=NEW.question_id AND q.kind='question' AND a.kind='answer'
-      AND a.target_kind='question' AND a.target_id=q.id AND a.course_id=q.course_id);
+      AND a.target_id=q.id AND a.course_id=q.course_id);
 END;
 --> statement-breakpoint
 CREATE TRIGGER acceptance_update_guard BEFORE UPDATE OF question_id,answer_id ON acceptances BEGIN
@@ -393,7 +391,7 @@ CREATE TRIGGER acceptance_update_guard BEFORE UPDATE OF question_id,answer_id ON
   SELECT RAISE(ABORT,'invalid_acceptance') WHERE NOT EXISTS(
     SELECT 1 FROM public_contents q JOIN public_contents a ON a.id=NEW.answer_id
     WHERE q.id=NEW.question_id AND q.kind='question' AND a.kind='answer'
-      AND a.target_kind='question' AND a.target_id=q.id AND a.course_id=q.course_id);
+      AND a.target_id=q.id AND a.course_id=q.course_id);
 END;
 --> statement-breakpoint
 CREATE TRIGGER acceptance_created AFTER INSERT ON acceptances BEGIN

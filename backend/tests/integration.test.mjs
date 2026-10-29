@@ -28,13 +28,20 @@ test('文档分页提供可见课程、资料和问答；文件不可用不丢�
     const q = await h.postQuestion('student-a', { body: linkDoc('讲义', '/materials/material-a/versions/1') }), a = await h.postAnswer(q);
     const page1 = await internal('GET', '/internal/documents?limit=1'); assert.equal(page1.data.hasMore, true);
     const page2 = await internal('GET', '/internal/documents?limit=100&after=' + encodeURIComponent(page1.data.nextCursor));
-    const ids = [...page1.data.items, ...page2.data.items].map((x     ) => x.id);
+    const items = [...page1.data.items, ...page2.data.items], ids = items.map((x     ) => x.id);
     assert.ok([q, a, 'material-a', 'material-b'].every(id => ids.includes(id))); assert.equal(new Set(ids).size, ids.length);
+    for (const item of items) {
+        assert.equal(item.targetKind, item.id === a ? 'question' : null);
+        assert.equal(item.targetId, item.id === a ? q : null);
+    }
+    assert.equal((await internal('GET', `/internal/contents/${a}`)).data.targetKind, 'question');
     await h.database.prepare("UPDATE file_versions SET status='hidden' WHERE material_id='material-a' AND version=1").run();
     assert.equal((await internal('GET', `/internal/contents/${q}`)).data.available, true);
     await h.api('PUT', `/contents/${q}/moderation`, 'teacher-a', { action: 'hide', reason: '下架讨论内容' });
     assert.equal((await internal('GET', `/internal/contents/${q}`)).data.available, false);
     assert.equal((await internal('GET', `/internal/contents/${a}`)).data.available, false);
+    const moderated = await h.api('GET', `/moderation/contents/${a}`, 'teacher-a');
+    assert.equal(moderated.status, 200); assert.equal(moderated.data.targetKind, 'question'); assert.equal(moderated.data.targetId, q);
     const visible = await internal('GET', '/internal/documents');
     assert.ok(visible.data.items.every(item => item.id !== q && item.id !== a));
 });

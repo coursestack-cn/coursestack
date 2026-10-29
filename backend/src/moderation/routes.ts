@@ -69,7 +69,7 @@ moderationRoutes.get('/moderation/contents/:id', async c => {
     await requireManagement(c, row.course_id);
     return respond(c, { id: row.id, kind: row.kind, courseId: row.course_id, authorId: row.author_id,
         title: row.title, body: parseBody(row.body), status: row.status,
-        targetKind: row.target_kind, targetId: row.target_id,
+        targetKind: row.parent_kind, targetId: row.target_id,
         createdAt: row.created_at, updatedAt: row.updated_at });
 });
 moderationRoutes.put('/contents/:id/moderation', async c => {

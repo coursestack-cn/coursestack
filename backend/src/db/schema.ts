@@ -121,7 +121,6 @@ export const contents = sqliteTable('contents', {
     title: text('title'),
     body: text('body'),
     tags: text('tags'),
-    targetKind: text('target_kind', { enum: ['material', 'question', 'answer', 'comment'] }),
     targetId: text('target_id'),
     status: text('status', { enum: ['visible', 'hidden', 'deleted'] }).notNull().default('visible'),
     createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
@@ -136,14 +135,12 @@ export const contents = sqliteTable('contents', {
     check('contents_deleted_payload', sql`${t.status} <> 'deleted' OR (${t.title} IS NULL AND ${t.body} IS NULL AND ${t.tags} IS NULL)`),
     check('contents_kind', sql`${t.kind} IN ('material', 'question', 'answer', 'comment')`),
     check('contents_tags', sql`${t.tags} IS NULL OR (${t.kind} IN ('question', 'material') AND json_valid(${t.tags}) AND json_type(${t.tags}) = 'array')`),
-    check('contents_target_kind', sql`${t.targetKind} IN ('material', 'question', 'answer', 'comment')`),
     check('contents_status', sql`${t.status} IN ('visible', 'hidden', 'deleted')`),
-    check('contents_shape', sql`(${t.kind} IN ('material', 'question') AND (${t.title} IS NOT NULL OR ${t.status} = 'deleted') AND ${t.targetKind} IS NULL AND ${t.targetId} IS NULL)
-        OR (${t.kind} = 'answer' AND ${t.title} IS NULL AND ${t.targetKind} IS 'question' AND ${t.targetId} IS NOT NULL)
-        OR (${t.kind} = 'comment' AND ${t.title} IS NULL AND ${t.targetKind} IS NOT NULL AND ${t.targetId} IS NOT NULL)`),
+    check('contents_shape', sql`(${t.kind} IN ('material', 'question') AND (${t.title} IS NOT NULL OR ${t.status} = 'deleted') AND ${t.targetId} IS NULL)
+        OR (${t.kind} IN ('answer', 'comment') AND ${t.title} IS NULL AND ${t.targetId} IS NOT NULL)`),
     uniqueIndex('contents_request_unique').on(t.authorId, t.requestKey),
     index('contents_course_kind_time').on(t.courseId, t.kind, t.status, t.createdAt, t.id),
-    index('contents_target').on(t.targetKind, t.targetId, t.status),
+    index('contents_target').on(t.targetId, t.status),
     index('contents_author').on(t.authorId, t.kind, t.createdAt, t.id),
 ]);
 

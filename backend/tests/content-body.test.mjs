@@ -138,7 +138,7 @@ test('deletion clears only title, body and tags while preserving relationships, 
     assert.equal((await h.api('DELETE', `/contents/${q}`, 'student-a', { })).status, 200);
     const after = await h.database.prepare('SELECT * FROM contents WHERE id=?').bind(q).first();
     for (const field of ['title', 'body', 'tags']) assert.equal(after[field], null, field);
-    for (const field of ['id', 'kind', 'course_id', 'author_id', 'target_kind', 'target_id', 'created_at', 'request_key', 'request_hash']) {
+    for (const field of ['id', 'kind', 'course_id', 'author_id', 'target_id', 'created_at', 'request_key', 'request_hash']) {
         assert.equal(after[field], before[field], field);
     }
     assert.equal(after.status, 'deleted'); assert.equal(after.updated_by, 'student-a');
