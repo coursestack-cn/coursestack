@@ -138,7 +138,7 @@ pnpm db:diagram
 
 账户基本信息统一在 accounts，普通账号只有一个身份。删除账户或切换身份仍按业务规则保留全部非基本数据；切换生成新 ID，旧身份显示“已删除”。管理员初始化既可创建账号，也可给已有无密码的唯一管理员补设密码，不覆盖已有密码。
 
-资料存入 contents.kind=material；回答和评论使用 target_kind/target_id 关联直接父内容。正文存储 ProseMirror JSON 文本，body 可空且有 json_valid 检查，HTTP 收发 JSON 对象；引用是正文中的链接。deleted 将标题、正文、标签置 NULL 并保留关系与操作元数据；评论删除后作为占位保留回复，问题、资料、回答删除后与 hidden 一样关闭其下分支。tags 可空且仅 question/material 可非空；操作原因直接存入管理或积分历史。
+资料存入 contents.kind=material；回答和评论使用 target_id 关联直接父内容，父级类型由父记录的 kind 查询得出，不重复存储。HTTP 的 targetKind 仍用于目标类型校验和返回父级类型。正文存储 ProseMirror JSON 文本，body 可空且有 json_valid 检查，HTTP 收发 JSON 对象；引用是正文中的链接。deleted 将标题、正文、标签置 NULL 并保留关系与操作元数据；评论删除后作为占位保留回复，问题、资料、回答删除后与 hidden 一样关闭其下分支。tags 可空且仅 question/material 可非空；操作原因直接存入管理或积分历史。
 
 当前学期为 terms.current，师生关系为 enrollments(course_id,term_id,account_id)。每个实例恰好一位教师，允许零学生；只能新建当前学期实例，每门课程至少有一个有教师的实例。教师建课由本人任教，管理员须传 teacherId；同一 D1 batch 先登记教师行再建课，外键延迟到事务结束检查。
 

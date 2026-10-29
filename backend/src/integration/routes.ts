@@ -30,8 +30,9 @@ internalRoutes.get('/documents', async c => {
             SELECT 'course:'||id AS documentId,id,'course' AS kind,id AS courseId,name AS title,introduction AS body,
                 NULL AS tags,NULL AS targetKind,NULL AS targetId,updated_at AS updatedAt FROM courses
             UNION ALL
-            SELECT kind||':'||id AS documentId,id,kind,course_id AS courseId,title,body,tags,target_kind AS targetKind,target_id AS targetId,updated_at AS updatedAt
-                FROM public_contents WHERE kind IN ('material','question','answer')
+            SELECT c.kind||':'||c.id AS documentId,c.id,c.kind,c.course_id AS courseId,c.title,c.body,c.tags,
+                parent.kind AS targetKind,c.target_id AS targetId,c.updated_at AS updatedAt
+                FROM public_contents c LEFT JOIN contents parent ON parent.id=c.target_id WHERE c.kind IN ('material','question','answer')
         ) WHERE documentId>${after} ORDER BY documentId ASC LIMIT ${limit + 1}`);
     const items = rows.slice(0, limit).map(r => ({ ...r, body: r.kind === 'course' ? r.body : parseBody(r.body),
         format: r.kind === 'course' ? 'text' : 'prosemirror', tags: r.tags === null ? null : JSON.parse(r.tags) as string[] }));

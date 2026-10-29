@@ -85,7 +85,10 @@ test('资料、问题和答案均可评论，回复只指向直接父评论', as
     for (const target of targets) {
         const r = await h.api('POST', '/comments', 'student-b', { ...target, body: doc('**评论**与`代码`') });
         assert.equal(r.status, 201); ids.push(r.data.id);
-        assert.equal((await h.api('GET', `/comments?targetKind=${target.targetKind}&targetId=${target.targetId}`)).data.items.length, 1);
+        const items = (await h.api('GET', `/comments?targetKind=${target.targetKind}&targetId=${target.targetId}`)).data.items;
+        assert.equal(items.length, 1);
+        assert.equal(items[0].targetKind, target.targetKind); assert.equal(items[0].targetId, target.targetId);
+        assert.equal((await h.api('GET', `/contents/${r.data.id}`)).data.targetKind, target.targetKind);
     }
     const reply = await h.api('POST', '/comments', 'teacher-a', { targetKind: 'comment', targetId: ids[0], body: doc('回复评论') });
     assert.equal(reply.status, 201);
@@ -153,6 +156,8 @@ test('删除评论清空正文并保留关联占位与回复，删除内容不�
     const list = await h.api('GET', `/comments?targetKind=question&targetId=${q}`);
     assert.deepEqual(list.data.items.map(x => [x.id, x.status ?? 'visible']), [[parent.data.id, 'deleted'], [child.data.id, 'visible']]);
     assert.equal(list.data.total, 2); assert.equal(list.data.items[0].body, null); assert.equal('author' in list.data.items[0], false);
+    assert.equal(list.data.items[0].targetKind, 'question'); assert.equal(list.data.items[0].targetId, q);
+    assert.equal(list.data.items[1].targetKind, 'comment'); assert.equal(list.data.items[1].targetId, parent.data.id);
     assert.equal((await h.api('GET', `/contents/${lonely.data.id}`)).data.status, 'deleted');
     assert.equal((await h.api('GET', `/contents/${parent.data.id}`)).data.body, null);
     assert.equal(await h.database.prepare('SELECT body FROM contents WHERE id=?').bind(parent.data.id).first('body'), null);
@@ -202,21 +207,34 @@ test('带 SQL 字符的课程查询和标签保持参数化', async () => {
 
 test('资料统一为内容，文件外键拒绝非资料，直接父级拒绝跨课程和类型错误', async () => {
     const material = await h.api('GET', '/contents/material-a');
-    assert.equal(material.data.kind, 'material'); assert.equal(material.data.targetId, null);
+    assert.equal(material.data.kind, 'material'); assert.equal(material.data.targetId, null); assert.equal(material.data.targetKind, null);
     const edited = await h.api('PATCH', '/contents/material-a', 'student-a', { title: '新标题', body: doc('资料简介') });
     assert.equal(edited.status, 200); assert.equal(edited.data.title, '新标题');
     assert.equal((await h.api('PUT', '/contents/material-a/vote', 'student-b', { value: 1 })).status, 400);
     const q = await h.postQuestion();
     await assert.rejects(() => h.database.prepare("INSERT INTO file_versions(material_id,version,filename,uploaded_by,updated_by) VALUES (?,1,'错误.pdf','student-a','student-a')").bind(q).run(), /invalid_material/);
     await assert.rejects(() => h.database.prepare("UPDATE file_versions SET material_id=? WHERE material_id='material-a' AND version=1").bind(q).run(), /file_version_identity_immutable/);
-    for (const [course, kind, id] of [['course-b', 'question', q], ['course-a', 'answer', q], ['course-a', 'question', 'missing']]) {
-        await assert.rejects(() => h.database.prepare("INSERT INTO contents(id,kind,course_id,author_id,body,target_kind,target_id,updated_by) VALUES ('invalid','comment',?,'student-a',?, ?,?,'student-a')").bind(course, JSON.stringify(doc('正文')), kind, id).run(), /invalid_content_target/);
-    }
-    await assert.rejects(() => h.database.prepare("INSERT INTO contents(id,kind,course_id,author_id,body,updated_by,request_key,request_hash) VALUES ('invalid','answer','course-a','student-a',?,'student-a','invalid','fixture')").bind(JSON.stringify(doc('正文'))).run(), /contents_shape/);
     const answer = await h.postAnswer(q);
+    const comment = await h.api('POST', '/comments', 'student-a', { targetKind: 'question', targetId: q, body: doc('父评论') });
+    assert.equal(comment.status, 201);
+    const insert = (kind, targetId, course = 'course-a') => h.database.prepare(`
+        INSERT INTO contents(id,kind,course_id,author_id,body,target_id,updated_by,request_key,request_hash)
+        VALUES ('invalid',?,?,'student-a',?,?,'student-a','invalid','fixture')`)
+        .bind(kind, course, JSON.stringify(doc('正文')), targetId).run();
+    for (const kind of ['answer', 'comment']) {
+        await assert.rejects(() => insert(kind, q, 'course-b'), /invalid_content_target/);
+        await assert.rejects(() => insert(kind, 'missing'), /invalid_content_target/);
+        await assert.rejects(() => insert(kind, null), /contents_shape/);
+    }
+    for (const targetId of ['material-a', answer, comment.data.id]) {
+        await assert.rejects(() => insert('answer', targetId), /invalid_content_target/);
+    }
     const dto = (await h.api('GET', `/contents/${answer}`)).data;
     assert.equal(dto.targetKind, 'question'); assert.equal(dto.targetId, q); assert.equal(dto.questionId, undefined);
-    await assert.rejects(() => h.database.prepare("UPDATE contents SET target_kind='material',target_id='material-a' WHERE id=?").bind(answer).run(), /content_identity_immutable/);
+    await assert.rejects(() => h.database.prepare("UPDATE contents SET target_id='material-a' WHERE id=?").bind(answer).run(), /content_identity_immutable/);
+    assert.equal((await h.api('PUT', `/contents/${q}/moderation`, 'teacher-a', { action: 'hide', reason: '下架父内容' })).status, 200);
+    await assert.rejects(() => insert('answer', q), /invalid_content_target/);
+    await assert.rejects(() => insert('comment', answer), /invalid_content_target/);
 });
 
 test('删除问题、资料或回答清空正文与标题，其下内容不再公开但关系与文件保留', async () => {
