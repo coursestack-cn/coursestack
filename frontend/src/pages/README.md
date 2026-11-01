@@ -95,7 +95,9 @@ if (!isAborted(error)) {
 
 个人设置通过 `GET /api/me/profile` 读取本人资料，身份、学工号、姓名、院系、专业、年级和最近登录时间只读展示。`session.changeNickname(nickname, signal?)` 只向 `PATCH /api/me/profile` 提交昵称，保存成功后同步当前会话中的昵称；完整学籍资料只保留在设置页。昵称去首尾空白，最多 80 个字符，留空保存为 null；未保存修改由统一离开确认保护。修改密码继续进入 `/settings/password`，成功后注销全部会话。
 
-登录态只存在内存和服务端 HttpOnly Cookie 中，不读取或持久化令牌。头像地址为 `/api/profiles/:id/avatar`，编码用户 ID 后传给 `Avatar`，由它负责加载失败时的首字回退。
+个人设置中的 `AvatarEditor` 负责选图、强制正方形裁切、上传和移除；只有确认裁切后才调用 `session.changeAvatar(blob)`，删除传 null。前端输出 512×512 PNG，通过 API 客户端的 `rawBody` 发送至 `PUT /api/me/avatar`，不发送原图或 FormData。图片处理与限制见[账号与权限](../../../docs/账号与权限.md#本人资料与头像)。上传失败保留裁切状态，成功后同步账号头像，不重新加载整份资料以覆盖尚未保存的昵称。
+
+登录态只存在内存和服务端 HttpOnly Cookie 中，不读取或持久化令牌。头像地址为 `/api/profiles/:id/avatar`；头像组件同时传入 `accountId` 和 `src`，通过共享头像状态同步该账号的最新地址或删除状态，并更新地址版本以触发重新加载。`Avatar` 负责加载失败时的首字回退。已删除作者不传入 accountId，避免旧页面中的头像更新覆盖删除占位。
 
 路由只按 `requiresAuth` 拦截匿名访问。角色仅用于入口展示，资源权限及操作权限仍由服务端验证。登录 `next` 使用 `src/lib/router/urls.ts` 中的 `safeNext()` 校验；登录页使用 `loginDestination()` 同时避免回跳到登录页形成循环。未授权响应会同步会话状态，但请求层不跳转页面。
 

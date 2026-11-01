@@ -1,5 +1,6 @@
 import { api, onUnauthorized, toApiError, type ApiError } from "$lib/api/client";
 import { toast } from "$lib/components/ui/toast.svelte.js";
+import { updateAvatar } from "$lib/avatar/state.svelte.js";
 
 export type Role = "student" | "teacher" | "admin";
 export type User = { id: string; nickname: string | null; role: Role; mustChangePassword: boolean };
@@ -76,6 +77,18 @@ export const session = {
         user = null;
         error = null;
         status = "anonymous";
+    },
+    async changeAvatar(image: Blob | null): Promise<boolean> {
+        const requestRevision = revision;
+        const accountId = user?.id;
+        type Result = { id: string; avatarUrl: string | null };
+        const result = image
+            ? await api.put<Result>("/api/me/avatar", undefined, { rawBody: image, headers: { "Content-Type": image.type } })
+            : await api.delete<Result>("/api/me/avatar");
+        if (requestRevision !== revision || status !== "authenticated"
+            || !user || user.id !== accountId || result.id !== accountId) return false;
+        updateAvatar(result.id, result.avatarUrl);
+        return true;
     },
     async logout(): Promise<void> {
         const requestRevision = ++revision;

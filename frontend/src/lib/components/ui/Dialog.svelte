@@ -86,6 +86,7 @@
 <style>
     .dialog { width: min(calc(var(--space-12) * 12), calc(100% - var(--space-8))); max-width: var(--width-prose); max-height: calc(100% - var(--space-8)); margin: auto; padding: 0; overflow-y: auto; border: 1px solid var(--color-border); border-radius: var(--radius-lg); background: var(--color-surface); color: var(--color-text); box-shadow: var(--shadow-popover); z-index: var(--z-dialog); }
     .dialog::backdrop { background: var(--color-overlay); }
+    .dialog:focus-visible, .dialog :global(:focus-visible) { outline: none !important; }
     header { display: flex; align-items: flex-start; justify-content: space-between; gap: var(--space-4); padding: var(--space-6) var(--space-6) var(--space-4); }
     h2 { margin: 0; min-width: 0; font-size: var(--font-size-xl); overflow-wrap: anywhere; }
     .body { display: grid; gap: var(--space-4); padding: 0 var(--space-6) var(--space-6); overflow-wrap: anywhere; }

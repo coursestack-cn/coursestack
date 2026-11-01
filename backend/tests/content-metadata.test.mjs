@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { afterEach, beforeEach, test } from 'node:test';
 import { openapi } from '../src/openapi.ts';
-import { start, doc, internalToken } from './discussions-helpers.mjs';
+import { start, doc, internalToken, tokenFor } from './discussions-helpers.mjs';
 
 let h;
 beforeEach(async () => { h = await start(); });
@@ -36,6 +36,49 @@ async function remove(id) {
     const response = await h.api('DELETE', `/contents/${id}`, 'admin', { });
     assert.equal(response.status, 200, JSON.stringify(response.data));
 }
+
+test('content authors expose current avatar URLs in details and lists, clearing them for removed or inactive accounts', async () => {
+    const question = await h.postQuestion(), answer = await h.postAnswer(question, 'student-a');
+    const reply = await comment(answer, 'student-a');
+    const paths = ['/courses/course-a/questions', `/questions/${question}/answers`,
+        `/comments?targetKind=answer&targetId=${answer}`, '/me/activity'];
+    const items = [question, answer, reply, 'material-a'];
+    const expectAvatar = async expected => {
+        for (const id of items) {
+            const author = (await detail(id)).author;
+            assert.equal(author.avatarUrl, expected, id);
+            assert.deepEqual(Object.keys(author).sort(), ['avatarUrl', 'id', 'isCourseTeacher', 'isDeleted', 'isTeacher', 'nickname']);
+        }
+        for (const path of paths) {
+            const response = await h.api('GET', path, path === '/me/activity' ? 'student-a' : undefined);
+            assert.equal(response.status, 200);
+            assert.ok(response.data.items.length > 0);
+            for (const row of response.data.items) assert.equal(row.author.avatarUrl, expected, path);
+        }
+    };
+    await expectAvatar(null);
+    const png = Buffer.from('iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mP8/x8AAwMCAO+aH7sAAAAASUVORK5CYII=', 'base64');
+    const upload = () => h.worker.fetch('http://localhost/api/me/avatar', { method: 'PUT', body: png,
+        headers: { Origin: 'http://localhost', Cookie: `coursestack_session=${tokenFor('student-a')}`, 'Content-Type': 'image/png' } });
+    assert.equal((await upload()).status, 200);
+    await expectAvatar('/api/profiles/student-a/avatar');
+    assert.equal((await h.api('DELETE', '/me/avatar', 'student-a')).status, 200);
+    await expectAvatar(null);
+    assert.equal((await upload()).status, 200);
+    // Retain the key here to ensure visibility depends on account status, not just key cleanup.
+    for (const status of ['disabled', 'deleted']) {
+        await h.database.prepare('UPDATE accounts SET status=? WHERE id=?').bind(status, 'student-a').run();
+        for (const id of items) {
+            const author = (await detail(id)).author;
+            assert.equal(author.avatarUrl, null);
+            assert.equal(author.isDeleted, status === 'deleted');
+        }
+        assert.equal((await h.worker.fetch('http://localhost/api/profiles/student-a/avatar')).status, 404);
+    }
+    const authorSchema = openapi.components.schemas.Content.properties.author;
+    assert.ok(authorSchema.required.includes('avatarUrl'));
+    assert.deepEqual(authorSchema.properties.avatarUrl.type, ['string', 'null']);
+});
 
 test('all public content readers expose unedited timestamps, reply summaries and counts', async () => {
     const q = await h.postQuestion(), a = await h.postAnswer(q), c = await comment(a, 'student-a');

@@ -43,6 +43,7 @@ export function publicSelect(c: Ctx, includeDeleted = false) {
     const viewerId = c.get('actor')?.id ?? '';
     return sql`SELECT c.*,parent.kind AS parent_kind,accepted.answer_id AS acceptedAnswerId,CASE WHEN u.status='deleted' THEN '已删除' ELSE u.nickname END AS author_name,
         CASE WHEN u.status='deleted' THEN NULL ELSE u.role END AS author_role,u.status='deleted' AS author_deleted,
+        CASE WHEN u.status='active' THEN u.avatar_key ELSE NULL END AS author_avatar_key,
         EXISTS(SELECT 1 FROM enrollments ct JOIN terms term ON term.id=ct.term_id AND term.current=1
             WHERE ct.account_id=c.author_id AND ct.course_id=c.course_id AND u.role='teacher' AND u.status='active') AS course_teacher,
         COALESCE((SELECT SUM(v.value) FROM votes v WHERE v.content_id=c.id),0) AS score,
@@ -72,6 +73,7 @@ export function contentDto(row: PublicRow) {
     return {
         id: row.id, kind: row.kind, courseId: row.course_id,
         author: { id: row.author_id, nickname: row.author_name, isDeleted: Boolean(row.author_deleted),
+            avatarUrl: row.author_avatar_key ? `/api/profiles/${encodeURIComponent(row.author_id)}/avatar` : null,
             isTeacher: row.author_role === 'teacher', isCourseTeacher: Boolean(row.course_teacher) },
         title: row.title, body: parseBody(row.body), format: 'prosemirror', tags: row.tags === null ? null : JSON.parse(row.tags) as string[],
         targetKind: row.parent_kind, targetId: row.target_id,

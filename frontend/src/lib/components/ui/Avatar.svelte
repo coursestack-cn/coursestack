@@ -4,6 +4,7 @@
     export type Props = Omit<HTMLAttributes<HTMLSpanElement>, "children"> & {
         name: string;
         src?: string;
+        accountId?: string;
         alt?: string;
         size?: "sm" | "md" | "lg";
     };
@@ -11,16 +12,20 @@
 
 <script lang="ts">
     import { UserRound } from "@lucide/svelte";
+    import { avatarSource } from "$lib/avatar/state.svelte.js";
 
-    let { name, src, alt, size = "md", class: className = "", ...rest }: Props = $props();
+    let { name, src, accountId, alt, size = "md", class: className = "", ...rest }: Props = $props();
     let failedSrc = $state<string>();
+    const imageSource = $derived(avatarSource(accountId, src));
     const palette = $derived(Array.from(name).reduce((hash, character) => (hash * 31 + character.codePointAt(0)!) >>> 0, 0) % 5);
     const initial = $derived(Array.from(new Intl.Segmenter("zh-CN", { granularity: "grapheme" }).segment(name.trim()))[0]?.segment ?? "?");
 </script>
 
 <span {...rest} class={`avatar ${size} palette-${palette} ${className}`}>
-    {#if src && src !== failedSrc}
-        <img {src} alt={alt ?? name} onerror={() => { failedSrc = src; }} />
+    {#if imageSource && imageSource !== failedSrc}
+        {#key imageSource}
+            <img src={imageSource} alt={alt ?? name} onerror={(event) => { failedSrc = event.currentTarget.getAttribute("src") ?? undefined; }} />
+        {/key}
     {:else if !name.trim()}<span role="img" aria-label={alt ?? name}><UserRound size="1.25em" aria-hidden="true" /></span>
     {:else}<span role="img" aria-label={alt ?? name}>{initial}</span>{/if}
 </span>
