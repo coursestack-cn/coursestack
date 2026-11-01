@@ -14,8 +14,10 @@ export type UploadTicket = {
     duplicate?: UploadDuplicate;
 };
 
+export type UploadPublished<T> = { status: "published"; result: T };
+
 export type UploadBackend<T> = {
-    prepare(request: UploadRequest, signal: AbortSignal): Promise<UploadTicket>;
+    prepare(request: UploadRequest, signal: AbortSignal): Promise<UploadTicket | UploadPublished<T>>;
     confirm(uploadId: string, signal: AbortSignal): Promise<T>;
 };
 

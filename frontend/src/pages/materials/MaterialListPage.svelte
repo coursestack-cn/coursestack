@@ -1,8 +1,7 @@
 <script lang="ts">
-    import PagePlaceholder from "$lib/components/shell/PagePlaceholder.svelte";
-    import type { PageProps } from "$lib/router/types";
-
+    import { type PageProps } from "$lib/router/types";
+    import CourseContentRedirect from "../courses/CourseContentRedirect.svelte";
     let { params }: PageProps = $props();
 </script>
 
-<PagePlaceholder {params} />
+<CourseContentRedirect courseCode={params.courseCode!} kind="material" />

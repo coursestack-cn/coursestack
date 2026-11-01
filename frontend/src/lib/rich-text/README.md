@@ -67,7 +67,7 @@
 
 字节数与 `new TextEncoder().encode(JSON.stringify(doc)).byteLength` 一致：无缩进、无结尾换行，中文不额外转成 `\u` 转义。传输 JSON 的空格不计入规范化后的正文大小，但 HTTP 请求本身仍须受后端请求体上限约束。内容写请求（问题、回答、评论和正文编辑）整体上限为 384 KiB，剩余 16 KiB 用于标题、标签等；该整体上限不由本模块校验。
 
-后端必须分别检查语义字符数和字节数。仅检查字符数无法限制大量空段落、长链接、标记或图片替代文本占用的空间。实际请求限制、授权、内容状态、图片访问及下架行为仍由服务端负责。
+后端必须分别检查语义字符数和字节数。仅检查字符数无法限制大量空段落、长链接、标记或图片替代文本占用的空间。
 
 ## 纯 TypeScript API
 
@@ -100,7 +100,7 @@
 
 `RichTextEditor.svelte` 使用同一白名单和正文样式，`value` 可绑定为 `RichTextDoc | null`，支持 `placeholder`、`toolbar`、`maxChars`、`uploadImage`、`disabled`、`invalid`、`id`、`describedBy`、`onsubmit`。`uploadImage(file, signal)` 返回 `{ src, alt? }`，真实上传由调用者注入。
 
-任务同时要求“输出始终通过 `validateDoc`”与“超限仍允许输入”。因此编辑器保留正在输入的超限文本，但当前内容不符合完整契约时将绑定值置为 `null`，不发布非法文档，也不继续暴露旧的合法正文。补充 `onstatechange({ chars, valid, reason, uploading })` 供页面判断提交状态：结构及合同上限通过、未超过页面 `maxChars` 且无正在上传图片时才为有效。页面 `maxChars` 比合同上限更小时，正文仍可保持合法绑定值，但状态为无效。页面应同时检查状态与绑定值，并自行决定是否提交；不要把 `null` 当作一次有效的空正文提交。
+编辑器的绑定值始终通过 `validateDoc`，但仍允许继续输入超限文本：当前内容不符合完整契约时，编辑器保留输入并将绑定值置为 `null`，不暴露旧的合法正文。`onstatechange({ chars, valid, reason, uploading })` 供页面判断提交状态：结构及合同上限通过、未超过页面 `maxChars` 且无正在上传图片时才为有效。页面 `maxChars` 比合同上限更小时，正文仍可保持合法绑定值，但状态为无效。页面应同时检查状态与绑定值，并自行决定是否提交；不要把 `null` 当作一次有效的空正文提交。
 
 ## 可复用样例
 

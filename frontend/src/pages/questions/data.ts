@@ -22,7 +22,7 @@ export type Tombstone = Pick<Content, "id" | "courseId" | "targetId" | "targetKi
 export type Comment = Content | Tombstone;
 export const encode = encodeURIComponent;
 export const questionHref = (id: string) => `/questions/${encode(urlId(id))}`;
-export const courseQuestionsHref = (course: Course) => `/courses/${encode(course.code)}/questions`;
+export const courseQuestionsHref = (course: Course) => `/courses/${encode(course.code)}`;
 export const pageNumber = (value: string | null) => {
     const number = Number(value ?? 1);
     return Number.isInteger(number) && number >= 1 && number <= 10000 ? number : 1;

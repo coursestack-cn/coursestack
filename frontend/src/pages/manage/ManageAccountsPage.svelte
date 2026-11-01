@@ -15,7 +15,7 @@
     import Dialog from "$lib/components/ui/Dialog.svelte";
     import Pagination from "$lib/components/ui/Pagination.svelte";
     import AccountEditDialog, { type Account } from "./AccountEditDialog.svelte";
-    import AdminNav from "./AdminNav.svelte";
+    import ManageNav from "./ManageNav.svelte";
 
     type AccountList = { items: Account[]; page: number; pageSize: number; total: number };
     const roleNames: Record<Role, string> = { admin: "管理员", student: "学生", teacher: "教师" };
@@ -120,7 +120,7 @@
     {#if !session.hasRole("admin")}
         <p role="alert">需要管理员权限才能查看账号。</p>
     {:else}
-        <AdminNav />
+        <ManageNav />
         <Card padding="lg">
             <form class="search" onsubmit={(event) => { event.preventDefault(); void updateQuery({ q: String(query).trim() || null, page: null }); reload++; }}>
                 <Field label="查找账号" help="支持学工号、昵称、姓名、院系、专业或年级。">

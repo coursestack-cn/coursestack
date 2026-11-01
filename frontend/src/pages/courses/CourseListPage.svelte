@@ -62,7 +62,7 @@
 <PageLayout title="全部课程" subtitle="浏览课程，查找资料与问答。">
     {#snippet actions()}
         {#if canCreate}
-            <Button href="/courses/new" variant="primary">
+            <Button href="/manage/courses?new=1" variant="primary">
                 {#snippet icon()}<Plus size="1em" />{/snippet}
                 新建课程
             </Button>

@@ -59,7 +59,7 @@
     {#snippet actions()}
         <Button href="/courses">全部课程</Button>
         {#if canCreate}
-            <Button href="/courses/new" variant="primary">
+            <Button href="/manage/courses?new=1" variant="primary">
                 {#snippet icon()}<Plus size="1em" />{/snippet}
                 新建课程
             </Button>

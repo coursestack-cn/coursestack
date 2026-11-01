@@ -40,8 +40,8 @@
             { label: "我的收藏", href: "/me/favorites" },
             { label: "个人设置", href: "/settings" }
         ];
-        if (session.hasRole("teacher")) items.push({ label: "新建课程", href: "/courses/new" });
-        if (session.hasRole("admin")) items.push({ label: "管理端", href: "/admin" });
+        if (session.hasRole("teacher")) items.push({ label: "管理课程", href: "/manage/courses" });
+        if (session.hasRole("admin")) items.push({ label: "管理端", href: "/manage/accounts" });
         items.push({ type: "separator" }, { label: loggingOut ? "正在退出…" : "退出登录", disabled: loggingOut, onselect: () => { void logout(); } });
         return items;
     });
