@@ -7,6 +7,7 @@ import type { AppEnv, PublicRow } from '../discussions/types.ts';
 import { parseBody } from '../discussions/body.ts';
 import { contentDto, publicDetail, publicSelect } from '../discussions/service.ts';
 import { createDatabase } from '../db/index.ts';
+import { withMaterialVersions } from '../materials/service.ts';
 
 export const personalRoutes = new Hono<AppEnv>();
 personalRoutes.get('/me/activity', async c => {
@@ -16,7 +17,7 @@ personalRoutes.get('/me/activity', async c => {
     const { rows, total } = await queryPage<PublicRow>(c, p, sql`${publicSelect(c)} WHERE c.author_id=${a.id}
         ${kind ? sql`AND c.kind=${kind}` : sql``} ${courseId ? sql`AND c.course_id=${courseId}` : sql``}
         ORDER BY c.created_at DESC,c.id ASC`);
-    return respond(c, listResult(rows.map(contentDto), p, total));
+    return respond(c, listResult(await withMaterialVersions(c, rows.map(contentDto)), p, total));
 });
 
 export const internalRoutes = new Hono<AppEnv>();

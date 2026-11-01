@@ -22,9 +22,9 @@ INSERT INTO courses(id,name,code,created_by,updated_by,created_at,updated_at,req
  ('course-b','大学物理','PHYS101','teacher-b','teacher-b',1792540800,1792540800,'fixture-course-b','fixture');
 INSERT INTO enrollments(course_id,account_id,term_id) VALUES ('course-a','student-a','term-active'),('course-a','student-b','term-active'),('course-b','student-b','term-active'),('course-a','visitor','term-old');
 INSERT INTO contents(id,kind,course_id,author_id,title,body,updated_by,request_key,request_hash) VALUES ('material-a','material','course-a','student-a','微积分讲义',NULL,'student-a','fixture-material-a','fixture'),('material-b','material','course-b','teacher-b','物理讲义',NULL,'teacher-b','fixture-material-b','fixture');
-INSERT INTO file_versions(material_id,version,filename,status,uploaded_by,updated_by) VALUES
-('material-a',1,'微积分-v1.pdf','visible','student-a','student-a'),('material-a',2,'微积分-v2.pdf','visible','student-a','student-a'),
-('material-a',3,'内部版本.pdf','hidden','student-a','student-a'),('material-b',1,'物理-v1.pdf','visible','teacher-b','teacher-b');
+INSERT INTO file_versions(material_id,version,storage_key,size,mime,uploaded_by,updated_by) VALUES
+('material-a',1,'fixtures/material-a/1',8,'application/pdf','student-a','student-a'),('material-a',2,'fixtures/material-a/2',8,'application/pdf','student-a','student-a'),
+('material-b',1,'fixtures/material-b/1',8,'application/pdf','teacher-b','teacher-b');
 `;
 
 export async function setCurrentTerm(db, id) {

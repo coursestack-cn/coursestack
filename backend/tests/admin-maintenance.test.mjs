@@ -202,7 +202,7 @@ test('remote CLI sends parameterized transactions to the exact configured D1 and
         return Response.json({ success: true, result });
     };
     const { fileURLToPath } = await import('node:url');
-    const args = ['--remote', '--config', fileURLToPath(targetPath)];
+    const args = ['--remote', fileURLToPath(targetPath)];
     await runAdministratorCommand(['init', ...args], console.options);
     assert.ok(requests.some(({ batch }) => batch.length === 2));
     assert.ok(!console.text.includes(password)); assert.ok(!console.text.includes('fictional-cloudflare-token'));

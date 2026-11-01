@@ -1,4 +1,5 @@
 import { richTextSchemas } from '../../shared/rich-text/schema.ts';
+import { materialDefinitions, materialSchemas } from './materials/openapi.ts';
 type Schema = Record<string, unknown>;
 const str = (maxLength = 100): Schema => ({ type: 'string', minLength: 1, maxLength });
 const id: Schema = { ...str(), pattern: '^[a-zA-Z0-9_-]+$' };
@@ -22,9 +23,10 @@ const enumeration = (...values: string[]): Schema => ({ type: 'string', enum: va
 const pagination = [q('page', { type: 'integer', minimum: 1, maximum: 10000, default: 1 }),
     q('pageSize', { type: 'integer', minimum: 1, maximum: 50, default: 20 })];
 const paged = (item: Schema): Schema => object({ items: { type: 'array', items: item }, page: positiveInteger, pageSize: positiveInteger, total: { type: 'integer', minimum: 0 } });
-type Definition = { method: string; path: string; summary: string; auth?: 'optional' | 'session' | 'internal';
-    request?: Schema; create?: boolean; parameters?: unknown[]; response?: Schema };
+export type Definition = { method: string; path: string; summary: string; auth?: 'optional' | 'session' | 'internal';
+    request?: Schema; create?: boolean; parameters?: unknown[]; response?: Schema; binary?: boolean };
 const defs: Definition[] = [
+    ...materialDefinitions,
     { method: 'get', path: '/me/courses', summary: '本人修读或授课的课程，区分当前学期与历史学期，同一课程去重', auth: 'session',
         parameters: [...pagination, q('scope', { ...enumeration('current', 'history'), default: 'current' })], response: ref('MyCoursePage') },
     { method: 'get', path: '/courses', summary: '课程列表；code 按唯一课程编号精确匹配', parameters: [...pagination, q('q'), q('code', str(40))], response: ref('CoursePage') },
@@ -86,7 +88,7 @@ const report = object({ id, contentId: id, reporterId: id, reason: str(1000), st
 function responseFor(path: string): Schema {
     switch (path) {
         case '/courses/{id}/entry': return object({ course: ref('Course'), summary: object({ questions: integer, unresolved: integer, answers: integer }),
-            permissions: object({ canManage: bool }), links: object({ questions: str(300), activity: str(300), materials: str(300) }) });
+            permissions: object({ canManage: bool }), links: object({ questions: str(300), activity: str(300), materials: str(300), contents: str(300) }) });
         case '/courses/{id}/activity': return paged(object({ contentId: id, kind: str(), title: { type: ['string','null'] }, createdAt: timestamp, updatedAt: timestamp }));
         case '/courses/{id}/bonus-ledger': case '/me/bonus-ledger': return paged(ledger);
         case '/courses/{id}/bonus-summary': return paged(object({ studentId: id, nickname, termId: id, totalPoints: integer }));
@@ -110,7 +112,7 @@ function responseFor(path: string): Schema {
 const paths: Record<string, Record<string, unknown>> = {};
 for (const d of defs) {
     const path = `/api${d.path}`;
-    const parameters = [...Array.from(path.matchAll(/\{(\w+)\}/g), m => ({ name: m[1], in: 'path', required: true, schema: id })), ...(d.parameters ?? [])];
+    const parameters = [...Array.from(path.matchAll(/\{(\w+)\}/g), m => ({ name: m[1], in: 'path', required: true, schema: m[1] === 'version' ? positiveInteger : id })), ...(d.parameters ?? [])];
     if (d.auth !== 'internal' && !['get', 'head', 'options'].includes(d.method)) parameters.push({ name: 'Origin', in: 'header', required: true, schema: { type: 'string', format: 'uri' } });
     if (d.create) parameters.push({ name: 'Idempotency-Key', in: 'header', required: true, schema: { type: 'string', minLength: 8, maxLength: 100, pattern: '^[A-Za-z0-9_-]+$' } });
     const security = d.auth === 'internal' ? [{ internalBearer: [] }] : d.auth === 'session'
@@ -120,15 +122,19 @@ for (const d of defs) {
         summary: d.summary, operationId: `${d.method}_${path.replace(/[^a-zA-Z0-9]+/g, '_')}`, security, parameters,
         ...(d.request ? { requestBody: { required: true, content: { 'application/json': { schema: d.request } } } } : {}),
         responses: {
-            [d.create ? '201' : '200']: { description: '成功', content: { 'application/json': { schema: object({ data: d.response ?? (d.create ? object({ id }) : responseFor(d.path)) }) } } },
-            ...Object.fromEntries([400, 401, 403, 404, 409, 413, 415, 500, 503].map(status => [String(status),
-                { description: ({ 400: '参数错误', 401: '登录失效', 403: '权限不足', 404: '内容不可用', 409: '状态冲突或重复操作', 413: '正文过大', 415: '需要JSON', 500: '服务错误', 503: '内部接口未配置' } as Record<number, string>)[status],
-                    content: { 'application/json': { schema: ref('Error') } } }]))
+            ...(d.binary ? {
+                '200': { description: '文件响应；HEAD 仅返回响应头', ...(d.method === 'head' ? {} : { content: { '*/*': { schema: { type: 'string', format: 'binary' } } } }) },
+                ...(d.method === 'head' ? {} : { '206': { description: '单一字节范围', content: { '*/*': { schema: { type: 'string', format: 'binary' } } } }, '416': { description: '无效范围，Content-Range 为 bytes */总大小' } }),
+                '304': { description: '文件未变化，仍校验登录及当前可见性' },
+            } : { [d.create ? '201' : '200']: { description: '成功', content: { 'application/json': { schema: object({ data: d.response ?? (d.create ? object({ id }) : responseFor(d.path)) }) } } } }),
+            ...Object.fromEntries([400, 401, 403, 404, 409, 410, 413, 415, 500, 503].map(status => [String(status),
+                { description: ({ 400: '参数错误', 401: '登录失效', 403: '权限不足', 404: '内容不可用', 409: '状态冲突或重复操作', 410: '上传过期', 413: '请求或文件过大', 415: '请求或文件类型不支持', 500: '服务错误', 503: '服务尚未配置' } as Record<number, string>)[status],
+                    ...(d.method === 'head' ? {} : { content: { 'application/json': { schema: ref('Error') } } }) }]))
         },
     };
 }
 export const openapi = {
-    openapi: '3.1.0', info: { title: 'CourseStack 课程与讨论 API', version: '4.0.0',
+    openapi: '3.1.0', info: { title: 'CourseStack 课程、讨论与资料 API', version: '5.0.0',
         description: '正文使用 Tiptap / ProseMirror JSON 对象，由前端按编辑器扩展配置安全渲染。公开数据不包含学工号、姓名、院系、专业或年级。写入需登录，创建需幂等键，课程和内容编辑按最终写入顺序生效，局部更新仅覆盖提交字段；积分为课程、学期、学生维度的整数。Cookie 写请求需可信 Origin。' },
     servers: [{ url: 'http://127.0.0.1:8787', description: '本地开发' }], paths,
     components: {
@@ -139,6 +145,7 @@ export const openapi = {
         schemas: {
             Error: object({ error: object({ code: str(80), message: { type: 'string' } }) }),
             ...richTextSchemas,
+            ...materialSchemas,
             BonusPolicy: object(bonusPolicy),
             LedgerEntry: ledger,
             Course: object({ id, ...courseFields, code: { type: 'string', maxLength: 40 }, bonusPolicy: ref('BonusPolicy'),
@@ -149,7 +156,7 @@ export const openapi = {
                 allOf: [questionCounts],
                 properties: { id, kind: enumeration('material', 'question', 'answer', 'comment'), courseId: id,
                     author: object({ id, nickname, avatarUrl: { type: ['string', 'null'], description: '当前头像的同源 Worker 地址；未设置、禁用或已删除账号为 null' }, isDeleted: { type: 'boolean' }, isTeacher: { type: 'boolean' }, isCourseTeacher: { type: 'boolean' } }),
-                    title: { type: ['string', 'null'] }, body: nullableBody, format: { const: 'prosemirror' }, tags,
+                    title: { type: ['string', 'null'] }, body: nullableBody, format: { const: 'prosemirror' }, tags, latestVersion: { anyOf: [ref('FileVersion'), { type: 'null' }] },
                     targetKind: nullableKind, targetId: nullableId, ...contentMetadata, answerCount, acceptedAnswerId: { type: ['string', 'null'] }, solved: { type: 'boolean' },
                     isAccepted: { type: 'boolean' }, score: { type: 'integer' }, myVote: { type: 'integer', enum: [-1, 0, 1] }, createdAt: { type: 'integer' }, updatedAt: { type: 'integer' } } },
             Tombstone: object({ id, kind: { const: 'comment' }, courseId: id, targetKind: enumeration('material', 'question', 'answer', 'comment'), targetId: id,

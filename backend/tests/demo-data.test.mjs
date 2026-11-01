@@ -3,8 +3,8 @@ import { test } from 'node:test';
 import { prepareDemoData } from '../scripts/lib/demo-data.mjs';
 import { clearBucket, resetDemoData } from '../scripts/lib/demo-reset.mjs';
 import { readMigrations } from '../scripts/lib/migrations.mjs';
-import { parseDemoArguments } from '../scripts/prepare-demo.mjs';
-import { parseResetArguments } from '../scripts/reset-demo.mjs';
+import { parseDemoArguments, runDemoCommand } from '../scripts/demo.mjs';
+import { parseDatabaseArguments } from '../scripts/lib/database-cli.mjs';
 import { hashPassword } from '../src/auth/crypto.ts';
 import { login } from '../src/auth/service.ts';
 import { start, setCurrentTerm } from './discussions-helpers.mjs';
@@ -73,11 +73,15 @@ test('demo preparation rejects unrelated account collisions and ambiguous course
 });
 
 test('demo command requires an explicit database target and rejects credentials in arguments', () => {
-    for (const args of [[], ['--local', '--remote'], ['--remote'], ['--local', '--local'], ['--local', '--token', 'fictional'], ['--remote', '--config', 'target.json', '--persist-to', 'state']]) {
+    for (const args of [[], ['--local', '--remote'], ['--remote'], ['--local', '--local'], ['--local', '--token', 'fictional'], ['--remote', 'target.json', '--persist-to', 'state']]) {
         assert.throws(() => parseDemoArguments(args));
     }
-    assert.equal(parseDemoArguments(['--local', '--dry-run'])['dry-run'], true);
-    assert.equal(parseDemoArguments(['--remote', '--config', 'target.json']).remote, true);
+    for (const args of [['--local', '--dry-run'], ['--local', '--course-id', 'course'], ['--local', '--confirm', 'local']]) {
+        assert.throws(() => parseDemoArguments(args));
+    }
+    for (const action of ['seed', 'setup']) assert.throws(() => parseDatabaseArguments([action, '--local']), { code: 'INVALID_ACTION' });
+    assert.equal(parseDemoArguments(['--local']).local, true);
+    assert.equal(parseDemoArguments(['--remote', 'target.json']).remote, 'target.json');
 });
 
 test('demo reset rebuilds the database with the demo set and keeps only the admin credential', async () => {
@@ -163,9 +167,13 @@ test('demo reset lists every R2 page before deleting each object', async () => {
     await assert.rejects(clearBucket(target, async () => { throw new TypeError('network'); }), { message: /GET 未收到响应/ });
 });
 
-test('demo reset command requires the target D1 ID and rejects credentials in arguments', () => {
-    for (const args of [[], ['--confirm', 'a', '--confirm', 'b'], ['--confirm', 'a', '--token', 'fictional'], ['--remote']]) {
-        assert.throws(() => parseResetArguments(args));
-    }
-    assert.equal(parseResetArguments(['--confirm', 'd1-id']).confirm, 'd1-id');
+test('demo help describes the always-reset command without accessing credentials or resources', async () => {
+    const unavailable = () => assert.fail('help must not access credentials or resources');
+    let text = '';
+    await runDemoCommand(['--help'], { prompt: unavailable, invoke: unavailable, openLocal: unavailable,
+        request: unavailable, output: { write(value) { text += value; } } });
+    assert.match(text, /pnpm demo --local/);
+    assert.match(text, /pnpm demo --remote/);
+    assert.match(text, /每次执行都重置/);
+    assert.doesNotMatch(text, /--confirm|--dry-run|demo:prepare|demo:reset/);
 });

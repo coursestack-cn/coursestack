@@ -6,8 +6,8 @@ import { HttpError, respond, assertChanged, input, listResult, page, requestIden
 import { activeUser, editPermission } from '../permissions.ts';
 import { actor } from '../auth/middleware.ts';
 import type { AppEnv, Ctx, ContentRow, PublicRow } from '../discussions/types.ts';
-import { accessibleContent, contentDto, publicDetail, publicSelect, requireEditor, tombstone, tombstoneDto, visibleContent } from '../discussions/service.ts';
-import { bodySchema, jsonChanged, type ProseMirrorDocument } from './body.ts';
+import { accessibleContent, contentDto, editContent, publicDetail, publicSelect, requireEditor, tombstone, tombstoneDto, visibleContent } from '../discussions/service.ts';
+import { bodySchema, type ProseMirrorDocument } from './body.ts';
 import { createDatabase } from '../db/index.ts';
 const now = () => Math.floor(Date.now() / 1000);
 const uid = () => crypto.randomUUID();
@@ -115,22 +115,7 @@ discussionRoutes.get('/contents/:id', async c => {
     return respond(c, await publicDetail(c, row.id));
 });
 discussionRoutes.patch('/contents/:id', async c => {
-    const row = await visibleContent(c, c.req.param('id')), a = await requireEditor(c, row);
-    const schema = row.kind === 'question' || row.kind === 'material' ? questionInput.pick({ title: true, body: true }).partial()
-        .extend({ tags: tagsSchema.nullable().optional() }).strict() : z.object({ body: bodySchema }).strict();
-    const data = await input(c, schema, CONTENT_REQUEST_MAX_BYTES) as { title?: string; body?: ProseMirrorDocument; tags?: string[] | null };
-    const body = data.body === undefined ? undefined : JSON.stringify(data.body);
-    const tags = data.tags === undefined ? undefined : data.tags?.length ? JSON.stringify(data.tags) : null;
-    const bodyChanged = body === undefined ? sql`0` : jsonChanged(sql`body`, body);
-    const tagsChanged = tags === undefined ? sql`0` : jsonChanged(sql`tags`, tags);
-    const titleChanged = data.title === undefined ? sql`0` : sql`title IS NOT ${data.title}`, at = now();
-    const result = await createDatabase(c.env.DB).run(sql`UPDATE contents SET title=${data.title ?? sql`title`},
-        body=${body === undefined ? sql`body` : sql`CASE WHEN ${bodyChanged} THEN ${body} ELSE body END`},
-        tags=${tags === undefined ? sql`tags` : sql`CASE WHEN ${tagsChanged} THEN ${tags} ELSE tags END`},
-        edited_at=CASE WHEN ${titleChanged} OR ${bodyChanged} OR ${tagsChanged} THEN ${at} ELSE edited_at END,
-        updated_at=${at},updated_by=${a.id} WHERE id=${row.id} AND id IN (SELECT id FROM public_contents)
-        AND ${editPermission(a, sql`contents.course_id`, sql`contents.author_id`)}`);
-    assertChanged(result); return respond(c, await publicDetail(c, row.id));
+    return respond(c, await editContent(c, c.req.param('id')));
 });
 discussionRoutes.delete('/contents/:id', async c => {
     const row = await visibleContent(c, c.req.param('id')), a = await requireEditor(c, row);

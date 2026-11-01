@@ -19,7 +19,7 @@ export async function backupAdministrator(binding) {
     return binding.prepare("SELECT id, nickname, password FROM accounts WHERE role = 'admin' AND password IS NOT NULL").first();
 }
 
-// Dropping every table also clears d1_migrations, so the current initialization SQL applies again.
+// An explicit demo reset clears d1_migrations, so Wrangler replays the entire migration history.
 // DROP TABLE skips row triggers, and deferred foreign keys let tables go in any order.
 export async function dropDatabaseObjects(binding) {
     const [{ results }] = await binding.batch([binding.prepare(objectsSql)]);
@@ -53,6 +53,18 @@ export async function clearBucket({ accountId, bucket, token }, request = fetch)
         const response = await call(`${base}/${key.split('/').map(encodeURIComponent).join('/')}`, 'DELETE');
         if (!response.ok && response.status !== 404) throw r2Response('DELETE', response, await response.json().catch(() => null));
     }
+    return keys.length;
+}
+
+export async function clearLocalBucket(bucket) {
+    const keys = [];
+    let cursor;
+    do {
+        const page = await bucket.list({ limit: 1000, ...(cursor ? { cursor } : {}) });
+        keys.push(...page.objects.map(object => object.key));
+        cursor = page.truncated ? page.cursor : undefined;
+    } while (cursor);
+    for (const key of keys) await bucket.delete(key);
     return keys.length;
 }
 
