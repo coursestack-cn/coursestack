@@ -26,7 +26,7 @@ CREATE VIEW bonus_sources AS
 SELECT kind AS source_kind,id AS source_id FROM rewardable_contents WHERE kind IN ('question','answer','comment')
 UNION ALL SELECT 'acceptance',answer_id FROM public_acceptances
 UNION ALL SELECT 'material',f.material_id||'@'||f.version FROM file_versions f
-    JOIN rewardable_contents m ON m.id=f.material_id WHERE f.status='visible';
+    JOIN rewardable_contents m ON m.id=f.material_id;
 --> statement-breakpoint
 CREATE VIEW bonus_state AS
 SELECT l.* FROM bonus_ledger l WHERE l.source_kind<>'manual'
@@ -179,11 +179,14 @@ CREATE TRIGGER file_version_insert_guard BEFORE INSERT ON file_versions BEGIN
 END;
 --> statement-breakpoint
 CREATE TRIGGER file_version_identity_immutable BEFORE UPDATE ON file_versions BEGIN
-  SELECT RAISE(ABORT,'file_version_identity_immutable') WHERE NEW.material_id<>OLD.material_id OR NEW.version<>OLD.version OR NEW.uploaded_by<>OLD.uploaded_by;
+  SELECT RAISE(ABORT,'file_version_identity_immutable') WHERE NEW.material_id<>OLD.material_id OR NEW.version<>OLD.version OR NEW.uploaded_by<>OLD.uploaded_by
+    OR NEW.storage_key<>OLD.storage_key OR NEW.size<>OLD.size OR NEW.mime<>OLD.mime OR NEW.created_at<>OLD.created_at;
   SELECT RAISE(ABORT,'invalid_file_actor') WHERE NOT EXISTS(SELECT 1 FROM accounts WHERE id=NEW.updated_by AND status<>'deleted');
 END;
 --> statement-breakpoint
 CREATE TRIGGER file_version_created_bonus AFTER INSERT ON file_versions BEGIN
+  INSERT INTO material_next_versions(material_id,next_version) VALUES(NEW.material_id,NEW.version+1)
+    ON CONFLICT(material_id) DO UPDATE SET next_version=MAX(next_version,excluded.next_version);
   INSERT INTO bonus_ledger(course_id,term_id,student_id,delta_points,source_kind,source_id,operator_id,created_at)
   SELECT m.course_id,t.id,NEW.uploaded_by,
     CASE WHEN NEW.version=1 THEN r.points_material ELSE r.points_material_version END,'material',NEW.material_id||'@'||NEW.version,
@@ -191,15 +194,8 @@ CREATE TRIGGER file_version_created_bonus AFTER INSERT ON file_versions BEGIN
   FROM public_contents m JOIN course_bonus_rules r ON r.id=m.course_id JOIN terms t ON t.current=1
   JOIN accounts student ON student.id=NEW.uploaded_by AND student.role='student' AND student.status<>'deleted'
   JOIN enrollments e ON e.course_id=m.course_id AND e.term_id=t.id AND e.account_id=student.id
-  WHERE m.id=NEW.material_id AND NEW.status='visible'
+  WHERE m.id=NEW.material_id
     AND CASE WHEN NEW.version=1 THEN r.points_material ELSE r.points_material_version END>0 ON CONFLICT DO NOTHING;
-  INSERT INTO bonus_ledger(course_id,term_id,student_id,delta_points,source_kind,source_id,operator_id,created_at,reverses_id)
-  SELECT l.course_id,l.term_id,l.student_id,-l.delta_points,l.source_kind,l.source_id,NEW.updated_by,unixepoch(),l.id
-  FROM bonus_state l LEFT JOIN bonus_sources s ON s.source_kind=l.source_kind AND s.source_id=l.source_id
-  WHERE l.course_id=(SELECT course_id FROM contents WHERE id=NEW.material_id) AND ((l.delta_points>0 AND s.source_id IS NULL) OR (l.delta_points<0 AND s.source_id IS NOT NULL));
-END;
---> statement-breakpoint
-CREATE TRIGGER file_version_status_bonus AFTER UPDATE OF status ON file_versions WHEN NEW.status<>OLD.status BEGIN
   INSERT INTO bonus_ledger(course_id,term_id,student_id,delta_points,source_kind,source_id,operator_id,created_at,reverses_id)
   SELECT l.course_id,l.term_id,l.student_id,-l.delta_points,l.source_kind,l.source_id,NEW.updated_by,unixepoch(),l.id
   FROM bonus_state l LEFT JOIN bonus_sources s ON s.source_kind=l.source_kind AND s.source_id=l.source_id

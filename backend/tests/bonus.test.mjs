@@ -92,19 +92,19 @@ test('material rewards use the uploader and composite version identity; physical
     await h.policy({ pointsMaterial: 40, pointsMaterialVersion: 10 });
     await h.database.prepare(`INSERT INTO contents(id,kind,course_id,author_id,title,body,updated_by,request_key,request_hash)
         VALUES ('new-material','material','course-a','student-a','讲义',NULL,'student-a','new-material-request','fixture')`).run();
-    const version = n => h.database.prepare(`INSERT INTO file_versions(material_id,version,filename,uploaded_by,updated_by)
-        VALUES ('new-material',?,'讲义.pdf','student-b','student-b')`).bind(n).run();
+    const version = n => h.database.prepare(`INSERT INTO file_versions(material_id,version,storage_key,size,mime,uploaded_by,updated_by)
+        VALUES ('new-material',?,lower(hex(randomblob(16))),8,'application/pdf','student-b','student-b')`).bind(n).run();
     await version(1); await version(2);
     assert.equal(await points(), 50); assert.equal(await points('student-a'), 0);
     await assert.rejects(version(2), /UNIQUE/);
     assert.deepEqual((await h.database.prepare("SELECT source_id,delta_points FROM bonus_ledger WHERE source_kind='material' ORDER BY id").all()).results,
         [{ source_id: 'new-material@1', delta_points: 40 }, { source_id: 'new-material@2', delta_points: 10 }]);
-    await h.database.prepare("UPDATE file_versions SET status='hidden',updated_by='teacher-a' WHERE material_id='new-material' AND version=1").run();
-    assert.equal(await points(), 10);
+    await moderation('new-material', 'hide');
+    assert.equal(await points(), 0);
     await h.policy({ pointsMaterial: 60, pointsMaterialVersion: 20 });
-    await h.database.prepare("UPDATE file_versions SET status='visible' WHERE material_id='new-material' AND version=1").run();
+    await moderation('new-material', 'restore');
     assert.equal(await points(), 50);
-    await h.database.prepare("DELETE FROM file_versions WHERE material_id='new-material' AND version=1").run();
+    assert.equal((await h.api('DELETE', '/materials/new-material/versions/1', 'teacher-a')).status, 200);
     assert.equal(await points(), 10);
     const last = await h.database.prepare('SELECT delta_points,source_kind,operator_id,reason FROM bonus_ledger ORDER BY id DESC LIMIT 1').first();
     assert.deepEqual(last, { delta_points: -40, source_kind: 'material', operator_id: 'teacher-a', reason: null });
@@ -112,7 +112,7 @@ test('material rewards use the uploader and composite version identity; physical
     assert.equal(await points(), 50);
     await h.policy({ pointsMaterial: 60, pointsMaterialVersion: 0 }); await version(5);
     assert.equal(await points(), 50);
-    await assert.rejects(h.database.prepare("UPDATE file_versions SET status='deleted' WHERE material_id='new-material'").run(), /file_versions_status/);
+    await assert.rejects(h.database.prepare("UPDATE file_versions SET status='deleted' WHERE material_id='new-material'").run(), /no such column: status/);
     assert.deepEqual((await h.database.prepare('PRAGMA foreign_key_check').all()).results, []);
 });
 
@@ -120,8 +120,8 @@ test('later material versions can earn points when the initial upload is worth z
     await h.policy({ pointsMaterial: 0, pointsMaterialVersion: 10 });
     await h.database.prepare(`INSERT INTO contents(id,kind,course_id,author_id,title,updated_by,request_key,request_hash)
         VALUES ('version-only','material','course-a','student-a','讲义','student-a','version-only-request','fixture')`).run();
-    for (const version of [1, 2]) await h.database.prepare(`INSERT INTO file_versions(material_id,version,filename,uploaded_by,updated_by)
-        VALUES ('version-only',?,'讲义.pdf','student-b','student-b')`).bind(version).run();
+    for (const version of [1, 2]) await h.database.prepare(`INSERT INTO file_versions(material_id,version,storage_key,size,mime,uploaded_by,updated_by)
+        VALUES ('version-only',?,lower(hex(randomblob(16))),8,'application/pdf','student-b','student-b')`).bind(version).run();
     assert.deepEqual((await h.database.prepare("SELECT source_id,delta_points FROM bonus_ledger WHERE source_kind='material' ORDER BY id").all()).results,
         [{ source_id: 'version-only@2', delta_points: 10 }]);
 });

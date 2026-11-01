@@ -35,7 +35,7 @@ test('文档分页提供可见课程、资料和问答；文件不可用不丢�
         assert.equal(item.targetId, item.id === a ? q : null);
     }
     assert.equal((await internal('GET', `/internal/contents/${a}`)).data.targetKind, 'question');
-    await h.database.prepare("UPDATE file_versions SET status='hidden' WHERE material_id='material-a' AND version=1").run();
+    await h.database.prepare("DELETE FROM file_versions WHERE material_id='material-a' AND version=1").run();
     assert.equal((await internal('GET', `/internal/contents/${q}`)).data.available, true);
     await h.api('PUT', `/contents/${q}/moderation`, 'teacher-a', { action: 'hide', reason: '下架讨论内容' });
     assert.equal((await internal('GET', `/internal/contents/${q}`)).data.available, false);

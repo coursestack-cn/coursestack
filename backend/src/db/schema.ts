@@ -102,15 +102,54 @@ export const loginAttempts = sqliteTable('login_attempts', {
 export const fileVersions = sqliteTable('file_versions', {
     materialId: text('material_id').notNull().references(() => contents.id),
     version: integer('version').notNull(),
-    filename: text('filename').notNull(),
-    status: text('status', { enum: ['visible', 'hidden'] }).notNull().default('visible'),
+    storageKey: text('storage_key').notNull(),
+    size: integer('size').notNull(),
+    mime: text('mime').notNull(),
     uploadedBy: text('uploaded_by').notNull().references(() => accounts.id),
     updatedBy: text('updated_by').notNull().references(() => accounts.id),
     createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
 }, (t) => [
     primaryKey({ columns: [t.materialId, t.version] }),
     check('file_versions_version', sql`${t.version} > 0`),
-    check('file_versions_status', sql`${t.status} IN ('visible', 'hidden')`),
+    check('file_versions_size', sql`${t.size} > 0 AND ${t.size} <= 9007199254740991`),
+    uniqueIndex('file_versions_storage_unique').on(t.storageKey),
+]);
+
+// Counters survive version removal, so a historical version URL is never reused.
+export const materialNextVersions = sqliteTable('material_next_versions', {
+    materialId: text('material_id').primaryKey().notNull().references(() => contents.id),
+    nextVersion: integer('next_version').notNull(),
+}, t => [check('material_next_versions_version', sql`${t.nextVersion} > 0`)]);
+
+export const materialUploadSessions = sqliteTable('material_upload_sessions', {
+    id: text('id').primaryKey().notNull(),
+    ownerId: text('owner_id').notNull().references(() => accounts.id),
+    courseId: text('course_id').notNull().references(() => courses.id),
+    // A new material ID is reserved here and only becomes a content row on publication.
+    materialId: text('material_id').notNull(),
+    mode: text('mode', { enum: ['create', 'version'] }).notNull(),
+    creationDraft: text('creation_draft'),
+    expectedSize: integer('expected_size').notNull(),
+    mime: text('mime').notNull(),
+    status: text('status', { enum: ['pending', 'confirming', 'published', 'cancelled', 'expired'] }).notNull().default('pending'),
+    resultVersion: integer('result_version'),
+    leaseToken: text('lease_token'),
+    leaseUntil: integer('lease_until'),
+    putExpiresAt: integer('put_expires_at').notNull(),
+    expiresAt: integer('expires_at').notNull(),
+    createdAt: integer('created_at').notNull(),
+    cleanedAt: integer('cleaned_at'),
+    requestKey: text('request_key').notNull(),
+    requestHash: text('request_hash').notNull(),
+}, t => [
+    uniqueIndex('material_upload_sessions_request_unique').on(t.ownerId, t.requestKey),
+    index('material_upload_sessions_cleanup').on(t.expiresAt, t.cleanedAt),
+    check('material_upload_sessions_mode', sql`${t.mode} IN ('create', 'version')`),
+    check('material_upload_sessions_status', sql`${t.status} IN ('pending', 'confirming', 'published', 'cancelled', 'expired')`),
+    check('material_upload_sessions_size', sql`${t.expectedSize} > 0 AND ${t.expectedSize} <= 9007199254740991`),
+    check('material_upload_sessions_creation_draft', sql`${t.creationDraft} IS NULL OR json_valid(${t.creationDraft})`),
+    check('material_upload_sessions_result', sql`(${t.status} = 'published') = (${t.resultVersion} IS NOT NULL) AND (${t.resultVersion} IS NULL OR ${t.resultVersion} > 0)`),
+    check('material_upload_sessions_lease', sql`(${t.status} = 'confirming') = (${t.leaseToken} IS NOT NULL AND ${t.leaseUntil} IS NOT NULL)`),
 ]);
 
 export const contents = sqliteTable('contents', {

@@ -1,3 +1,9 @@
 # Optional internal service credential (at least 24 random characters).
 # Leave empty to disable internal APIs. Never commit real secrets.
 INTERNAL_API_TOKEN=""
+
+# Local simulated uploads need none of these credentials.
+# Production Worker secrets must be configured separately; never commit real values.
+R2_ACCOUNT_ID=""
+R2_ACCESS_KEY_ID=""
+R2_SECRET_ACCESS_KEY=""

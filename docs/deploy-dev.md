@@ -26,24 +26,24 @@ Wrangler 管理的绑定、变量、路由和可观测性在部署时由配置�
 
 工作流须先合入默认分支。推送或合并到 main 即触发生产发布；需要重新发布当前 main 时，打开 **Actions > Deploy Workers > Run workflow** 并选择 main。其他分支被工作流条件和环境规则共同限制。
 
-流程依次安装锁定依赖、检查后端类型与初始化 SQL、运行后端测试、检查并构建前端，通过后发布 Worker 与前端资源，并按下述开关处理生产数据，再验证 `/api/health` 和 `/`。发布串行排队，新的推送不取消正在运行的发布。
+流程依次安装锁定依赖、检查后端类型与迁移快照、运行后端测试、检查并构建前端，通过后应用待执行的 D1 迁移，再发布 Worker 与前端资源，最后验证 `/api/health` 和 `/`。发布串行排队，新的推送不取消正在运行的发布。仅显式请求演示数据重置时改为发布后重建演示环境。
 
 ### 演示数据重置
 
-布尔开关 `RESET_DATA` 默认为 true，用于每次发布后直接在生产端查看演示数据：
+手动发布的 `reset_data` 默认关闭，内部转换为布尔开关 `RESET_DATA`：
 
-- true：发布后运行 `pnpm demo:reset`，删除生产 D1 的全部表和视图（含迁移记录）及 R2 桶的全部文件，重新应用初始化 SQL、`seed/local.sql` 的演示学期和[开题演示数据](../backend/README.md#开题演示账号)。已初始化管理员的 ID、昵称和密码散列保留，其会话、头像以及其他账号和业务数据全部删除。
-- false：发布前只应用尚未执行的迁移，不修改云端数据和文件。
+- true：发布后运行 `pnpm demo --remote .local/remote.json`，删除生产 D1 的全部表和视图（含迁移记录）及 R2 桶的全部文件，由同一命令重新应用完整迁移历史、初始化两个演示学期和[开题演示数据](../backend/README.md#开题演示账号)。已初始化管理员的 ID、昵称和密码散列保留，其会话、头像以及其他账号和业务数据全部删除。
+- false：发布前应用尚未执行的迁移，保留已有业务数据和 R2 文件，不导入演示数据。
 
-手动运行时在 **Run workflow** 中勾选或取消 `reset_data`；推送触发时读取 production 环境或仓库的 Actions 变量 `RESET_DATA`（**Settings > Secrets and variables > Actions > Variables**），未设置视为 true，只接受 `true` 或 `false`。重置在发布之后执行，期间新 Worker 可能短暂面对旧结构或空库。重置先清理 R2，失败时不改动 D1；删除 D1 后若迁移失败，库为空且管理员丢失，可用 `wrangler d1 time-travel restore DB --env production --timestamp <重置前时间>` 恢复，或修复后重新运行工作流再初始化管理员。
+推送触发的发布始终执行迁移，不重置数据，也不再读取仓库或环境中原有的 `RESET_DATA` 变量。只有手动 **Run workflow** 明确勾选 `reset_data` 才会重置。重置在发布之后执行，期间新 Worker 可能短暂面对旧结构或空库。重置先清理 R2，失败时不改动 D1；删除 D1 后若迁移失败，库为空且管理员丢失，可用 `wrangler d1 time-travel restore DB --env production --timestamp <重置前时间>` 恢复，或修复后重新运行工作流再初始化管理员。
 
 ## 数据库结构变更
 
-当前原型只支持当前数据模型，`schema.ts` 与 `rules.sql` 生成单份 `migrations/0000_schema.sql`。结构变更在合入前生成、检查并审查，见[后端开发说明](../backend/README.md#数据库结构与迁移)。
+`schema.ts` 与 `rules.sql` 维护当前目标结构，通过 `pnpm db:generate --name <change>` 追加迁移和快照，保留已应用的 `0000_schema.sql` 及后续历史。结构变更在合入前生成、检查并审查，见[后端开发说明](../backend/README.md#数据库结构与迁移)。
 
-开启演示数据重置时，每次发布都删除全部表并重新应用当前初始化 SQL，结构变化随之生效。关闭重置时，生产结构变化后须先准备空的生产 D1，包括清除旧迁移执行记录；合入 main 会立即触发发布，需与合并时间协调。此时工作流只应用初始化 SQL，不升级旧库；Wrangler 会跳过已经记录的同名文件，单纯再次部署不会应用该文件的新内容。
+工作流从 production Wrangler 配置与账号环境变量生成不含凭据的 `.local/remote.json`。常规发布在替换 Worker 前执行 `pnpm db:migrate --remote .local/remote.json`，由 Wrangler 根据 `d1_migrations` 应用待执行文件。无需清空生产 D1 或迁移记录；重复部署会跳过已应用迁移，空库则顺序应用完整历史。本次 `0001_materials.sql` 保留账号、课程、问答、会话和积分；旧 file_versions 应为空，若检测到意外记录则中止并回滚，待核实其文件元数据后再处理。
 
-允许结构与 Worker 替换期间短暂不可用，不要求新结构兼容旧 Worker。需要维护窗口时由部署环境控制流量，验证后恢复；应用没有关闭网站 API。初始化成功后，即使发布失败也不会回滚数据库。CI 不初始化管理员；关闭演示数据重置时也不导入云端种子、不重置账户。
+允许迁移与 Worker 替换期间短暂不可用。需要维护窗口时由部署环境控制流量，验证后恢复；应用没有关闭网站 API。迁移成功后，即使发布失败也不会自动回滚数据库；修复通过追加迁移或明确的数据库恢复操作完成。CI 不初始化管理员；关闭演示数据重置时也不导入云端种子、不重置账户。
 
 ## 域名与 R2 CORS
 
@@ -65,7 +65,11 @@ Wrangler 管理的绑定、变量、路由和可观测性在部署时由配置�
 
 生产桶仅允许 `https://coursestack.cn`，不添加本地来源；移除旧 workers.dev 和 dev 子域名来源。保存文档或部署 Worker 不会应用桶 CORS，须由运维另行保存。
 
-保持桶私有，预签名 URL 仍使用 R2 S3 端点，应用域名不能替代它。当前头像通过 Worker 的 FILES 绑定访问，不需要桶 CORS；资料直传接口、S3 凭据和相应验证尚待完成。
+保持桶私有，预签名 URL 使用 R2 S3 端点。头像、资料预览下载通过 Worker 的 FILES 绑定访问；资料上传使用预签名 PUT，浏览器按票据发送原始 File/Blob。签名绑定 Content-Type 和 Content-Length；长度由浏览器自动发送，前端不手工设置该头，也不使用 multipart/form-data。
+
+资料上传需要单独配置 Worker 的 `R2_ACCOUNT_ID`、`R2_ACCESS_KEY_ID`、`R2_SECRET_ACCESS_KEY`，它们与部署用 CLOUDFLARE_API_TOKEN 分开。S3 凭据应限制到资料桶。`R2_BUCKET_NAME` 由 Wrangler 管理，必须与 FILES 绑定一致；缺少有效配置时上传申请返回503。提交的 `.dev.vars.example` 只包含空值，本地模拟上传不需要这些凭据。
+
+`MATERIAL_MAX_BYTES` 默认104857600（100 MiB），可下调。生产配置包含每小时第17分钟执行的资料上传清理任务；它回收临时文件和已无版本引用的正式文件，保留仍被版本引用的文件。协议、清理等待时间和重试行为见[资料与文件](./资料与文件.md)。部署前需在实际目标桶验证直传、签名大小/类型限制、CORS、确认发布、资料下架后的访问限制与版本删除后的文件回收；仓库测试不代表已验证云端配置。
 
 ## 凭据与管理员
 
@@ -73,10 +77,10 @@ Cloudflare Token 不进入仓库、前端、VITE 变量、PR 或日志。CI 使�
 
 内部供数另用 Worker Secret `INTERNAL_API_TOKEN`，至少 24 字符，与 Cloudflare 管理 Token 分开；缺少时内部接口返回 503，配置约定见[事件供数](./课程与讨论.md#事件搜索与通知供数)。
 
-生产数据库初始化结构后，由运维单独交互初始化管理员，见[管理员操作](./管理员操作.md)。演示数据重置保留已初始化的管理员，只有重置前尚无管理员时才需另行初始化。目标配置只含 Account ID 和 D1 ID，后者从 production Wrangler 环境核对，例如：
+生产数据库初始化结构后，由运维单独交互初始化管理员，见[管理员操作](./管理员操作.md)。演示数据重置保留已初始化的管理员，只有重置前尚无管理员时才需另行初始化。目标配置包含 Account ID 和 D1 ID，可带 bucketName，后者从 production Wrangler 环境核对，例如：
 
 ```sh
-pnpm admin:init --remote --config .local/admin-production.json
+pnpm admin:init --remote .local/remote.json
 ```
 
 该操作在 `backend/` 执行，不属于 CI。

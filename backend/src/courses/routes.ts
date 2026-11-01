@@ -6,6 +6,7 @@ import { activeUser, management, requireManagement } from '../permissions.ts';
 import { actor } from '../auth/middleware.ts';
 import type { AppEnv, Ctx } from '../discussions/types.ts';
 import { createDatabase, prepareStatement } from '../db/index.ts';
+import { urlId } from '../materials/validation.ts';
 const now = () => Math.floor(Date.now() / 1000);
 const uid = () => crypto.randomUUID();
 
@@ -132,7 +133,7 @@ courseRoutes.get('/courses/:id/entry', async c => {
         COUNT(CASE WHEN kind='answer' THEN 1 END) AS answers FROM public_contents WHERE course_id=${id}`);
     return respond(c, { course: courseDto(course), summary, permissions: { canManage },
         links: { questions: `/api/courses/${id}/questions`, activity: `/api/courses/${id}/activity`,
-            materials: `/api/materials?courseId=${id}` } });
+            materials: `/api/courses/${urlId(id)}/contents?kind=material`, contents: `/api/courses/${urlId(id)}/contents` } });
 });
 courseRoutes.get('/courses/:id/activity', async c => {
     const id = c.req.param('id'), p = page(c);

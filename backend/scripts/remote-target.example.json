@@ -1,0 +1,5 @@
+{
+    "accountId": "替换为目标 Cloudflare 账号 ID",
+    "databaseId": "替换为目标 D1 数据库 ID",
+    "bucketName": "替换为目标 R2 桶名称，demo 必填，其他命令可删除此字段"
+}
