@@ -28,7 +28,7 @@ export type Definition = { method: string; path: string; summary: string; auth?:
 const defs: Definition[] = [
     ...materialDefinitions,
     { method: 'get', path: '/me/courses', summary: '本人修读或授课的课程，区分当前学期与历史学期，同一课程去重', auth: 'session',
-        parameters: [...pagination, q('scope', { ...enumeration('current', 'history'), default: 'current' })], response: ref('MyCoursePage') },
+        parameters: [...pagination, q('scope', { ...enumeration('current', 'history'), default: 'current' }), q('q', { type: 'string', maxLength: 100 })], response: ref('MyCoursePage') },
     { method: 'get', path: '/courses', summary: '课程列表；code 按唯一课程编号精确匹配', parameters: [...pagination, q('q'), q('code', str(40))], response: ref('CoursePage') },
     { method: 'post', path: '/courses', summary: '创建当前学期课程：教师任教，管理员须指定 teacherId', auth: 'session', create: true, request: object({ ...courseFields, teacherId: id }, ['name', 'code']) },
     { method: 'get', path: '/courses/{id}', summary: '课程详情', response: ref('Course') },
