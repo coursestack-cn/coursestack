@@ -80,7 +80,7 @@
 </script>
 
 <Dialog {...rest} bind:open title={reporting ? "举报内容" : "下架内容"}
-    description={reporting ? "选择举报类别，并补充有助于核实的说明。" : "下架后，该内容及其下方内容将不再公开显示。"}
+    description={reporting ? "选择举报类别，并补充有助于核实的说明。" : "下架后，该内容将不再公开显示。前往“管理”页面可管理下架内容。"}
     dismissible={!pending} aria-busy={pending || undefined}>
     <form id={formId} class="reason-form" onsubmit={submit} novalidate>
         {#if reporting}
