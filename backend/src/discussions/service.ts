@@ -1,7 +1,10 @@
-import { parseBody } from './body.ts';
+import { parseBody, bodySchema, jsonChanged, type ProseMirrorDocument } from './body.ts';
+import { CONTENT_REQUEST_MAX_BYTES } from '../../../shared/rich-text/index.ts';
+import { z } from 'zod';
 import { sql } from 'drizzle-orm';
 import { createDatabase } from '../db/index.ts';
-import { HttpError } from '../http.ts';
+import { HttpError, input, tagsSchema, assertChanged } from '../http.ts';
+import { materialEditInput } from '../materials/validation.ts';
 import { actor } from '../auth/middleware.ts';
 import { editPermission } from '../permissions.ts';
 import type { ContentRow, PublicRow, Ctx } from './types.ts';
@@ -85,4 +88,25 @@ export async function publicDetail(c: Ctx, id: string) {
     const row = await createDatabase(c.env.DB).get<PublicRow>(sql`${publicSelect(c)} WHERE c.id=${id}`);
     if (!row) throw new HttpError(404, 'CONTENT_UNAVAILABLE', '内容不存在或不可用');
     return contentDto(row);
+}
+
+export async function editContent(c: Ctx, id: string, kind?: ContentRow['kind']) {
+    const row = await visibleContent(c, id, kind), a = await requireEditor(c, row);
+    const schema = row.kind === 'material' ? materialEditInput : row.kind === 'question'
+        ? z.object({ title: z.string().trim().min(1).max(200).optional(), body: bodySchema.optional(), tags: tagsSchema.nullable().optional() }).strict()
+        : z.object({ body: bodySchema }).strict();
+    const data = await input(c, schema, CONTENT_REQUEST_MAX_BYTES) as { title?: string; body?: ProseMirrorDocument; tags?: string[] | null };
+    const body = data.body === undefined ? undefined : JSON.stringify(data.body);
+    const tags = data.tags === undefined ? undefined : data.tags?.length ? JSON.stringify(data.tags) : null;
+    const bodyChanged = body === undefined ? sql`0` : jsonChanged(sql`body`, body);
+    const tagsChanged = tags === undefined ? sql`0` : jsonChanged(sql`tags`, tags);
+    const titleChanged = data.title === undefined ? sql`0` : sql`title IS NOT ${data.title}`, at = Math.floor(Date.now() / 1000);
+    const result = await createDatabase(c.env.DB).run(sql`UPDATE contents SET title=${data.title ?? sql`title`},
+        body=${body === undefined ? sql`body` : sql`CASE WHEN ${bodyChanged} THEN ${body} ELSE body END`},
+        tags=${tags === undefined ? sql`tags` : sql`CASE WHEN ${tagsChanged} THEN ${tags} ELSE tags END`},
+        edited_at=CASE WHEN ${titleChanged} OR ${bodyChanged} OR ${tagsChanged} THEN ${at} ELSE edited_at END,
+        updated_at=${at},updated_by=${a.id} WHERE id=${row.id} AND id IN (SELECT id FROM public_contents)
+        AND ${editPermission(a, sql`contents.course_id`, sql`contents.author_id`)}`);
+    assertChanged(result);
+    return publicDetail(c, row.id);
 }

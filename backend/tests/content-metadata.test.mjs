@@ -157,12 +157,10 @@ test('votes, acceptance, points, visibility, versions and deletion preserve edit
             { studentId: 'student-b', termId: 'term-active', deltaPoints })).status, 201);
         await unchanged();
     }
-    await h.database.prepare("INSERT INTO file_versions(material_id,version,filename,uploaded_by,updated_by) VALUES ('material-a',4,'v4.pdf','student-a','student-a')").run();
+    await h.database.prepare("INSERT INTO file_versions(material_id,version,storage_key,size,mime,uploaded_by,updated_by) VALUES ('material-a',4,'fixture-v4',8,'application/pdf','student-a','student-a')").run();
     await unchanged();
-    for (const status of ['hidden', 'visible']) {
-        await h.database.prepare("UPDATE file_versions SET status=? WHERE material_id='material-a' AND version=4").bind(status).run();
-        await unchanged();
-    }
+    assert.equal((await h.api('DELETE', '/materials/material-a/versions/4', 'student-a')).status, 200);
+    await unchanged();
     for (const id of expected.keys()) {
         await hide(id); await unchanged();
         await restore(id); await unchanged();

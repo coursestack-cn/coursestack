@@ -64,7 +64,7 @@ test('正文中的版本链接不受文件状态影响，编辑正文不会清�
     const q = await h.postQuestion('student-a', { body, tags: ['极限'] });
     assert.deepEqual((await h.api('GET', `/questions/${q}`)).data.body, body);
     assert.equal((await h.api('GET', '/courses/course-a/questions?fileVersionId=version-a1')).status, 400);
-    await h.database.prepare("UPDATE file_versions SET status='hidden' WHERE material_id='material-a' AND version=1").run();
+    await h.database.prepare("DELETE FROM file_versions WHERE material_id='material-a' AND version=1").run();
     const r = await h.api('GET', `/questions/${q}`); assert.equal(r.status, 200);
     assert.deepEqual(r.data.body, body); assert.equal(r.data.file, undefined);
     const edited = await h.api('PATCH', `/contents/${q}`, 'student-a', { body: doc('修改正文') });
@@ -212,7 +212,7 @@ test('资料统一为内容，文件外键拒绝非资料，直接父级拒绝�
     assert.equal(edited.status, 200); assert.equal(edited.data.title, '新标题');
     assert.equal((await h.api('PUT', '/contents/material-a/vote', 'student-b', { value: 1 })).status, 400);
     const q = await h.postQuestion();
-    await assert.rejects(() => h.database.prepare("INSERT INTO file_versions(material_id,version,filename,uploaded_by,updated_by) VALUES (?,1,'错误.pdf','student-a','student-a')").bind(q).run(), /invalid_material/);
+    await assert.rejects(() => h.database.prepare("INSERT INTO file_versions(material_id,version,storage_key,size,mime,uploaded_by,updated_by) VALUES (?,1,'invalid-version',8,'application/pdf','student-a','student-a')").bind(q).run(), /invalid_material/);
     await assert.rejects(() => h.database.prepare("UPDATE file_versions SET material_id=? WHERE material_id='material-a' AND version=1").bind(q).run(), /file_version_identity_immutable/);
     const answer = await h.postAnswer(q);
     const comment = await h.api('POST', '/comments', 'student-a', { targetKind: 'question', targetId: q, body: doc('父评论') });

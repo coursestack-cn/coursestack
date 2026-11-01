@@ -1,8 +1,8 @@
 {
   "openapi": "3.1.0",
   "info": {
-    "title": "CourseStack 课程与讨论 API",
-    "version": "4.0.0",
+    "title": "CourseStack 课程、讨论与资料 API",
+    "version": "5.0.0",
     "description": "正文使用 Tiptap / ProseMirror JSON 对象，由前端按编辑器扩展配置安全渲染。公开数据不包含学工号、姓名、院系、专业或年级。写入需登录，创建需幂等键，课程和内容编辑按最终写入顺序生效，局部更新仅覆盖提交字段；积分为课程、学期、学生维度的整数。Cookie 写请求需可信 Origin。"
   },
   "servers": [
@@ -12,6 +12,2864 @@
     }
   ],
   "paths": {
+    "/api/courses/{id}/contents": {
+      "get": {
+        "summary": "资料与问题统一分页、标签筛选；state 和 score 排序仅限 kind=question",
+        "operationId": "get__api_courses_id_contents",
+        "security": [
+          {},
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[a-zA-Z0-9_-]+$"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000,
+              "default": 1
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20
+            }
+          },
+          {
+            "name": "kind",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "question",
+                "material"
+              ]
+            }
+          },
+          {
+            "name": "tag",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 30
+            }
+          },
+          {
+            "name": "state",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "all",
+                "unresolved",
+                "solved"
+              ]
+            }
+          },
+          {
+            "name": "sort",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "enum": [
+                "active",
+                "newest",
+                "score"
+              ]
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/CourseContentPage"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "登录失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "权限不足",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "内容不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "状态冲突或重复操作",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求或文件过大",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "请求或文件类型不支持",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "服务尚未配置",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/materials/policy": {
+      "get": {
+        "summary": "单文件上传限制和登录要求",
+        "operationId": "get__api_materials_policy",
+        "security": [
+          {},
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "maxBytes": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9007199254740991
+                        },
+                        "mimeTypes": {
+                          "type": "array",
+                          "items": {
+                            "type": "string",
+                            "enum": [
+                              "application/pdf",
+                              "image/png",
+                              "image/jpeg",
+                              "image/gif",
+                              "image/webp",
+                              "application/msword",
+                              "application/vnd.ms-excel",
+                              "application/vnd.ms-powerpoint",
+                              "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                              "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                              "application/zip"
+                            ]
+                          }
+                        },
+                        "filesPerVersion": {
+                          "const": 1
+                        },
+                        "fileAccessRequiresLogin": {
+                          "const": true
+                        },
+                        "uploadUrlLifetimeSeconds": {
+                          "const": 600
+                        },
+                        "uploadLifetimeSeconds": {
+                          "const": 86400
+                        }
+                      },
+                      "required": [
+                        "maxBytes",
+                        "mimeTypes",
+                        "filesPerVersion",
+                        "fileAccessRequiresLogin",
+                        "uploadUrlLifetimeSeconds",
+                        "uploadLifetimeSeconds"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "登录失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "权限不足",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "内容不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "状态冲突或重复操作",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求或文件过大",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "请求或文件类型不支持",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "服务尚未配置",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/materials/{id}": {
+      "get": {
+        "summary": "资料介绍、默认或指定版本、前50个现存版本；游客仅能读取元数据",
+        "operationId": "get__api_materials_id_",
+        "security": [
+          {},
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[a-zA-Z0-9_-]+$"
+            }
+          },
+          {
+            "name": "version",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 9007199254740991
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/MaterialDetail"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "登录失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "权限不足",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "内容不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "状态冲突或重复操作",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求或文件过大",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "请求或文件类型不支持",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "服务尚未配置",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "patch": {
+        "summary": "编辑统一文件名、富文本介绍与标签；不改变版本文件",
+        "operationId": "patch__api_materials_id_",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[a-zA-Z0-9_-]+$"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uri"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "title": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 200,
+                    "description": "资料级统一文件名，也是标题；禁止路径分隔符和控制字符，各版本共用"
+                  },
+                  "body": {
+                    "$ref": "#/components/schemas/ProseMirrorDocument"
+                  },
+                  "tags": {
+                    "anyOf": [
+                      {
+                        "type": "array",
+                        "maxItems": 8,
+                        "items": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 30
+                        }
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/MaterialDetail"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "登录失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "权限不足",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "内容不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "状态冲突或重复操作",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求或文件过大",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "请求或文件类型不支持",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "服务尚未配置",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/materials/{id}/versions": {
+      "get": {
+        "summary": "现存版本分页，版本号降序",
+        "operationId": "get__api_materials_id_versions",
+        "security": [
+          {},
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[a-zA-Z0-9_-]+$"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000,
+              "default": 1
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/MaterialVersionPage"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "登录失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "权限不足",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "内容不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "状态冲突或重复操作",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求或文件过大",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "请求或文件类型不支持",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "服务尚未配置",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/materials/{id}/versions/{version}": {
+      "get": {
+        "summary": "指定现存版本与资料级统一文件名",
+        "operationId": "get__api_materials_id_versions_version_",
+        "security": [
+          {},
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[a-zA-Z0-9_-]+$"
+            }
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "materialId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 100
+                        },
+                        "title": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 200,
+                          "description": "资料级统一文件名，也是标题；禁止路径分隔符和控制字符，各版本共用"
+                        },
+                        "version": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9007199254740991
+                        },
+                        "size": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9007199254740991
+                        },
+                        "mime": {
+                          "type": "string",
+                          "enum": [
+                            "application/pdf",
+                            "image/png",
+                            "image/jpeg",
+                            "image/gif",
+                            "image/webp",
+                            "application/msword",
+                            "application/vnd.ms-excel",
+                            "application/vnd.ms-powerpoint",
+                            "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                            "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                            "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                            "application/zip"
+                          ]
+                        },
+                        "uploadedBy": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 100
+                        },
+                        "createdAt": {
+                          "type": "integer"
+                        },
+                        "previewKind": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "enum": [
+                                "pdf",
+                                "image"
+                              ]
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "previewUrl": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 300
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        },
+                        "downloadUrl": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 300
+                        }
+                      },
+                      "required": [
+                        "materialId",
+                        "title",
+                        "version",
+                        "size",
+                        "mime",
+                        "uploadedBy",
+                        "createdAt",
+                        "previewKind",
+                        "previewUrl",
+                        "downloadUrl"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "登录失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "权限不足",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "内容不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "状态冲突或重复操作",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求或文件过大",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "请求或文件类型不支持",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "服务尚未配置",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "资料作者、当前课程教师或管理员删除版本；撤回该版本积分，版本号不复用",
+        "operationId": "delete__api_materials_id_versions_version_",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[a-zA-Z0-9_-]+$"
+            }
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uri"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "materialId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 100
+                        },
+                        "version": {
+                          "type": "integer",
+                          "minimum": 1,
+                          "maximum": 9007199254740991
+                        },
+                        "deleted": {
+                          "const": true
+                        }
+                      },
+                      "required": [
+                        "materialId",
+                        "version",
+                        "deleted"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "登录失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "权限不足",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "内容不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "状态冲突或重复操作",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求或文件过大",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "请求或文件类型不支持",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "服务尚未配置",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/materials/{id}/versions/{version}/preview": {
+      "get": {
+        "summary": "登录后读取 PDF/图片；不支持预览的类型返回415",
+        "operationId": "get__api_materials_id_versions_version_preview",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[a-zA-Z0-9_-]+$"
+            }
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "Range",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "GET 支持单一字节区间；无效范围返回416"
+            }
+          },
+          {
+            "name": "If-Range",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "文件响应；HEAD 仅返回响应头",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "206": {
+            "description": "单一字节范围",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "文件未变化，仍校验登录及当前可见性"
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "登录失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "权限不足",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "内容不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "状态冲突或重复操作",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求或文件过大",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "请求或文件类型不支持",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "416": {
+            "description": "无效范围，Content-Range 为 bytes */总大小"
+          },
+          "500": {
+            "description": "服务错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "服务尚未配置",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "head": {
+        "summary": "登录后读取 PDF/图片；不支持预览的类型返回415",
+        "operationId": "head__api_materials_id_versions_version_preview",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[a-zA-Z0-9_-]+$"
+            }
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "Range",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "GET 支持单一字节区间；无效范围返回416"
+            }
+          },
+          {
+            "name": "If-Range",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "文件响应；HEAD 仅返回响应头"
+          },
+          "304": {
+            "description": "文件未变化，仍校验登录及当前可见性"
+          },
+          "400": {
+            "description": "参数错误"
+          },
+          "401": {
+            "description": "登录失效"
+          },
+          "403": {
+            "description": "权限不足"
+          },
+          "404": {
+            "description": "内容不可用"
+          },
+          "409": {
+            "description": "状态冲突或重复操作"
+          },
+          "410": {
+            "description": "上传过期"
+          },
+          "413": {
+            "description": "请求或文件过大"
+          },
+          "415": {
+            "description": "请求或文件类型不支持"
+          },
+          "500": {
+            "description": "服务错误"
+          },
+          "503": {
+            "description": "服务尚未配置"
+          }
+        }
+      }
+    },
+    "/api/materials/{id}/versions/{version}/download": {
+      "get": {
+        "summary": "登录后下载指定版本，文件名来自资料标题",
+        "operationId": "get__api_materials_id_versions_version_download",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[a-zA-Z0-9_-]+$"
+            }
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "Range",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "GET 支持单一字节区间；无效范围返回416"
+            }
+          },
+          {
+            "name": "If-Range",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "文件响应；HEAD 仅返回响应头",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "206": {
+            "description": "单一字节范围",
+            "content": {
+              "*/*": {
+                "schema": {
+                  "type": "string",
+                  "format": "binary"
+                }
+              }
+            }
+          },
+          "304": {
+            "description": "文件未变化，仍校验登录及当前可见性"
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "登录失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "权限不足",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "内容不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "状态冲突或重复操作",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求或文件过大",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "请求或文件类型不支持",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "416": {
+            "description": "无效范围，Content-Range 为 bytes */总大小"
+          },
+          "500": {
+            "description": "服务错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "服务尚未配置",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "head": {
+        "summary": "登录后下载指定版本，文件名来自资料标题",
+        "operationId": "head__api_materials_id_versions_version_download",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[a-zA-Z0-9_-]+$"
+            }
+          },
+          {
+            "name": "version",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "integer",
+              "minimum": 1
+            }
+          },
+          {
+            "name": "Range",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "description": "GET 支持单一字节区间；无效范围返回416"
+            }
+          },
+          {
+            "name": "If-Range",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          },
+          {
+            "name": "If-None-Match",
+            "in": "header",
+            "required": false,
+            "schema": {
+              "type": "string"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "文件响应；HEAD 仅返回响应头"
+          },
+          "304": {
+            "description": "文件未变化，仍校验登录及当前可见性"
+          },
+          "400": {
+            "description": "参数错误"
+          },
+          "401": {
+            "description": "登录失效"
+          },
+          "403": {
+            "description": "权限不足"
+          },
+          "404": {
+            "description": "内容不可用"
+          },
+          "409": {
+            "description": "状态冲突或重复操作"
+          },
+          "410": {
+            "description": "上传过期"
+          },
+          "413": {
+            "description": "请求或文件过大"
+          },
+          "415": {
+            "description": "请求或文件类型不支持"
+          },
+          "500": {
+            "description": "服务错误"
+          },
+          "503": {
+            "description": "服务尚未配置"
+          }
+        }
+      }
+    },
+    "/api/material-uploads": {
+      "post": {
+        "summary": "申请单文件上传；相同幂等键重试可刷新未完成票据，已发布则返回结果，无查重",
+        "operationId": "post__api_material_uploads",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uri"
+            }
+          },
+          {
+            "name": "Idempotency-Key",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 8,
+              "maxLength": 100,
+              "pattern": "^[A-Za-z0-9_-]+$"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "oneOf": [
+                  {
+                    "type": "object",
+                    "properties": {
+                      "mode": {
+                        "const": "create"
+                      },
+                      "courseId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 100
+                      },
+                      "title": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 200,
+                        "description": "资料级统一文件名，也是标题；禁止路径分隔符和控制字符，各版本共用"
+                      },
+                      "body": {
+                        "$ref": "#/components/schemas/ProseMirrorDocument"
+                      },
+                      "tags": {
+                        "anyOf": [
+                          {
+                            "type": "array",
+                            "maxItems": 8,
+                            "items": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 30
+                            }
+                          },
+                          {
+                            "type": "null"
+                          }
+                        ]
+                      },
+                      "file": {
+                        "type": "object",
+                        "properties": {
+                          "size": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 9007199254740991
+                          },
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "application/pdf",
+                              "image/png",
+                              "image/jpeg",
+                              "image/gif",
+                              "image/webp",
+                              "application/msword",
+                              "application/vnd.ms-excel",
+                              "application/vnd.ms-powerpoint",
+                              "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                              "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                              "application/zip"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "size",
+                          "type"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "mode",
+                      "courseId",
+                      "title",
+                      "body",
+                      "file"
+                    ],
+                    "additionalProperties": false
+                  },
+                  {
+                    "type": "object",
+                    "properties": {
+                      "mode": {
+                        "const": "version"
+                      },
+                      "materialId": {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 100
+                      },
+                      "file": {
+                        "type": "object",
+                        "properties": {
+                          "size": {
+                            "type": "integer",
+                            "minimum": 1,
+                            "maximum": 9007199254740991
+                          },
+                          "type": {
+                            "type": "string",
+                            "enum": [
+                              "application/pdf",
+                              "image/png",
+                              "image/jpeg",
+                              "image/gif",
+                              "image/webp",
+                              "application/msword",
+                              "application/vnd.ms-excel",
+                              "application/vnd.ms-powerpoint",
+                              "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+                              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+                              "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+                              "application/zip"
+                            ]
+                          }
+                        },
+                        "required": [
+                          "size",
+                          "type"
+                        ],
+                        "additionalProperties": false
+                      }
+                    },
+                    "required": [
+                      "mode",
+                      "materialId",
+                      "file"
+                    ],
+                    "additionalProperties": false
+                  }
+                ]
+              }
+            }
+          }
+        },
+        "responses": {
+          "201": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "oneOf": [
+                        {
+                          "$ref": "#/components/schemas/MaterialUploadTicket"
+                        },
+                        {
+                          "allOf": [
+                            {
+                              "$ref": "#/components/schemas/MaterialUploadStatus"
+                            },
+                            {
+                              "type": "object",
+                              "properties": {
+                                "status": {
+                                  "const": "published"
+                                },
+                                "result": {
+                                  "type": "object",
+                                  "properties": {
+                                    "materialId": {
+                                      "type": "string",
+                                      "minLength": 1,
+                                      "maxLength": 100
+                                    },
+                                    "version": {
+                                      "type": "integer",
+                                      "minimum": 1,
+                                      "maximum": 9007199254740991
+                                    }
+                                  },
+                                  "required": [
+                                    "materialId",
+                                    "version"
+                                  ],
+                                  "additionalProperties": false
+                                }
+                              }
+                            }
+                          ]
+                        }
+                      ]
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "登录失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "权限不足",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "内容不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "状态冲突或重复操作",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求或文件过大",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "请求或文件类型不支持",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "服务尚未配置",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/material-uploads/{id}": {
+      "get": {
+        "summary": "上传者查询处理状态与发布结果",
+        "operationId": "get__api_material_uploads_id_",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[a-zA-Z0-9_-]+$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/MaterialUploadStatus"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "登录失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "权限不足",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "内容不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "状态冲突或重复操作",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求或文件过大",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "请求或文件类型不支持",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "服务尚未配置",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "取消未发布上传；正在确认时返回409，已发布后不能通过上传接口删除资料",
+        "operationId": "delete__api_material_uploads_id_",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[a-zA-Z0-9_-]+$"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uri"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/MaterialUploadStatus"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "登录失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "权限不足",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "内容不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "状态冲突或重复操作",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求或文件过大",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "请求或文件类型不支持",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "服务尚未配置",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/material-uploads/{id}/confirm": {
+      "post": {
+        "summary": "核验、封存并发布文件；相同上传重复确认返回同一个版本，不重复计分",
+        "operationId": "post__api_material_uploads_id_confirm",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[a-zA-Z0-9_-]+$"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uri"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/MaterialUploadResult"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "登录失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "权限不足",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "内容不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "状态冲突或重复操作",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求或文件过大",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "请求或文件类型不支持",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "服务尚未配置",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/moderation/materials/{id}/versions": {
+      "get": {
+        "summary": "当前课程教师或管理员查询资料的现存版本，包括整体下架的资料",
+        "operationId": "get__api_moderation_materials_id_versions",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[a-zA-Z0-9_-]+$"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000,
+              "default": 1
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/MaterialVersionPage"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "登录失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "权限不足",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "内容不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "状态冲突或重复操作",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求或文件过大",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "请求或文件类型不支持",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "服务尚未配置",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
     "/api/me/courses": {
       "get": {
         "summary": "本人修读或授课的课程，区分当前学期与历史学期，同一课程去重",
@@ -128,8 +2986,18 @@
               }
             }
           },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "413": {
-            "description": "正文过大",
+            "description": "请求或文件过大",
             "content": {
               "application/json": {
                 "schema": {
@@ -139,7 +3007,7 @@
             }
           },
           "415": {
-            "description": "需要JSON",
+            "description": "请求或文件类型不支持",
             "content": {
               "application/json": {
                 "schema": {
@@ -159,7 +3027,7 @@
             }
           },
           "503": {
-            "description": "内部接口未配置",
+            "description": "服务尚未配置",
             "content": {
               "application/json": {
                 "schema": {
@@ -293,8 +3161,18 @@
               }
             }
           },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "413": {
-            "description": "正文过大",
+            "description": "请求或文件过大",
             "content": {
               "application/json": {
                 "schema": {
@@ -304,7 +3182,7 @@
             }
           },
           "415": {
-            "description": "需要JSON",
+            "description": "请求或文件类型不支持",
             "content": {
               "application/json": {
                 "schema": {
@@ -324,7 +3202,7 @@
             }
           },
           "503": {
-            "description": "内部接口未配置",
+            "description": "服务尚未配置",
             "content": {
               "application/json": {
                 "schema": {
@@ -484,8 +3362,18 @@
               }
             }
           },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "413": {
-            "description": "正文过大",
+            "description": "请求或文件过大",
             "content": {
               "application/json": {
                 "schema": {
@@ -495,7 +3383,7 @@
             }
           },
           "415": {
-            "description": "需要JSON",
+            "description": "请求或文件类型不支持",
             "content": {
               "application/json": {
                 "schema": {
@@ -515,7 +3403,7 @@
             }
           },
           "503": {
-            "description": "内部接口未配置",
+            "description": "服务尚未配置",
             "content": {
               "application/json": {
                 "schema": {
@@ -620,8 +3508,18 @@
               }
             }
           },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "413": {
-            "description": "正文过大",
+            "description": "请求或文件过大",
             "content": {
               "application/json": {
                 "schema": {
@@ -631,7 +3529,7 @@
             }
           },
           "415": {
-            "description": "需要JSON",
+            "description": "请求或文件类型不支持",
             "content": {
               "application/json": {
                 "schema": {
@@ -651,7 +3549,7 @@
             }
           },
           "503": {
-            "description": "内部接口未配置",
+            "description": "服务尚未配置",
             "content": {
               "application/json": {
                 "schema": {
@@ -790,8 +3688,18 @@
               }
             }
           },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "413": {
-            "description": "正文过大",
+            "description": "请求或文件过大",
             "content": {
               "application/json": {
                 "schema": {
@@ -801,7 +3709,7 @@
             }
           },
           "415": {
-            "description": "需要JSON",
+            "description": "请求或文件类型不支持",
             "content": {
               "application/json": {
                 "schema": {
@@ -821,7 +3729,7 @@
             }
           },
           "503": {
-            "description": "内部接口未配置",
+            "description": "服务尚未配置",
             "content": {
               "application/json": {
                 "schema": {
@@ -987,8 +3895,18 @@
               }
             }
           },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "413": {
-            "description": "正文过大",
+            "description": "请求或文件过大",
             "content": {
               "application/json": {
                 "schema": {
@@ -998,7 +3916,7 @@
             }
           },
           "415": {
-            "description": "需要JSON",
+            "description": "请求或文件类型不支持",
             "content": {
               "application/json": {
                 "schema": {
@@ -1018,7 +3936,7 @@
             }
           },
           "503": {
-            "description": "内部接口未配置",
+            "description": "服务尚未配置",
             "content": {
               "application/json": {
                 "schema": {
@@ -1116,12 +4034,18 @@
                               "type": "string",
                               "minLength": 1,
                               "maxLength": 300
+                            },
+                            "contents": {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 300
                             }
                           },
                           "required": [
                             "questions",
                             "activity",
-                            "materials"
+                            "materials",
+                            "contents"
                           ],
                           "additionalProperties": false
                         }
@@ -1193,8 +4117,18 @@
               }
             }
           },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "413": {
-            "description": "正文过大",
+            "description": "请求或文件过大",
             "content": {
               "application/json": {
                 "schema": {
@@ -1204,7 +4138,7 @@
             }
           },
           "415": {
-            "description": "需要JSON",
+            "description": "请求或文件类型不支持",
             "content": {
               "application/json": {
                 "schema": {
@@ -1224,7 +4158,7 @@
             }
           },
           "503": {
-            "description": "内部接口未配置",
+            "description": "服务尚未配置",
             "content": {
               "application/json": {
                 "schema": {
@@ -1413,8 +4347,18 @@
               }
             }
           },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "413": {
-            "description": "正文过大",
+            "description": "请求或文件过大",
             "content": {
               "application/json": {
                 "schema": {
@@ -1424,7 +4368,7 @@
             }
           },
           "415": {
-            "description": "需要JSON",
+            "description": "请求或文件类型不支持",
             "content": {
               "application/json": {
                 "schema": {
@@ -1444,7 +4388,7 @@
             }
           },
           "503": {
-            "description": "内部接口未配置",
+            "description": "服务尚未配置",
             "content": {
               "application/json": {
                 "schema": {
@@ -1605,8 +4549,18 @@
               }
             }
           },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "413": {
-            "description": "正文过大",
+            "description": "请求或文件过大",
             "content": {
               "application/json": {
                 "schema": {
@@ -1616,7 +4570,7 @@
             }
           },
           "415": {
-            "description": "需要JSON",
+            "description": "请求或文件类型不支持",
             "content": {
               "application/json": {
                 "schema": {
@@ -1636,7 +4590,7 @@
             }
           },
           "503": {
-            "description": "内部接口未配置",
+            "description": "服务尚未配置",
             "content": {
               "application/json": {
                 "schema": {
@@ -1808,8 +4762,18 @@
               }
             }
           },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "413": {
-            "description": "正文过大",
+            "description": "请求或文件过大",
             "content": {
               "application/json": {
                 "schema": {
@@ -1819,7 +4783,7 @@
             }
           },
           "415": {
-            "description": "需要JSON",
+            "description": "请求或文件类型不支持",
             "content": {
               "application/json": {
                 "schema": {
@@ -1839,7 +4803,7 @@
             }
           },
           "503": {
-            "description": "内部接口未配置",
+            "description": "服务尚未配置",
             "content": {
               "application/json": {
                 "schema": {
@@ -1944,8 +4908,18 @@
               }
             }
           },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "413": {
-            "description": "正文过大",
+            "description": "请求或文件过大",
             "content": {
               "application/json": {
                 "schema": {
@@ -1955,7 +4929,7 @@
             }
           },
           "415": {
-            "description": "需要JSON",
+            "description": "请求或文件类型不支持",
             "content": {
               "application/json": {
                 "schema": {
@@ -1975,7 +4949,7 @@
             }
           },
           "503": {
-            "description": "内部接口未配置",
+            "description": "服务尚未配置",
             "content": {
               "application/json": {
                 "schema": {
@@ -2102,8 +5076,18 @@
               }
             }
           },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "413": {
-            "description": "正文过大",
+            "description": "请求或文件过大",
             "content": {
               "application/json": {
                 "schema": {
@@ -2113,7 +5097,7 @@
             }
           },
           "415": {
-            "description": "需要JSON",
+            "description": "请求或文件类型不支持",
             "content": {
               "application/json": {
                 "schema": {
@@ -2133,7 +5117,7 @@
             }
           },
           "503": {
-            "description": "内部接口未配置",
+            "description": "服务尚未配置",
             "content": {
               "application/json": {
                 "schema": {
@@ -2286,8 +5270,18 @@
               }
             }
           },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "413": {
-            "description": "正文过大",
+            "description": "请求或文件过大",
             "content": {
               "application/json": {
                 "schema": {
@@ -2297,7 +5291,7 @@
             }
           },
           "415": {
-            "description": "需要JSON",
+            "description": "请求或文件类型不支持",
             "content": {
               "application/json": {
                 "schema": {
@@ -2317,7 +5311,7 @@
             }
           },
           "503": {
-            "description": "内部接口未配置",
+            "description": "服务尚未配置",
             "content": {
               "application/json": {
                 "schema": {
@@ -2504,8 +5498,18 @@
               }
             }
           },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "413": {
-            "description": "正文过大",
+            "description": "请求或文件过大",
             "content": {
               "application/json": {
                 "schema": {
@@ -2515,7 +5519,7 @@
             }
           },
           "415": {
-            "description": "需要JSON",
+            "description": "请求或文件类型不支持",
             "content": {
               "application/json": {
                 "schema": {
@@ -2535,7 +5539,7 @@
             }
           },
           "503": {
-            "description": "内部接口未配置",
+            "description": "服务尚未配置",
             "content": {
               "application/json": {
                 "schema": {
@@ -2694,8 +5698,18 @@
               }
             }
           },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "413": {
-            "description": "正文过大",
+            "description": "请求或文件过大",
             "content": {
               "application/json": {
                 "schema": {
@@ -2705,7 +5719,7 @@
             }
           },
           "415": {
-            "description": "需要JSON",
+            "description": "请求或文件类型不支持",
             "content": {
               "application/json": {
                 "schema": {
@@ -2725,7 +5739,7 @@
             }
           },
           "503": {
-            "description": "内部接口未配置",
+            "description": "服务尚未配置",
             "content": {
               "application/json": {
                 "schema": {
@@ -2837,8 +5851,18 @@
               }
             }
           },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "413": {
-            "description": "正文过大",
+            "description": "请求或文件过大",
             "content": {
               "application/json": {
                 "schema": {
@@ -2848,7 +5872,7 @@
             }
           },
           "415": {
-            "description": "需要JSON",
+            "description": "请求或文件类型不支持",
             "content": {
               "application/json": {
                 "schema": {
@@ -2868,7 +5892,7 @@
             }
           },
           "503": {
-            "description": "内部接口未配置",
+            "description": "服务尚未配置",
             "content": {
               "application/json": {
                 "schema": {
@@ -3030,8 +6054,18 @@
               }
             }
           },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "413": {
-            "description": "正文过大",
+            "description": "请求或文件过大",
             "content": {
               "application/json": {
                 "schema": {
@@ -3041,7 +6075,7 @@
             }
           },
           "415": {
-            "description": "需要JSON",
+            "description": "请求或文件类型不支持",
             "content": {
               "application/json": {
                 "schema": {
@@ -3061,7 +6095,7 @@
             }
           },
           "503": {
-            "description": "内部接口未配置",
+            "description": "服务尚未配置",
             "content": {
               "application/json": {
                 "schema": {
@@ -3188,8 +6222,18 @@
               }
             }
           },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "413": {
-            "description": "正文过大",
+            "description": "请求或文件过大",
             "content": {
               "application/json": {
                 "schema": {
@@ -3199,7 +6243,7 @@
             }
           },
           "415": {
-            "description": "需要JSON",
+            "description": "请求或文件类型不支持",
             "content": {
               "application/json": {
                 "schema": {
@@ -3219,7 +6263,7 @@
             }
           },
           "503": {
-            "description": "内部接口未配置",
+            "description": "服务尚未配置",
             "content": {
               "application/json": {
                 "schema": {
@@ -3381,8 +6425,18 @@
               }
             }
           },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "413": {
-            "description": "正文过大",
+            "description": "请求或文件过大",
             "content": {
               "application/json": {
                 "schema": {
@@ -3392,7 +6446,7 @@
             }
           },
           "415": {
-            "description": "需要JSON",
+            "description": "请求或文件类型不支持",
             "content": {
               "application/json": {
                 "schema": {
@@ -3412,7 +6466,7 @@
             }
           },
           "503": {
-            "description": "内部接口未配置",
+            "description": "服务尚未配置",
             "content": {
               "application/json": {
                 "schema": {
@@ -3569,8 +6623,18 @@
               }
             }
           },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "413": {
-            "description": "正文过大",
+            "description": "请求或文件过大",
             "content": {
               "application/json": {
                 "schema": {
@@ -3580,7 +6644,7 @@
             }
           },
           "415": {
-            "description": "需要JSON",
+            "description": "请求或文件类型不支持",
             "content": {
               "application/json": {
                 "schema": {
@@ -3600,7 +6664,7 @@
             }
           },
           "503": {
-            "description": "内部接口未配置",
+            "description": "服务尚未配置",
             "content": {
               "application/json": {
                 "schema": {
@@ -3775,8 +6839,18 @@
               }
             }
           },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "413": {
-            "description": "正文过大",
+            "description": "请求或文件过大",
             "content": {
               "application/json": {
                 "schema": {
@@ -3786,7 +6860,7 @@
             }
           },
           "415": {
-            "description": "需要JSON",
+            "description": "请求或文件类型不支持",
             "content": {
               "application/json": {
                 "schema": {
@@ -3806,7 +6880,7 @@
             }
           },
           "503": {
-            "description": "内部接口未配置",
+            "description": "服务尚未配置",
             "content": {
               "application/json": {
                 "schema": {
@@ -4067,8 +7141,18 @@
               }
             }
           },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "413": {
-            "description": "正文过大",
+            "description": "请求或文件过大",
             "content": {
               "application/json": {
                 "schema": {
@@ -4078,7 +7162,7 @@
             }
           },
           "415": {
-            "description": "需要JSON",
+            "description": "请求或文件类型不支持",
             "content": {
               "application/json": {
                 "schema": {
@@ -4098,7 +7182,7 @@
             }
           },
           "503": {
-            "description": "内部接口未配置",
+            "description": "服务尚未配置",
             "content": {
               "application/json": {
                 "schema": {
@@ -4293,8 +7377,18 @@
               }
             }
           },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "413": {
-            "description": "正文过大",
+            "description": "请求或文件过大",
             "content": {
               "application/json": {
                 "schema": {
@@ -4304,7 +7398,7 @@
             }
           },
           "415": {
-            "description": "需要JSON",
+            "description": "请求或文件类型不支持",
             "content": {
               "application/json": {
                 "schema": {
@@ -4324,7 +7418,7 @@
             }
           },
           "503": {
-            "description": "内部接口未配置",
+            "description": "服务尚未配置",
             "content": {
               "application/json": {
                 "schema": {
@@ -4585,8 +7679,18 @@
               }
             }
           },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "413": {
-            "description": "正文过大",
+            "description": "请求或文件过大",
             "content": {
               "application/json": {
                 "schema": {
@@ -4596,7 +7700,7 @@
             }
           },
           "415": {
-            "description": "需要JSON",
+            "description": "请求或文件类型不支持",
             "content": {
               "application/json": {
                 "schema": {
@@ -4616,7 +7720,7 @@
             }
           },
           "503": {
-            "description": "内部接口未配置",
+            "description": "服务尚未配置",
             "content": {
               "application/json": {
                 "schema": {
@@ -4756,8 +7860,18 @@
               }
             }
           },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "413": {
-            "description": "正文过大",
+            "description": "请求或文件过大",
             "content": {
               "application/json": {
                 "schema": {
@@ -4767,7 +7881,7 @@
             }
           },
           "415": {
-            "description": "需要JSON",
+            "description": "请求或文件类型不支持",
             "content": {
               "application/json": {
                 "schema": {
@@ -4787,7 +7901,7 @@
             }
           },
           "503": {
-            "description": "内部接口未配置",
+            "description": "服务尚未配置",
             "content": {
               "application/json": {
                 "schema": {
@@ -4944,8 +8058,18 @@
               }
             }
           },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "413": {
-            "description": "正文过大",
+            "description": "请求或文件过大",
             "content": {
               "application/json": {
                 "schema": {
@@ -4955,7 +8079,7 @@
             }
           },
           "415": {
-            "description": "需要JSON",
+            "description": "请求或文件类型不支持",
             "content": {
               "application/json": {
                 "schema": {
@@ -4975,7 +8099,7 @@
             }
           },
           "503": {
-            "description": "内部接口未配置",
+            "description": "服务尚未配置",
             "content": {
               "application/json": {
                 "schema": {
@@ -5223,8 +8347,18 @@
               }
             }
           },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "413": {
-            "description": "正文过大",
+            "description": "请求或文件过大",
             "content": {
               "application/json": {
                 "schema": {
@@ -5234,7 +8368,7 @@
             }
           },
           "415": {
-            "description": "需要JSON",
+            "description": "请求或文件类型不支持",
             "content": {
               "application/json": {
                 "schema": {
@@ -5254,7 +8388,7 @@
             }
           },
           "503": {
-            "description": "内部接口未配置",
+            "description": "服务尚未配置",
             "content": {
               "application/json": {
                 "schema": {
@@ -5414,8 +8548,18 @@
               }
             }
           },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "413": {
-            "description": "正文过大",
+            "description": "请求或文件过大",
             "content": {
               "application/json": {
                 "schema": {
@@ -5425,7 +8569,7 @@
             }
           },
           "415": {
-            "description": "需要JSON",
+            "description": "请求或文件类型不支持",
             "content": {
               "application/json": {
                 "schema": {
@@ -5445,7 +8589,7 @@
             }
           },
           "503": {
-            "description": "内部接口未配置",
+            "description": "服务尚未配置",
             "content": {
               "application/json": {
                 "schema": {
@@ -5646,8 +8790,18 @@
               }
             }
           },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "413": {
-            "description": "正文过大",
+            "description": "请求或文件过大",
             "content": {
               "application/json": {
                 "schema": {
@@ -5657,7 +8811,7 @@
             }
           },
           "415": {
-            "description": "需要JSON",
+            "description": "请求或文件类型不支持",
             "content": {
               "application/json": {
                 "schema": {
@@ -5677,7 +8831,7 @@
             }
           },
           "503": {
-            "description": "内部接口未配置",
+            "description": "服务尚未配置",
             "content": {
               "application/json": {
                 "schema": {
@@ -5841,8 +8995,18 @@
               }
             }
           },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "413": {
-            "description": "正文过大",
+            "description": "请求或文件过大",
             "content": {
               "application/json": {
                 "schema": {
@@ -5852,7 +9016,7 @@
             }
           },
           "415": {
-            "description": "需要JSON",
+            "description": "请求或文件类型不支持",
             "content": {
               "application/json": {
                 "schema": {
@@ -5872,7 +9036,7 @@
             }
           },
           "503": {
-            "description": "内部接口未配置",
+            "description": "服务尚未配置",
             "content": {
               "application/json": {
                 "schema": {
@@ -6071,8 +9235,18 @@
               }
             }
           },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "413": {
-            "description": "正文过大",
+            "description": "请求或文件过大",
             "content": {
               "application/json": {
                 "schema": {
@@ -6082,7 +9256,7 @@
             }
           },
           "415": {
-            "description": "需要JSON",
+            "description": "请求或文件类型不支持",
             "content": {
               "application/json": {
                 "schema": {
@@ -6102,7 +9276,7 @@
             }
           },
           "503": {
-            "description": "内部接口未配置",
+            "description": "服务尚未配置",
             "content": {
               "application/json": {
                 "schema": {
@@ -6347,8 +9521,18 @@
               }
             }
           },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "413": {
-            "description": "正文过大",
+            "description": "请求或文件过大",
             "content": {
               "application/json": {
                 "schema": {
@@ -6358,7 +9542,7 @@
             }
           },
           "415": {
-            "description": "需要JSON",
+            "description": "请求或文件类型不支持",
             "content": {
               "application/json": {
                 "schema": {
@@ -6378,7 +9562,7 @@
             }
           },
           "503": {
-            "description": "内部接口未配置",
+            "description": "服务尚未配置",
             "content": {
               "application/json": {
                 "schema": {
@@ -6520,8 +9704,18 @@
               }
             }
           },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
           "413": {
-            "description": "正文过大",
+            "description": "请求或文件过大",
             "content": {
               "application/json": {
                 "schema": {
@@ -6531,7 +9725,7 @@
             }
           },
           "415": {
-            "description": "需要JSON",
+            "description": "请求或文件类型不支持",
             "content": {
               "application/json": {
                 "schema": {
@@ -6551,7 +9745,7 @@
             }
           },
           "503": {
-            "description": "内部接口未配置",
+            "description": "服务尚未配置",
             "content": {
               "application/json": {
                 "schema": {
@@ -7100,6 +10294,402 @@
           }
         ]
       },
+      "FileVersion": {
+        "type": "object",
+        "properties": {
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "size": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "mime": {
+            "type": "string",
+            "enum": [
+              "application/pdf",
+              "image/png",
+              "image/jpeg",
+              "image/gif",
+              "image/webp",
+              "application/msword",
+              "application/vnd.ms-excel",
+              "application/vnd.ms-powerpoint",
+              "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+              "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet",
+              "application/vnd.openxmlformats-officedocument.presentationml.presentation",
+              "application/zip"
+            ]
+          },
+          "uploadedBy": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "createdAt": {
+            "type": "integer"
+          },
+          "previewKind": {
+            "anyOf": [
+              {
+                "type": "string",
+                "enum": [
+                  "pdf",
+                  "image"
+                ]
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "previewUrl": {
+            "anyOf": [
+              {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 300
+              },
+              {
+                "type": "null"
+              }
+            ]
+          },
+          "downloadUrl": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 300
+          }
+        },
+        "required": [
+          "version",
+          "size",
+          "mime",
+          "uploadedBy",
+          "createdAt",
+          "previewKind",
+          "previewUrl",
+          "downloadUrl"
+        ],
+        "additionalProperties": false
+      },
+      "MaterialUploadResult": {
+        "type": "object",
+        "properties": {
+          "materialId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "version": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          }
+        },
+        "required": [
+          "materialId",
+          "version"
+        ],
+        "additionalProperties": false
+      },
+      "MaterialUploadStatus": {
+        "type": "object",
+        "properties": {
+          "uploadId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "pending",
+              "confirming",
+              "published",
+              "cancelled",
+              "expired"
+            ]
+          },
+          "expiresAt": {
+            "type": "integer"
+          },
+          "result": {
+            "anyOf": [
+              {
+                "type": "object",
+                "properties": {
+                  "materialId": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 100
+                  },
+                  "version": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                  }
+                },
+                "required": [
+                  "materialId",
+                  "version"
+                ],
+                "additionalProperties": false
+              },
+              {
+                "type": "null"
+              }
+            ]
+          }
+        },
+        "required": [
+          "uploadId",
+          "status",
+          "expiresAt",
+          "result"
+        ],
+        "additionalProperties": false
+      },
+      "MaterialUploadTicket": {
+        "type": "object",
+        "properties": {
+          "uploadId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100
+          },
+          "status": {
+            "const": "pending"
+          },
+          "url": {
+            "type": "string",
+            "format": "uri"
+          },
+          "headers": {
+            "type": "object",
+            "additionalProperties": {
+              "type": "string"
+            }
+          },
+          "expiresAt": {
+            "type": "integer"
+          }
+        },
+        "required": [
+          "uploadId",
+          "status",
+          "url",
+          "headers",
+          "expiresAt"
+        ],
+        "additionalProperties": false
+      },
+      "MaterialVersionPage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "$ref": "#/components/schemas/FileVersion"
+            }
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "pageSize": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "items",
+          "page",
+          "pageSize",
+          "total"
+        ],
+        "additionalProperties": false
+      },
+      "MaterialDetail": {
+        "allOf": [
+          {
+            "$ref": "#/components/schemas/Content"
+          },
+          {
+            "type": "object",
+            "properties": {
+              "kind": {
+                "const": "material"
+              },
+              "latestVersion": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/FileVersion"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "selectedVersion": {
+                "anyOf": [
+                  {
+                    "$ref": "#/components/schemas/FileVersion"
+                  },
+                  {
+                    "type": "null"
+                  }
+                ]
+              },
+              "versions": {
+                "type": "object",
+                "properties": {
+                  "items": {
+                    "type": "array",
+                    "items": {
+                      "$ref": "#/components/schemas/FileVersion"
+                    }
+                  },
+                  "page": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                  },
+                  "pageSize": {
+                    "type": "integer",
+                    "minimum": 1,
+                    "maximum": 9007199254740991
+                  },
+                  "total": {
+                    "type": "integer",
+                    "minimum": 0
+                  }
+                },
+                "required": [
+                  "items",
+                  "page",
+                  "pageSize",
+                  "total"
+                ],
+                "additionalProperties": false
+              },
+              "permissions": {
+                "type": "object",
+                "properties": {
+                  "canEdit": {
+                    "type": "boolean"
+                  },
+                  "canUploadVersion": {
+                    "type": "boolean"
+                  },
+                  "canDeleteVersion": {
+                    "type": "boolean"
+                  },
+                  "canManage": {
+                    "type": "boolean"
+                  },
+                  "requiresLoginForFile": {
+                    "type": "boolean"
+                  }
+                },
+                "required": [
+                  "canEdit",
+                  "canUploadVersion",
+                  "canDeleteVersion",
+                  "canManage",
+                  "requiresLoginForFile"
+                ],
+                "additionalProperties": false
+              }
+            },
+            "required": [
+              "latestVersion",
+              "selectedVersion",
+              "versions",
+              "permissions"
+            ]
+          }
+        ]
+      },
+      "CourseContentPage": {
+        "type": "object",
+        "properties": {
+          "items": {
+            "type": "array",
+            "items": {
+              "allOf": [
+                {
+                  "$ref": "#/components/schemas/Content"
+                },
+                {
+                  "type": "object",
+                  "properties": {
+                    "kind": {
+                      "type": "string",
+                      "enum": [
+                        "question",
+                        "material"
+                      ]
+                    },
+                    "latestVersion": {
+                      "anyOf": [
+                        {
+                          "$ref": "#/components/schemas/FileVersion"
+                        },
+                        {
+                          "type": "null"
+                        }
+                      ]
+                    }
+                  },
+                  "if": {
+                    "properties": {
+                      "kind": {
+                        "const": "material"
+                      }
+                    }
+                  },
+                  "then": {
+                    "required": [
+                      "latestVersion"
+                    ]
+                  }
+                }
+              ]
+            }
+          },
+          "page": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "pageSize": {
+            "type": "integer",
+            "minimum": 1,
+            "maximum": 9007199254740991
+          },
+          "total": {
+            "type": "integer",
+            "minimum": 0
+          }
+        },
+        "required": [
+          "items",
+          "page",
+          "pageSize",
+          "total"
+        ],
+        "additionalProperties": false
+      },
       "BonusPolicy": {
         "type": "object",
         "properties": {
@@ -7487,6 +11077,16 @@
               "maxLength": 30
             },
             "description": "仅问题和资料允许标签；回答和评论为 null"
+          },
+          "latestVersion": {
+            "anyOf": [
+              {
+                "$ref": "#/components/schemas/FileVersion"
+              },
+              {
+                "type": "null"
+              }
+            ]
           },
           "targetKind": {
             "anyOf": [

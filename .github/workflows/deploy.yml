@@ -11,7 +11,7 @@ on:
       reset_data:
         description: Replace production D1 and R2 data with the demo data after deploying
         type: boolean
-        default: true
+        default: false
 
 permissions:
   contents: read
@@ -54,10 +54,10 @@ jobs:
             exit 1
           fi
 
-      # Manual runs use the reset_data input; pushes use the RESET_DATA variable, true when unset.
+      # Ordinary releases always migrate; only an explicit manual input can reset production data.
       - name: Resolve data reset
         env:
-          RESET_DATA: ${{ github.event_name == 'workflow_dispatch' && format('{0}', inputs.reset_data) || vars.RESET_DATA || 'true' }}
+          RESET_DATA: ${{ github.event_name == 'workflow_dispatch' && inputs.reset_data && 'true' || 'false' }}
         run: |
           if [[ "$RESET_DATA" != true && "$RESET_DATA" != false ]]; then
             echo "::error::RESET_DATA must be true or false."
@@ -84,6 +84,21 @@ jobs:
         working-directory: frontend
         run: pnpm install --frozen-lockfile
 
+      - name: Prepare database target
+        env:
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          node --input-type=module <<'NODE'
+          import { mkdir, readFile, writeFile } from 'node:fs/promises';
+          const { env: { production } } = JSON.parse(await readFile('wrangler.json', 'utf8'));
+          await mkdir('.local', { recursive: true });
+          await writeFile('.local/remote.json', JSON.stringify({
+            accountId: process.env.CLOUDFLARE_ACCOUNT_ID,
+            databaseId: production.d1_databases[0].database_id,
+            bucketName: production.r2_buckets[0].bucket_name,
+          }));
+          NODE
+
       - name: Check backend types
         run: pnpm check
 
@@ -103,7 +118,7 @@ jobs:
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: pnpm exec wrangler d1 migrations apply DB --env "$DEPLOY_ENV" --remote
+        run: pnpm db:migrate --remote .local/remote.json
 
       - name: Deploy Worker and frontend assets
         env:
@@ -111,13 +126,13 @@ jobs:
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
         run: pnpm exec wrangler deploy --env "$DEPLOY_ENV"
 
-      # Drops all D1 tables and R2 objects, reapplies the schema and demo data, and keeps the admin credential.
+      # Explicit reset only: drops D1 and R2, replays all migrations, and keeps the admin credential.
       - name: Reset production data to the demo set
         if: env.RESET_DATA == 'true'
         env:
           CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
           CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
-        run: pnpm demo:reset --confirm "$(jq --raw-output '.env.production.d1_databases[0].database_id' wrangler.json)"
+        run: pnpm demo --remote .local/remote.json
 
       - name: Verify deployment
         run: |
@@ -140,7 +155,7 @@ jobs:
             if [[ "$RESET_DATA" == true ]]; then
               echo "- Data: D1 and R2 reset to the demo data, admin credential kept"
             else
-              echo "- D1: pending migrations applied, data unchanged"
+              echo "- D1: pending migrations applied, no demo reset"
             fi
             echo "- Verification: API health and frontend request passed"
           } >> "$GITHUB_STEP_SUMMARY"

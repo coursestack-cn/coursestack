@@ -4,8 +4,9 @@ export function validateRemoteTarget(target) {
     if (!target || !/^[a-f0-9]{32}$/i.test(target.accountId ?? '')
         || !/^[a-f0-9]{8}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{4}-[a-f0-9]{12}$/i.test(target.databaseId ?? '')
         || /^00000000-0000-0000-0000-/.test(target.databaseId)
-        || Object.keys(target).some((key) => !['accountId', 'databaseId'].includes(key))) {
-        throw new HttpError(400, 'INVALID_TARGET', '远程配置只能包含有效的 accountId、databaseId，不能使用本地占位 ID');
+        || target.bucketName !== undefined && (typeof target.bucketName !== 'string' || !/^[a-z0-9][a-z0-9-]{1,61}[a-z0-9]$/.test(target.bucketName))
+        || Object.keys(target).some((key) => !['accountId', 'databaseId', 'bucketName'].includes(key))) {
+        throw new HttpError(400, 'INVALID_TARGET', '远程配置必须包含有效的 accountId、databaseId，可包含有效的 bucketName；不能含凭据或使用本地占位 ID');
     }
     return target;
 }

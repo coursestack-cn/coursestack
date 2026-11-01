@@ -1,74 +1,46 @@
-import { readFile } from 'node:fs/promises';
-import { fileURLToPath } from 'node:url';
-import { parseArgs } from 'node:util';
 import { administratorState, initializeAdministrator, resetAdministratorPassword } from '../../src/auth/service.ts';
 import { passwordField } from '../../src/auth/crypto.ts';
 import { HttpError } from '../../src/http.ts';
-import { remoteAdminDatabase, validateRemoteTarget } from './admin-database.mjs';
+import { remoteAdminDatabase } from './admin-database.mjs';
+import { loadRemoteTarget, localStateDirectory, openLocalTarget, parseTargetArguments } from './target.mjs';
 import { terminalPrompt } from './admin-prompt.mjs';
 
 const usage = `管理员运维（在 backend 目录执行）：
   pnpm admin:init --local
   pnpm admin:reset --local
   pnpm admin:status --local
-  pnpm admin:init --remote --config .local/admin-production.json
-  pnpm admin:reset --remote --config .local/admin-production.json
-  pnpm admin:status --remote --config .local/admin-production.json
-远程 JSON 配置仅包含 accountId、databaseId。Token 从交互终端或 CLOUDFLARE_API_TOKEN 读取。
+  pnpm admin:init --remote .local/remote.json
+  pnpm admin:reset --remote .local/remote.json
+  pnpm admin:status --remote .local/remote.json
+远程 JSON 配置包含 accountId、databaseId，可带 bucketName。Token 从交互终端或 CLOUDFLARE_API_TOKEN 读取。
 密码仅支持终端隐藏输入。命令不会部署 Worker、执行迁移或重置其他账号。`;
 
 export function parseAdminArguments(args) {
     const [action, ...rest] = args;
-    let parsed;
-    try {
-        parsed = parseArgs({ args: rest, strict: true, allowPositionals: false, tokens: true, options: {
-            local: { type: 'boolean' }, remote: { type: 'boolean' }, config: { type: 'string' }, help: { type: 'boolean' },
-        } });
-        const names = parsed.tokens.filter((token) => token.kind === 'option').map((token) => token.name);
-        if (new Set(names).size !== names.length) throw new Error();
-    } catch {
-        throw new HttpError(400, 'INVALID_ARGUMENTS', '命令参数不正确；请使用 --help，勿在参数中传入密码或 Token');
-    }
     if (!['init', 'reset', 'status'].includes(action)) throw new HttpError(400, 'INVALID_ACTION', '请选择 init、reset 或 status');
-    const { values } = parsed;
-    if (values.help) return { action, help: true };
-    if (Boolean(values.local) === Boolean(values.remote) || (values.local && values.config) || (values.remote && !values.config)) {
-        throw new HttpError(400, 'TARGET_REQUIRED', '必须明确选择 --local 或 --remote --config <配置文件>');
-    }
-    return { action, ...values };
-}
-
-async function connectLocal() {
-    const { getPlatformProxy } = await import('wrangler');
-    return getPlatformProxy({
-        configPath: fileURLToPath(new URL('../../wrangler.json', import.meta.url)),
-        environment: 'local', envFiles: [], remoteBindings: false,
-        persist: { path: fileURLToPath(new URL('../../.wrangler/state/v3', import.meta.url)) },
-    });
+    return { action, ...parseTargetArguments(rest) };
 }
 
 export async function runAdministratorCommand(args, {
     input = process.stdin, output = process.stdout, environment = process.env,
     prompt = (message, hidden) => terminalPrompt(message, { input, output, hidden }),
-    openLocal = connectLocal, request = fetch,
+    openLocal = openLocalTarget, request = fetch,
 } = {}) {
     const options = parseAdminArguments(args);
     if (options.help) { output.write(`${usage}\n`); return; }
     if (!input.isTTY) throw new HttpError(400, 'TERMINAL_REQUIRED', '请在交互终端运行管理员运维命令');
     let target;
     if (options.remote) {
-        try { target = JSON.parse(await readFile(options.config, 'utf8')); }
-        catch { throw new HttpError(400, 'INVALID_TARGET', '无法读取远程配置，请检查 --config 指向的 JSON 文件'); }
-        validateRemoteTarget(target);
+        target = await loadRemoteTarget(options.remote);
         output.write(`远程 Cloudflare 账号：${target.accountId}\n目标 D1：${target.databaseId}\n`);
     } else {
-        output.write('目标：本地 local 数据库，backend/.wrangler/state\n');
+        output.write(`本地状态根目录：${localStateDirectory(options['persist-to'])}\n`);
     }
     let platform;
     try {
         const binding = target
             ? remoteAdminDatabase(target, environment.CLOUDFLARE_API_TOKEN || await prompt('Cloudflare API Token（不回显）：', true), request)
-            : (platform = await openLocal()).env.DB;
+            : (platform = await openLocal(options['persist-to'])).env.DB;
         const state = await administratorState(binding);
         if (state) output.write(`管理员 ID：${state.id}\n状态：${state.status}；凭据版本：${state.version ?? '未初始化'}\n`);
         else output.write('当前数据库尚无管理员。\n');

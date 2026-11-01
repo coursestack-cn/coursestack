@@ -14,6 +14,10 @@ import { bonusRoutes } from './discussions/bonus.ts';
 import { moderationRoutes } from './moderation/routes.ts';
 import { internalRoutes, personalRoutes } from './integration/routes.ts';
 import { openapi } from './openapi.ts';
+import { materialRoutes } from './materials/routes.ts';
+import { materialUploadRoutes } from './materials/uploads.ts';
+import { cleanupMaterialUploads } from './materials/cleanup.ts';
+import { type Env } from './env.ts';
 
 export const app = new Hono<AppEnv>();
 
@@ -57,6 +61,8 @@ api.route('/', acceptanceRoutes);
 api.route('/', bonusRoutes);
 api.route('/', moderationRoutes);
 api.route('/', personalRoutes);
+api.route('/', materialRoutes);
+api.route('/', materialUploadRoutes);
 app.route('/api', api);
 
 app.notFound(() => json({ error: { code: 'NOT_FOUND', message: '接口不存在' } }, 404));
@@ -78,4 +84,9 @@ app.onError((error, c) => {
     return failure(500, 'INTERNAL_ERROR', '服务暂时不可用');
 });
 
-export default { fetch: app.fetch };
+export default {
+    fetch: app.fetch,
+    scheduled(_event: ScheduledController, env: Env, context: ExecutionContext) {
+        context.waitUntil(cleanupMaterialUploads(env));
+    },
+};

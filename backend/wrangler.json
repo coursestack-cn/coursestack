@@ -16,7 +16,8 @@
             "main": "src/index.ts",
             "routes": [],
             "vars": {
-                "APP_ENV": "local"
+                "APP_ENV": "local",
+                "MATERIAL_MAX_BYTES": "104857600"
             },
             "d1_databases": [
                 {
@@ -48,7 +49,12 @@
                 }
             ],
             "vars": {
-                "APP_ENV": "production"
+                "APP_ENV": "production",
+                "MATERIAL_MAX_BYTES": "104857600",
+                "R2_BUCKET_NAME": "coursestack-files"
+            },
+            "triggers": {
+                "crons": ["17 * * * *"]
             },
             "observability": {
                 "enabled": true,

@@ -35,7 +35,7 @@ export async function prepareDemoData(binding, { dryRun = false, course: request
     }
     const currentTerm = termResult.results[0];
     if (!currentTerm) throw conflict('请先设置当前学期，再创建演示课程实例。');
-    if (courseResult.results.length > 1) throw conflict('存在多个同名课程，请用 --course-id 指定演示课程。');
+    if (courseResult.results.length > 1) throw conflict('存在多个同名课程，无法准备演示数据。');
     if (requestedCourse && !courseResult.results.length) throw conflict('指定的课程不存在。');
     const selectedCourse = courseResult.results[0] ?? { id: courseId, name: courseName };
     const assigned = await binding.prepare(`SELECT e.account_id FROM enrollments e JOIN accounts a ON a.id=e.account_id
@@ -74,6 +74,6 @@ export async function prepareDemoData(binding, { dryRun = false, course: request
             .bind(selectedCourse.id, selectedTerm, JSON.stringify(members.filter((m) => m.role === 'student').map((m) => m.id)), currentTerm.id),
     ];
     const result = await binding.batch(statements);
-    if (!Number(result[1].results[0]?.ready)) throw conflict('当前学期已变化，本次未写入数据，请重新预览。');
+    if (!Number(result[1].results[0]?.ready)) throw conflict('当前学期已变化，本次未写入数据。');
     return summary;
 }
