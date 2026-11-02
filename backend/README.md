@@ -2,6 +2,8 @@
 
 当前提供 Workers / TypeScript / Hono / Drizzle / D1 后端，以及本地模拟 R2 绑定。账号、会话、受控资料与头像接口见[账号与权限](../docs/账号与权限.md)；课程、问答、采纳加分、审查及内部供数接口见[课程与讨论](../docs/课程与讨论.md)；统一内容列表、单文件上传、版本管理和预览下载见[资料与文件](../docs/资料与文件.md)。
 
+教学班模型目前完成数据层与增量迁移，课程路由、演示数据脚本、部分业务测试夹具及前端仍使用旧模型；须完成[接续适配](../docs/课程与讨论.md#数据层实现与接续范围)后再将 0004 与应用一起发布。本轮验证使用隔离临时库，未改动开发或远程数据库。
+
 ## 启动
 
 要求 Node.js `^22.12.0 || >=24.0.0`、`pnpm@12.5.1`。所有命令在 `backend/` 执行，各应用独立安装依赖。首次准备本地环境：
@@ -128,6 +130,19 @@ pnpm check
 `0001_materials.sql` 增加资料上传会话、版本计数、版本审查记录，并更新文件版本字段和触发器，保留已有账号、课程、问答、会话及积分。迁移检查 `file_versions` 是否为空，发现意外旧记录会以 `materials_require_empty_file_versions` 失败并回滚，须先核实文件元数据，不能直接删除记录绕过。
 
 `0002_material_table_names.sql` 重命名两张资料表；`0003_material_version_contract.sql` 将上传 payload 改为 creation_draft，移除更新说明、独立版本状态及版本审查记录。版本只允许删除，资料整体下架沿用 contents。该迁移若检测到隐藏版本会以 `material_versions_require_no_hidden_rows` 中止并回滚，需先明确恢复或删除这些版本，避免它们被自动公开。
+
+`0004_teaching_classes.sql` 将课程号作为课程主键，拆分课程学期、教学班和学生归属，按教学班保存积分规则及流水归属。已有内容、上传会话、文件版本、版本计数、积分金额与撤回链保留；迁移不会重新奖励旧内容。课程旧 ID 与新编号交叉重合也按完整映射处理。迁移前置校验的 `academic_valid_member_roles`、`academic_unique_legacy_teacher`、`academic_legacy_rules_required` 分别表示成员身份错误、教师归属无法唯一确定和旧积分规则缺失，应核实数据后处理，不能跳过校验。
+
+课程与教学班采用目标契约，迁移、后端和前端必须一同集成发布；旧的教师建课、code 字段和课程级积分接口不兼容。演示脚本也使用新模型：账号、开课安排、教学班及学生归属在同一批次写入；空库会创建无登录密码的管理员占位，仍需 admin:init 初始化登录。
+
+集成检查（不执行完整构建）：
+
+```sh
+pnpm db:check
+pnpm check
+pnpm test
+pnpm openapi:check
+```
 
 local、production 使用同一组迁移；生产迁移由部署工作流在发布 Worker 前执行，见[数据库结构变更](../docs/部署与运维.md#数据库结构变更)。
 

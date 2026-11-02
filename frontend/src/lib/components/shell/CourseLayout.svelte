@@ -3,14 +3,8 @@
     import type { Resource } from "$lib/api/resource.svelte.js";
 
     type CourseEntry = {
-        course: {
-            id: string;
-            name: string;
-            code: string;
-            introduction: string;
-            currentTeacher: { id: string; nickname: string | null; isDeleted: boolean } | null;
-        };
-        permissions: { canManage: boolean };
+        course: import("../../../pages/manage/course").Course;
+        permissions: { canManageContent: boolean; canManageCourse: boolean };
         viewer: string | undefined;
     };
 
@@ -30,11 +24,7 @@
     const result = resource(async (signal) => {
         const code = courseCode, viewer = session.user?.id;
         if (!code.trim() || code.trim().length > 40) throw new ApiError(404, "COURSE_NOT_FOUND", "课程不存在");
-        const query = new URLSearchParams({ code, pageSize: "1" });
-        const courses = await api.get<{ items: { id: string }[] }>(`/api/courses?${query}`, { signal });
-        const course = courses.items[0];
-        if (!course) throw new ApiError(404, "COURSE_NOT_FOUND", "课程不存在");
-        const entry = await api.get<Omit<CourseEntry, "viewer">>(`/api/courses/${encodeURIComponent(course.id)}/entry`, { signal });
+        const entry = await api.get<Omit<CourseEntry, "viewer">>(`/api/courses/${encodeURIComponent(code)}/entry`, { signal });
         return { ...entry, viewer };
     });
     setContext(courseContext, result);
@@ -42,9 +32,9 @@
 
 <PageLayout title={result.data?.course.name ?? "课程"}>
     {#snippet heading()}
-        <CourseNav courseCode={result.data?.course.code ?? courseCode} courseName={result.data?.course.name ?? "课程"}
+        <CourseNav courseCode={result.data?.course.id ?? courseCode} courseName={result.data?.course.name ?? "课程"}
             loading={result.status === "loading"}
-            showManage={result.data?.viewer === session.user?.id && result.data?.permissions.canManage} />
+            showManage={result.data?.viewer === session.user?.id && result.data?.permissions.canManageContent} />
     {/snippet}
     <ResourceState status={result.status} error={result.error} refreshing={result.refreshing} reload={result.reload}>
         {@render children()}

@@ -1,7 +1,7 @@
 <script module lang="ts">
-    import type { Course } from "./course";
+    import { type TeachingClass } from "./course";
 
-    export type Props = { open?: boolean; course: Course | null; onsaved: () => void; onfailed?: () => void };
+    export type Props = { open?: boolean; course: TeachingClass | null; onsaved: () => void; onfailed?: () => void };
 </script>
 
 <script lang="ts">
@@ -13,7 +13,7 @@
     import Field from "$lib/components/ui/Field.svelte";
     import TextInput from "$lib/components/ui/TextInput.svelte";
     import { toast } from "$lib/components/ui/toast.svelte.js";
-    import type { BonusPolicy } from "./course";
+    import { classUrl, type BonusPolicy } from "./course";
 
     type Key = keyof BonusPolicy;
     const fields: { key: Key; label: string }[] = [
@@ -57,7 +57,7 @@
         pending = true;
         formError = "";
         try {
-            await api.put(`/api/courses/${encodeURIComponent(course.id)}/bonus-policy`, policy);
+            await api.put(`${classUrl(course)}/bonus-policy`, policy);
             if (!alive) return;
             toast.success("已保存加分规则");
             onsaved();
@@ -67,7 +67,7 @@
             formError = userMessage(cause, {
                 COURSE_NOT_FOUND: "课程不存在或已被删除，请关闭弹窗并刷新列表。",
                 400: "提交的分值有误，检查后重试。",
-                default: "未能确认保存结果。请先核对课程的加分规则，再决定是否重新保存。"
+                default: "未能确认保存结果。请先核对教学班的加分规则，再决定是否重新保存。"
             });
             onfailed?.();
         } finally {
@@ -76,9 +76,9 @@
     }
 </script>
 
-<Dialog bind:open title="加分规则" description={course ? `${course.code} · ${course.name}` : undefined} dismissible={!pending}>
+<Dialog bind:open title="加分规则" description={course ? `${course.course.name} ${course.term.name} ${course.teacher.nickname ?? "教师"}` : undefined} dismissible={!pending}>
     <form class="policy-form" onsubmit={save} aria-busy={pending || undefined} novalidate>
-        <p class="hint">每项为本课程学生获得的整数积分，0 表示不计分。修改只影响之后的奖励，已发放的积分不会重算。</p>
+        <p class="hint">每项为本教学班学生获得的整数积分，0 表示不计分。修改只影响之后的奖励，已发放的积分不会重算。</p>
         <div class="grid">
             {#each fields as { key, label } (key)}
                 <Field {label} error={errors[key]}>

@@ -49,7 +49,7 @@ export const materialDefinitions: Definition[] = [
         parameters: [{ name: 'Range', in: 'header', required: false, schema: { type: 'string', description: 'GET 支持单一字节区间；无效范围返回416' } },
             ...['If-Range', 'If-None-Match'].map(name => ({ name, in: 'header', required: false, schema: { type: 'string' } }))] }))),
     { method: 'post', path: '/material-uploads', summary: '申请单文件上传；相同幂等键重试可刷新未完成票据，已发布则返回结果，无查重', auth: 'session', create: true,
-        request: { oneOf: [object({ mode: { const: 'create' }, courseId: id, ...metadata, file }, ['mode', 'courseId', 'title', 'body', 'file']),
+        request: { oneOf: [object({ mode: { const: 'create' }, courseId: ref('CourseId'), ...metadata, file }, ['mode', 'courseId', 'title', 'body', 'file']),
             object({ mode: { const: 'version' }, materialId: id, file }, ['mode', 'materialId', 'file'])] },
         response: { oneOf: [ref('MaterialUploadTicket'), { allOf: [ref('MaterialUploadStatus'), { type: 'object', properties: { status: { const: 'published' }, result } }] }] } },
     { method: 'get', path: '/material-uploads/{id}', summary: '上传者查询处理状态与发布结果', auth: 'session', response: ref('MaterialUploadStatus') },

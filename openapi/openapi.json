@@ -2,8 +2,8 @@
   "openapi": "3.1.0",
   "info": {
     "title": "CourseStack 课程、讨论与资料 API",
-    "version": "5.0.0",
-    "description": "正文使用 Tiptap / ProseMirror JSON 对象，由前端按编辑器扩展配置安全渲染。公开数据不包含学工号、姓名、院系、专业或年级。写入需登录，创建需幂等键，课程和内容编辑按最终写入顺序生效，局部更新仅覆盖提交字段；积分为课程、学期、学生维度的整数。Cookie 写请求需可信 Origin。"
+    "version": "6.0.0",
+    "description": "正文使用 Tiptap / ProseMirror JSON 对象，由前端按编辑器扩展配置安全渲染。公开数据不包含学工号、姓名、院系、专业或年级。写入需登录，创建需幂等键，课程和内容编辑按最终写入顺序生效，局部更新仅覆盖提交字段；课程号即课程 ID，课程与开课安排分离；积分和学生名单按课程、学期、教师的教学班管理。Cookie 写请求需可信 Origin。"
   },
   "servers": [
     {
@@ -30,8 +30,15 @@
             "schema": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 100,
-              "pattern": "^[a-zA-Z0-9_-]+$"
+              "maxLength": 40,
+              "not": {
+                "enum": [
+                  ".",
+                  ".."
+                ]
+              },
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+              "description": "课程号，保持原值，URL 路径需编码"
             }
           },
           {
@@ -1963,9 +1970,7 @@
                         "const": "create"
                       },
                       "courseId": {
-                        "type": "string",
-                        "minLength": 1,
-                        "maxLength": 100
+                        "$ref": "#/components/schemas/CourseId"
                       },
                       "title": {
                         "type": "string",
@@ -3050,7 +3055,7 @@
     },
     "/api/courses": {
       "get": {
-        "summary": "课程列表；code 按唯一课程编号精确匹配",
+        "summary": "课程列表，id 精确匹配课程号，termId 筛选管理员已安排开设的课程",
         "operationId": "get__api_courses",
         "security": [
           {},
@@ -3090,13 +3095,32 @@
             }
           },
           {
-            "name": "code",
+            "name": "id",
             "in": "query",
             "required": false,
             "schema": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 40
+              "maxLength": 40,
+              "not": {
+                "enum": [
+                  ".",
+                  ".."
+                ]
+              },
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+              "description": "课程号，保持原值，URL 路径需编码"
+            }
+          },
+          {
+            "name": "termId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[a-zA-Z0-9_-]+$"
             }
           }
         ],
@@ -3223,7 +3247,7 @@
         }
       },
       "post": {
-        "summary": "创建当前学期课程：教师任教，管理员须指定 teacherId",
+        "summary": "管理员建立长期课程，无需学期或任课教师",
         "operationId": "post__api_courses",
         "security": [
           {
@@ -3259,30 +3283,32 @@
               "schema": {
                 "type": "object",
                 "properties": {
+                  "id": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 40,
+                    "not": {
+                      "enum": [
+                        ".",
+                        ".."
+                      ]
+                    },
+                    "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                    "description": "课程号，保持原值，URL 路径需编码"
+                  },
                   "name": {
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 120
                   },
-                  "code": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 40
-                  },
                   "introduction": {
                     "type": "string",
                     "maxLength": 5000
-                  },
-                  "teacherId": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 100,
-                    "pattern": "^[a-zA-Z0-9_-]+$"
                   }
                 },
                 "required": [
-                  "name",
-                  "code"
+                  "id",
+                  "name"
                 ],
                 "additionalProperties": false
               }
@@ -3303,8 +3329,15 @@
                         "id": {
                           "type": "string",
                           "minLength": 1,
-                          "maxLength": 100,
-                          "pattern": "^[a-zA-Z0-9_-]+$"
+                          "maxLength": 40,
+                          "not": {
+                            "enum": [
+                              ".",
+                              ".."
+                            ]
+                          },
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                          "description": "课程号，保持原值，URL 路径需编码"
                         }
                       },
                       "required": [
@@ -3426,7 +3459,7 @@
     },
     "/api/courses/{id}": {
       "get": {
-        "summary": "课程详情",
+        "summary": "课程详情及本学期全部任课教师",
         "operationId": "get__api_courses_id_",
         "security": [
           {},
@@ -3442,8 +3475,15 @@
             "schema": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 100,
-              "pattern": "^[a-zA-Z0-9_-]+$"
+              "maxLength": 40,
+              "not": {
+                "enum": [
+                  ".",
+                  ".."
+                ]
+              },
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+              "description": "课程号，保持原值，URL 路径需编码"
             }
           }
         ],
@@ -3570,7 +3610,7 @@
         }
       },
       "patch": {
-        "summary": "当前课程教师或管理员编辑课程",
+        "summary": "管理员编辑课程名称及简介；课程号不可修改",
         "operationId": "patch__api_courses_id_",
         "security": [
           {
@@ -3585,8 +3625,15 @@
             "schema": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 100,
-              "pattern": "^[a-zA-Z0-9_-]+$"
+              "maxLength": 40,
+              "not": {
+                "enum": [
+                  ".",
+                  ".."
+                ]
+              },
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+              "description": "课程号，保持原值，URL 路径需编码"
             }
           },
           {
@@ -3610,11 +3657,6 @@
                     "type": "string",
                     "minLength": 1,
                     "maxLength": 120
-                  },
-                  "code": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 40
                   },
                   "introduction": {
                     "type": "string",
@@ -3750,10 +3792,687 @@
         }
       }
     },
-    "/api/courses/{id}/bonus-policy": {
+    "/api/terms": {
+      "get": {
+        "summary": "学期列表，当前学期优先",
+        "operationId": "get__api_terms",
+        "security": [
+          {},
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Term"
+                      }
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "登录失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "权限不足",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "内容不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "状态冲突或重复操作",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求或文件过大",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "请求或文件类型不支持",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "服务尚未配置",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/terms/current": {
       "put": {
-        "summary": "配置六项整数积分规则，资料首次上传与后续版本分别计分，历史奖励不重算",
-        "operationId": "put__api_courses_id_bonus_policy",
+        "summary": "管理员切换当前学期，null 清除；保留所有历史关系",
+        "operationId": "put__api_terms_current",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uri"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "termId": {
+                    "anyOf": [
+                      {
+                        "type": "string",
+                        "minLength": 1,
+                        "maxLength": 100,
+                        "pattern": "^[a-zA-Z0-9_-]+$"
+                      },
+                      {
+                        "type": "null"
+                      }
+                    ]
+                  }
+                },
+                "required": [
+                  "termId"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "termId": {
+                          "anyOf": [
+                            {
+                              "type": "string",
+                              "minLength": 1,
+                              "maxLength": 100,
+                              "pattern": "^[a-zA-Z0-9_-]+$"
+                            },
+                            {
+                              "type": "null"
+                            }
+                          ]
+                        }
+                      },
+                      "required": [
+                        "termId"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "登录失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "权限不足",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "内容不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "状态冲突或重复操作",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求或文件过大",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "请求或文件类型不支持",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "服务尚未配置",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/terms/{termId}": {
+      "put": {
+        "summary": "管理员建立或重命名学期；ID 不可为 current",
+        "operationId": "put__api_terms_termId_",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "termId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[a-zA-Z0-9_-]+$"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uri"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
+                  }
+                },
+                "required": [
+                  "name"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "id": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 100,
+                          "pattern": "^[a-zA-Z0-9_-]+$"
+                        },
+                        "name": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 120
+                        }
+                      },
+                      "required": [
+                        "id",
+                        "name"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "登录失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "权限不足",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "内容不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "状态冲突或重复操作",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求或文件过大",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "请求或文件类型不支持",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "服务尚未配置",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/courses/{id}/terms": {
+      "get": {
+        "summary": "课程已安排开设的学期",
+        "operationId": "get__api_courses_id_terms",
+        "security": [
+          {},
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40,
+              "not": {
+                "enum": [
+                  ".",
+                  ".."
+                ]
+              },
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+              "description": "课程号，保持原值，URL 路径需编码"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "array",
+                      "items": {
+                        "$ref": "#/components/schemas/Term"
+                      }
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "登录失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "权限不足",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "内容不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "状态冲突或重复操作",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求或文件过大",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "请求或文件类型不支持",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "服务尚未配置",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/courses/{id}/terms/{termId}": {
+      "put": {
+        "summary": "管理员安排课程在指定学期开设，可重复调用",
+        "operationId": "put__api_courses_id_terms_termId_",
         "security": [
           {
             "sessionCookie": []
@@ -3762,6 +4481,987 @@
         "parameters": [
           {
             "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40,
+              "not": {
+                "enum": [
+                  ".",
+                  ".."
+                ]
+              },
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+              "description": "课程号，保持原值，URL 路径需编码"
+            }
+          },
+          {
+            "name": "termId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[a-zA-Z0-9_-]+$"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uri"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "courseId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 40,
+                          "not": {
+                            "enum": [
+                              ".",
+                              ".."
+                            ]
+                          },
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                          "description": "课程号，保持原值，URL 路径需编码"
+                        },
+                        "termId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 100,
+                          "pattern": "^[a-zA-Z0-9_-]+$"
+                        }
+                      },
+                      "required": [
+                        "courseId",
+                        "termId"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "登录失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "权限不足",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "内容不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "状态冲突或重复操作",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求或文件过大",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "请求或文件类型不支持",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "服务尚未配置",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "delete": {
+        "summary": "管理员撤销尚无教学班的开课安排；已有教学班返回409",
+        "operationId": "delete__api_courses_id_terms_termId_",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40,
+              "not": {
+                "enum": [
+                  ".",
+                  ".."
+                ]
+              },
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+              "description": "课程号，保持原值，URL 路径需编码"
+            }
+          },
+          {
+            "name": "termId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[a-zA-Z0-9_-]+$"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uri"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "courseId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 40,
+                          "not": {
+                            "enum": [
+                              ".",
+                              ".."
+                            ]
+                          },
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                          "description": "课程号，保持原值，URL 路径需编码"
+                        },
+                        "termId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 100,
+                          "pattern": "^[a-zA-Z0-9_-]+$"
+                        }
+                      },
+                      "required": [
+                        "courseId",
+                        "termId"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "登录失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "权限不足",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "内容不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "状态冲突或重复操作",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求或文件过大",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "请求或文件类型不支持",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "服务尚未配置",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/courses/{id}/terms/{termId}/teachers/me": {
+      "put": {
+        "summary": "教师直接加入本学期已开设课程，创建本人教学班；重复加入返回同一班",
+        "operationId": "put__api_courses_id_terms_termId_teachers_me",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40,
+              "not": {
+                "enum": [
+                  ".",
+                  ".."
+                ]
+              },
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+              "description": "课程号，保持原值，URL 路径需编码"
+            }
+          },
+          {
+            "name": "termId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[a-zA-Z0-9_-]+$"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uri"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/TeachingClass"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "登录失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "权限不足",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "内容不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "状态冲突或重复操作",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求或文件过大",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "请求或文件类型不支持",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "服务尚未配置",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/teaching-classes": {
+      "get": {
+        "summary": "教师只见本人当期教学班，管理员可见全部教学班",
+        "operationId": "get__api_teaching_classes",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000,
+              "default": 1
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20
+            }
+          },
+          {
+            "name": "courseId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40,
+              "not": {
+                "enum": [
+                  ".",
+                  ".."
+                ]
+              },
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+              "description": "课程号，保持原值，URL 路径需编码"
+            }
+          },
+          {
+            "name": "termId",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[a-zA-Z0-9_-]+$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/TeachingClass"
+                          }
+                        },
+                        "page": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "pageSize": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "total": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "required": [
+                        "items",
+                        "page",
+                        "pageSize",
+                        "total"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "登录失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "权限不足",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "内容不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "状态冲突或重复操作",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求或文件过大",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "请求或文件类型不支持",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "服务尚未配置",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/courses/{id}/terms/{termId}/teachers/{teacherId}": {
+      "get": {
+        "summary": "本人当期教学班或管理员读取教学班详情",
+        "operationId": "get__api_courses_id_terms_termId_teachers_teacherId_",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40,
+              "not": {
+                "enum": [
+                  ".",
+                  ".."
+                ]
+              },
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+              "description": "课程号，保持原值，URL 路径需编码"
+            }
+          },
+          {
+            "name": "termId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[a-zA-Z0-9_-]+$"
+            }
+          },
+          {
+            "name": "teacherId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[a-zA-Z0-9_-]+$"
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "$ref": "#/components/schemas/TeachingClass"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "登录失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "权限不足",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "内容不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "状态冲突或重复操作",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求或文件过大",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "请求或文件类型不支持",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "服务尚未配置",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/courses/{id}/terms/{termId}/teachers/{teacherId}/bonus-policy": {
+      "put": {
+        "summary": "本人当期教学班教师或管理员配置本班六项积分规则，不重算历史流水",
+        "operationId": "put__api_courses_id_terms_termId_teachers_teacherId_bonus_policy",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40,
+              "not": {
+                "enum": [
+                  ".",
+                  ".."
+                ]
+              },
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+              "description": "课程号，保持原值，URL 路径需编码"
+            }
+          },
+          {
+            "name": "termId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[a-zA-Z0-9_-]+$"
+            }
+          },
+          {
+            "name": "teacherId",
             "in": "path",
             "required": true,
             "schema": {
@@ -3843,7 +5543,444 @@
                   "type": "object",
                   "properties": {
                     "data": {
-                      "$ref": "#/components/schemas/Course"
+                      "$ref": "#/components/schemas/TeachingClass"
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "登录失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "权限不足",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "内容不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "状态冲突或重复操作",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求或文件过大",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "请求或文件类型不支持",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "服务尚未配置",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      }
+    },
+    "/api/courses/{id}/terms/{termId}/teachers/{teacherId}/students": {
+      "get": {
+        "summary": "本人当期教学班教师或管理员读取学生名单与必要学籍信息",
+        "operationId": "get__api_courses_id_terms_termId_teachers_teacherId_students",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40,
+              "not": {
+                "enum": [
+                  ".",
+                  ".."
+                ]
+              },
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+              "description": "课程号，保持原值，URL 路径需编码"
+            }
+          },
+          {
+            "name": "termId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[a-zA-Z0-9_-]+$"
+            }
+          },
+          {
+            "name": "teacherId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[a-zA-Z0-9_-]+$"
+            }
+          },
+          {
+            "name": "page",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 10000,
+              "default": 1
+            }
+          },
+          {
+            "name": "pageSize",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "integer",
+              "minimum": 1,
+              "maximum": 50,
+              "default": 20
+            }
+          }
+        ],
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "items": {
+                          "type": "array",
+                          "items": {
+                            "$ref": "#/components/schemas/ClassStudent"
+                          }
+                        },
+                        "page": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "pageSize": {
+                          "type": "integer",
+                          "minimum": 1
+                        },
+                        "total": {
+                          "type": "integer",
+                          "minimum": 0
+                        }
+                      },
+                      "required": [
+                        "items",
+                        "page",
+                        "pageSize",
+                        "total"
+                      ],
+                      "additionalProperties": false
+                    }
+                  },
+                  "required": [
+                    "data"
+                  ],
+                  "additionalProperties": false
+                }
+              }
+            }
+          },
+          "400": {
+            "description": "参数错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "401": {
+            "description": "登录失效",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "403": {
+            "description": "权限不足",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "404": {
+            "description": "内容不可用",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "409": {
+            "description": "状态冲突或重复操作",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "410": {
+            "description": "上传过期",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "413": {
+            "description": "请求或文件过大",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "415": {
+            "description": "请求或文件类型不支持",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "500": {
+            "description": "服务错误",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          },
+          "503": {
+            "description": "服务尚未配置",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "$ref": "#/components/schemas/Error"
+                }
+              }
+            }
+          }
+        }
+      },
+      "post": {
+        "summary": "按已有学号加入当前学期教学班；同班重复请求不重复写入，已属其他教师班返回409",
+        "operationId": "post__api_courses_id_terms_termId_teachers_teacherId_students",
+        "security": [
+          {
+            "sessionCookie": []
+          }
+        ],
+        "parameters": [
+          {
+            "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40,
+              "not": {
+                "enum": [
+                  ".",
+                  ".."
+                ]
+              },
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+              "description": "课程号，保持原值，URL 路径需编码"
+            }
+          },
+          {
+            "name": "termId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[a-zA-Z0-9_-]+$"
+            }
+          },
+          {
+            "name": "teacherId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[a-zA-Z0-9_-]+$"
+            }
+          },
+          {
+            "name": "Origin",
+            "in": "header",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "format": "uri"
+            }
+          }
+        ],
+        "requestBody": {
+          "required": true,
+          "content": {
+            "application/json": {
+              "schema": {
+                "type": "object",
+                "properties": {
+                  "schoolNumber": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 80
+                  }
+                },
+                "required": [
+                  "schoolNumber"
+                ],
+                "additionalProperties": false
+              }
+            }
+          }
+        },
+        "responses": {
+          "200": {
+            "description": "成功",
+            "content": {
+              "application/json": {
+                "schema": {
+                  "type": "object",
+                  "properties": {
+                    "data": {
+                      "type": "object",
+                      "properties": {
+                        "studentId": {
+                          "type": "string",
+                          "minLength": 1,
+                          "maxLength": 100,
+                          "pattern": "^[a-zA-Z0-9_-]+$"
+                        }
+                      },
+                      "required": [
+                        "studentId"
+                      ],
+                      "additionalProperties": false
                     }
                   },
                   "required": [
@@ -3975,8 +6112,15 @@
             "schema": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 100,
-              "pattern": "^[a-zA-Z0-9_-]+$"
+              "maxLength": 40,
+              "not": {
+                "enum": [
+                  ".",
+                  ".."
+                ]
+              },
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+              "description": "课程号，保持原值，URL 路径需编码"
             }
           }
         ],
@@ -4017,12 +6161,16 @@
                         "permissions": {
                           "type": "object",
                           "properties": {
-                            "canManage": {
+                            "canManageContent": {
+                              "type": "boolean"
+                            },
+                            "canManageCourse": {
                               "type": "boolean"
                             }
                           },
                           "required": [
-                            "canManage"
+                            "canManageContent",
+                            "canManageCourse"
                           ],
                           "additionalProperties": false
                         },
@@ -4197,8 +6345,15 @@
             "schema": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 100,
-              "pattern": "^[a-zA-Z0-9_-]+$"
+              "maxLength": 40,
+              "not": {
+                "enum": [
+                  ".",
+                  ".."
+                ]
+              },
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+              "description": "课程号，保持原值，URL 路径需编码"
             }
           },
           {
@@ -4427,8 +6582,15 @@
             "schema": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 100,
-              "pattern": "^[a-zA-Z0-9_-]+$"
+              "maxLength": 40,
+              "not": {
+                "enum": [
+                  ".",
+                  ".."
+                ]
+              },
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+              "description": "课程号，保持原值，URL 路径需编码"
             }
           },
           {
@@ -4626,8 +6788,15 @@
             "schema": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 100,
-              "pattern": "^[a-zA-Z0-9_-]+$"
+              "maxLength": 40,
+              "not": {
+                "enum": [
+                  ".",
+                  ".."
+                ]
+              },
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+              "description": "课程号，保持原值，URL 路径需编码"
             }
           },
           {
@@ -6685,10 +8854,10 @@
         }
       }
     },
-    "/api/courses/{id}/bonus-adjustments": {
+    "/api/courses/{id}/terms/{termId}/teachers/{teacherId}/bonus-adjustments": {
       "post": {
-        "summary": "当前课程教师或管理员为指定课程、学期、学生手动加减整数分",
-        "operationId": "post__api_courses_id_bonus_adjustments",
+        "summary": "本人当期教学班教师或管理员为本班学生手动加减整数分",
+        "operationId": "post__api_courses_id_terms_termId_teachers_teacherId_bonus_adjustments",
         "security": [
           {
             "sessionCookie": []
@@ -6697,6 +8866,35 @@
         "parameters": [
           {
             "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40,
+              "not": {
+                "enum": [
+                  ".",
+                  ".."
+                ]
+              },
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+              "description": "课程号，保持原值，URL 路径需编码"
+            }
+          },
+          {
+            "name": "termId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[a-zA-Z0-9_-]+$"
+            }
+          },
+          {
+            "name": "teacherId",
             "in": "path",
             "required": true,
             "schema": {
@@ -6740,12 +8938,6 @@
                     "maxLength": 100,
                     "pattern": "^[a-zA-Z0-9_-]+$"
                   },
-                  "termId": {
-                    "type": "string",
-                    "minLength": 1,
-                    "maxLength": 100,
-                    "pattern": "^[a-zA-Z0-9_-]+$"
-                  },
                   "deltaPoints": {
                     "type": "integer",
                     "minimum": -9007199254740991,
@@ -6770,7 +8962,6 @@
                 },
                 "required": [
                   "studentId",
-                  "termId",
                   "deltaPoints"
                 ],
                 "additionalProperties": false
@@ -6901,10 +9092,10 @@
         }
       }
     },
-    "/api/courses/{id}/bonus-ledger": {
+    "/api/courses/{id}/terms/{termId}/teachers/{teacherId}/bonus-ledger": {
       "get": {
-        "summary": "教师查询本课程加分流水",
-        "operationId": "get__api_courses_id_bonus_ledger",
+        "summary": "本人当期教学班教师或管理员查询本班流水",
+        "operationId": "get__api_courses_id_terms_termId_teachers_teacherId_bonus_ledger",
         "security": [
           {
             "sessionCookie": []
@@ -6913,6 +9104,35 @@
         "parameters": [
           {
             "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40,
+              "not": {
+                "enum": [
+                  ".",
+                  ".."
+                ]
+              },
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+              "description": "课程号，保持原值，URL 路径需编码"
+            }
+          },
+          {
+            "name": "termId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[a-zA-Z0-9_-]+$"
+            }
+          },
+          {
+            "name": "teacherId",
             "in": "path",
             "required": true,
             "schema": {
@@ -6943,17 +9163,6 @@
               "maximum": 50,
               "default": 20
             }
-          },
-          {
-            "name": "termId",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 100,
-              "pattern": "^[a-zA-Z0-9_-]+$"
-            }
           }
         ],
         "responses": {
@@ -6979,8 +9188,15 @@
                               "courseId": {
                                 "type": "string",
                                 "minLength": 1,
-                                "maxLength": 100,
-                                "pattern": "^[a-zA-Z0-9_-]+$"
+                                "maxLength": 40,
+                                "not": {
+                                  "enum": [
+                                    ".",
+                                    ".."
+                                  ]
+                                },
+                                "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                                "description": "课程号，保持原值，URL 路径需编码"
                               },
                               "studentId": {
                                 "type": "string",
@@ -6988,7 +9204,20 @@
                                 "maxLength": 100,
                                 "pattern": "^[a-zA-Z0-9_-]+$"
                               },
+                              "studentNickname": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "maxLength": 80
+                              },
                               "termId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 100,
+                                "pattern": "^[a-zA-Z0-9_-]+$"
+                              },
+                              "teacherId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 100,
@@ -7058,7 +9287,9 @@
                               "id",
                               "courseId",
                               "studentId",
+                              "studentNickname",
                               "termId",
+                              "teacherId",
                               "deltaPoints",
                               "sourceKind",
                               "sourceId",
@@ -7203,10 +9434,10 @@
         }
       }
     },
-    "/api/courses/{id}/bonus-summary": {
+    "/api/courses/{id}/terms/{termId}/teachers/{teacherId}/bonus-summary": {
       "get": {
-        "summary": "教师查询学生按学期的净加分",
-        "operationId": "get__api_courses_id_bonus_summary",
+        "summary": "本人当期教学班教师或管理员查询本班学生净加分",
+        "operationId": "get__api_courses_id_terms_termId_teachers_teacherId_bonus_summary",
         "security": [
           {
             "sessionCookie": []
@@ -7215,6 +9446,35 @@
         "parameters": [
           {
             "name": "id",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 40,
+              "not": {
+                "enum": [
+                  ".",
+                  ".."
+                ]
+              },
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+              "description": "课程号，保持原值，URL 路径需编码"
+            }
+          },
+          {
+            "name": "termId",
+            "in": "path",
+            "required": true,
+            "schema": {
+              "type": "string",
+              "minLength": 1,
+              "maxLength": 100,
+              "pattern": "^[a-zA-Z0-9_-]+$"
+            }
+          },
+          {
+            "name": "teacherId",
             "in": "path",
             "required": true,
             "schema": {
@@ -7244,17 +9504,6 @@
               "minimum": 1,
               "maximum": 50,
               "default": 20
-            }
-          },
-          {
-            "name": "termId",
-            "in": "query",
-            "required": false,
-            "schema": {
-              "type": "string",
-              "minLength": 1,
-              "maxLength": 100,
-              "pattern": "^[a-zA-Z0-9_-]+$"
             }
           }
         ],
@@ -7293,6 +9542,12 @@
                                 "maxLength": 100,
                                 "pattern": "^[a-zA-Z0-9_-]+$"
                               },
+                              "teacherId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 100,
+                                "pattern": "^[a-zA-Z0-9_-]+$"
+                              },
                               "totalPoints": {
                                 "type": "integer"
                               }
@@ -7301,6 +9556,7 @@
                               "studentId",
                               "nickname",
                               "termId",
+                              "teacherId",
                               "totalPoints"
                             ],
                             "additionalProperties": false
@@ -7489,8 +9745,15 @@
             "schema": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 100,
-              "pattern": "^[a-zA-Z0-9_-]+$"
+              "maxLength": 40,
+              "not": {
+                "enum": [
+                  ".",
+                  ".."
+                ]
+              },
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+              "description": "课程号，保持原值，URL 路径需编码"
             }
           }
         ],
@@ -7517,8 +9780,15 @@
                               "courseId": {
                                 "type": "string",
                                 "minLength": 1,
-                                "maxLength": 100,
-                                "pattern": "^[a-zA-Z0-9_-]+$"
+                                "maxLength": 40,
+                                "not": {
+                                  "enum": [
+                                    ".",
+                                    ".."
+                                  ]
+                                },
+                                "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                                "description": "课程号，保持原值，URL 路径需编码"
                               },
                               "studentId": {
                                 "type": "string",
@@ -7526,7 +9796,20 @@
                                 "maxLength": 100,
                                 "pattern": "^[a-zA-Z0-9_-]+$"
                               },
+                              "studentNickname": {
+                                "type": [
+                                  "string",
+                                  "null"
+                                ],
+                                "maxLength": 80
+                              },
                               "termId": {
+                                "type": "string",
+                                "minLength": 1,
+                                "maxLength": 100,
+                                "pattern": "^[a-zA-Z0-9_-]+$"
+                              },
+                              "teacherId": {
                                 "type": "string",
                                 "minLength": 1,
                                 "maxLength": 100,
@@ -7596,7 +9879,9 @@
                               "id",
                               "courseId",
                               "studentId",
+                              "studentNickname",
                               "termId",
+                              "teacherId",
                               "deltaPoints",
                               "sourceKind",
                               "sourceId",
@@ -7794,8 +10079,15 @@
             "schema": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 100,
-              "pattern": "^[a-zA-Z0-9_-]+$"
+              "maxLength": 40,
+              "not": {
+                "enum": [
+                  ".",
+                  ".."
+                ]
+              },
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+              "description": "课程号，保持原值，URL 路径需编码"
             }
           }
         ],
@@ -8159,8 +10451,15 @@
             "schema": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 100,
-              "pattern": "^[a-zA-Z0-9_-]+$"
+              "maxLength": 40,
+              "not": {
+                "enum": [
+                  ".",
+                  ".."
+                ]
+              },
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+              "description": "课程号，保持原值，URL 路径需编码"
             }
           },
           {
@@ -8257,8 +10556,15 @@
                               "courseId": {
                                 "type": "string",
                                 "minLength": 1,
-                                "maxLength": 100,
-                                "pattern": "^[a-zA-Z0-9_-]+$"
+                                "maxLength": 40,
+                                "not": {
+                                  "enum": [
+                                    ".",
+                                    ".."
+                                  ]
+                                },
+                                "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                                "description": "课程号，保持原值，URL 路径需编码"
                               }
                             },
                             "required": [
@@ -8657,8 +10963,15 @@
                         "courseId": {
                           "type": "string",
                           "minLength": 1,
-                          "maxLength": 100,
-                          "pattern": "^[a-zA-Z0-9_-]+$"
+                          "maxLength": 40,
+                          "not": {
+                            "enum": [
+                              ".",
+                              ".."
+                            ]
+                          },
+                          "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                          "description": "课程号，保持原值，URL 路径需编码"
                         },
                         "authorId": {
                           "type": "string",
@@ -9096,8 +11409,15 @@
             "schema": {
               "type": "string",
               "minLength": 1,
-              "maxLength": 100,
-              "pattern": "^[a-zA-Z0-9_-]+$"
+              "maxLength": 40,
+              "not": {
+                "enum": [
+                  ".",
+                  ".."
+                ]
+              },
+              "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+              "description": "课程号，保持原值，URL 路径需编码"
             }
           }
         ],
@@ -9350,8 +11670,7 @@
                               "id": {
                                 "type": "string",
                                 "minLength": 1,
-                                "maxLength": 100,
-                                "pattern": "^[a-zA-Z0-9_-]+$"
+                                "maxLength": 100
                               },
                               "kind": {
                                 "type": "string",
@@ -9365,8 +11684,15 @@
                               "courseId": {
                                 "type": "string",
                                 "minLength": 1,
-                                "maxLength": 100,
-                                "pattern": "^[a-zA-Z0-9_-]+$"
+                                "maxLength": 40,
+                                "not": {
+                                  "enum": [
+                                    ".",
+                                    ".."
+                                  ]
+                                },
+                                "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                                "description": "课程号，保持原值，URL 路径需编码"
                               },
                               "title": {
                                 "type": [
@@ -10699,6 +13025,19 @@
         ],
         "additionalProperties": false
       },
+      "CourseId": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 40,
+        "not": {
+          "enum": [
+            ".",
+            ".."
+          ]
+        },
+        "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+        "description": "课程号，保持原值，URL 路径需编码"
+      },
       "BonusPolicy": {
         "type": "object",
         "properties": {
@@ -10755,8 +13094,15 @@
           "courseId": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 100,
-            "pattern": "^[a-zA-Z0-9_-]+$"
+            "maxLength": 40,
+            "not": {
+              "enum": [
+                ".",
+                ".."
+              ]
+            },
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+            "description": "课程号，保持原值，URL 路径需编码"
           },
           "studentId": {
             "type": "string",
@@ -10764,7 +13110,20 @@
             "maxLength": 100,
             "pattern": "^[a-zA-Z0-9_-]+$"
           },
+          "studentNickname": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 80
+          },
           "termId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "pattern": "^[a-zA-Z0-9_-]+$"
+          },
+          "teacherId": {
             "type": "string",
             "minLength": 1,
             "maxLength": 100,
@@ -10834,7 +13193,9 @@
           "id",
           "courseId",
           "studentId",
+          "studentNickname",
           "termId",
+          "teacherId",
           "deltaPoints",
           "sourceKind",
           "sourceId",
@@ -10845,7 +13206,7 @@
         ],
         "additionalProperties": false
       },
-      "Course": {
+      "Term": {
         "type": "object",
         "properties": {
           "id": {
@@ -10859,18 +13220,216 @@
             "minLength": 1,
             "maxLength": 120
           },
-          "code": {
+          "current": {
+            "type": "boolean"
+          }
+        },
+        "required": [
+          "id",
+          "name",
+          "current"
+        ],
+        "additionalProperties": false
+      },
+      "TeachingClass": {
+        "type": "object",
+        "properties": {
+          "courseId": {
             "type": "string",
-            "maxLength": 40
+            "minLength": 1,
+            "maxLength": 40,
+            "not": {
+              "enum": [
+                ".",
+                ".."
+              ]
+            },
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+            "description": "课程号，保持原值，URL 路径需编码"
+          },
+          "termId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "pattern": "^[a-zA-Z0-9_-]+$"
+          },
+          "teacherId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "pattern": "^[a-zA-Z0-9_-]+$"
+          },
+          "course": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 40,
+                "not": {
+                  "enum": [
+                    ".",
+                    ".."
+                  ]
+                },
+                "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+                "description": "课程号，保持原值，URL 路径需编码"
+              },
+              "name": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 120
+              }
+            },
+            "required": [
+              "id",
+              "name"
+            ],
+            "additionalProperties": false
+          },
+          "term": {
+            "$ref": "#/components/schemas/Term"
+          },
+          "teacher": {
+            "type": "object",
+            "properties": {
+              "id": {
+                "type": "string",
+                "minLength": 1,
+                "maxLength": 100,
+                "pattern": "^[a-zA-Z0-9_-]+$"
+              },
+              "nickname": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "maxLength": 80
+              },
+              "isDeleted": {
+                "type": "boolean"
+              }
+            },
+            "required": [
+              "id",
+              "nickname",
+              "isDeleted"
+            ],
+            "additionalProperties": false
+          },
+          "studentCount": {
+            "type": "integer",
+            "minimum": 0
+          },
+          "bonusPolicy": {
+            "$ref": "#/components/schemas/BonusPolicy"
+          }
+        },
+        "required": [
+          "courseId",
+          "termId",
+          "teacherId",
+          "course",
+          "term",
+          "teacher",
+          "studentCount",
+          "bonusPolicy"
+        ],
+        "additionalProperties": false
+      },
+      "ClassStudent": {
+        "type": "object",
+        "properties": {
+          "studentId": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 100,
+            "pattern": "^[a-zA-Z0-9_-]+$"
+          },
+          "nickname": {
+            "type": [
+              "string",
+              "null"
+            ],
+            "maxLength": 80
+          },
+          "status": {
+            "type": "string",
+            "enum": [
+              "active",
+              "disabled",
+              "deleted"
+            ]
+          },
+          "schoolNumber": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "name": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "department": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "major": {
+            "type": [
+              "string",
+              "null"
+            ]
+          },
+          "grade": {
+            "type": [
+              "string",
+              "null"
+            ]
+          }
+        },
+        "required": [
+          "studentId",
+          "nickname",
+          "status",
+          "schoolNumber",
+          "name",
+          "department",
+          "major",
+          "grade"
+        ],
+        "additionalProperties": false
+      },
+      "Course": {
+        "type": "object",
+        "properties": {
+          "id": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 40,
+            "not": {
+              "enum": [
+                ".",
+                ".."
+              ]
+            },
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+            "description": "课程号，保持原值，URL 路径需编码"
+          },
+          "name": {
+            "type": "string",
+            "minLength": 1,
+            "maxLength": 120
           },
           "introduction": {
             "type": "string",
             "maxLength": 5000
           },
-          "bonusPolicy": {
-            "$ref": "#/components/schemas/BonusPolicy"
-          },
-          "currentTeacher": {
+          "currentTerm": {
             "anyOf": [
               {
                 "type": "object",
@@ -10881,44 +13440,72 @@
                     "maxLength": 100,
                     "pattern": "^[a-zA-Z0-9_-]+$"
                   },
-                  "nickname": {
-                    "type": [
-                      "string",
-                      "null"
-                    ],
-                    "maxLength": 80
-                  },
-                  "isDeleted": {
-                    "type": "boolean"
+                  "name": {
+                    "type": "string",
+                    "minLength": 1,
+                    "maxLength": 120
                   }
                 },
                 "required": [
                   "id",
-                  "nickname",
-                  "isDeleted"
+                  "name"
                 ],
                 "additionalProperties": false
               },
               {
                 "type": "null"
               }
-            ],
-            "description": "当前学期任课教师；未设置当前学期或本学期未开课时为 null"
+            ]
+          },
+          "offeredInCurrentTerm": {
+            "type": "boolean"
+          },
+          "currentTeachers": {
+            "type": "array",
+            "items": {
+              "type": "object",
+              "properties": {
+                "id": {
+                  "type": "string",
+                  "minLength": 1,
+                  "maxLength": 100,
+                  "pattern": "^[a-zA-Z0-9_-]+$"
+                },
+                "nickname": {
+                  "type": [
+                    "string",
+                    "null"
+                  ],
+                  "maxLength": 80
+                },
+                "isDeleted": {
+                  "type": "boolean"
+                }
+              },
+              "required": [
+                "id",
+                "nickname",
+                "isDeleted"
+              ],
+              "additionalProperties": false
+            }
           },
           "createdAt": {
-            "type": "integer"
+            "type": "integer",
+            "description": "Unix 秒"
           },
           "updatedAt": {
-            "type": "integer"
+            "type": "integer",
+            "description": "Unix 秒"
           }
         },
         "required": [
           "id",
           "name",
-          "code",
           "introduction",
-          "bonusPolicy",
-          "currentTeacher",
+          "currentTerm",
+          "offeredInCurrentTerm",
+          "currentTeachers",
           "createdAt",
           "updatedAt"
         ],
@@ -11017,8 +13604,15 @@
           "courseId": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 100,
-            "pattern": "^[a-zA-Z0-9_-]+$"
+            "maxLength": 40,
+            "not": {
+              "enum": [
+                ".",
+                ".."
+              ]
+            },
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+            "description": "课程号，保持原值，URL 路径需编码"
           },
           "author": {
             "type": "object",
@@ -11208,8 +13802,15 @@
           "courseId": {
             "type": "string",
             "minLength": 1,
-            "maxLength": 100,
-            "pattern": "^[a-zA-Z0-9_-]+$"
+            "maxLength": 40,
+            "not": {
+              "enum": [
+                ".",
+                ".."
+              ]
+            },
+            "pattern": "^[^\\u0000-\\u001f\\u007f]+$",
+            "description": "课程号，保持原值，URL 路径需编码"
           },
           "targetKind": {
             "type": "string",

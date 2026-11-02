@@ -17,7 +17,10 @@
     import Pagination from "$lib/components/ui/Pagination.svelte";
     import StateBlock from "$lib/components/ui/StateBlock.svelte";
     import ManageNav from "./ManageNav.svelte";
-    import BonusPolicyDialog from "./BonusPolicyDialog.svelte";
+    import JoinCourseDialog from "./JoinCourseDialog.svelte";
+    import CourseTermsDialog from "./CourseTermsDialog.svelte";
+    import TermSettingsDialog from "./TermSettingsDialog.svelte";
+    import CourseClassesDialog from "./CourseClassesDialog.svelte";
     import CourseFormDialog from "./CourseFormDialog.svelte";
     import type { Course } from "./course";
 
@@ -60,15 +63,18 @@
     });
 
     let formOpen = $state(false);
-    let policyOpen = $state(false);
+    let classesOpen = $state(false);
+    let termsOpen = $state(false);
+    let termSettingsOpen = $state(false);
+    let joinOpen = $state(false);
     let selected = $state.raw<Course | null>(null);
 
     $effect(() => {
         const requested = createRequested;
         if (!canManage) return;
         untrack(() => {
-            if (requested) { selected = null; formOpen = true; }
-            else if (!selected) formOpen = false;
+            if (requested) { selected = null; if (isAdmin) formOpen = true; else joinOpen = true; }
+            else if (!selected) { formOpen = false; joinOpen = false; }
         });
     });
 
@@ -89,18 +95,19 @@
         else void updateQuery({ q: next || null, page: null });
     }
 
-    function teacherLabel(teacher: Course["currentTeacher"]) {
-        if (!teacher) return "本学期未开课";
-        return teacher.isDeleted ? "已删除" : teacher.nickname ?? "未设置昵称";
+    function teacherLabel(course: Course) {
+        if (!course.offeredInCurrentTerm) return "本学期未开课";
+        return course.currentTeachers.map(teacher => teacher.isDeleted ? "已删除" : teacher.nickname ?? "未设置昵称").join("、") || "尚无教师加入";
     }
 </script>
 
-<PageLayout title="课程管理" subtitle={isAdmin ? "新建课程，维护全站课程信息和加分规则。" : "新建课程，管理本学期由你任教的课程。"}>
+<PageLayout title="课程管理" subtitle={isAdmin ? "维护课程信息、开课安排与各教师的教学班。" : "加入本学期已开设的课程，管理自己的教学班。"}>
     {#snippet actions()}
+        {#if isAdmin}<Button onclick={() => { termSettingsOpen = true; }}>学期设置</Button>{/if}
         {#if canManage}
             <Button variant="primary" onclick={() => { void updateQuery({ new: "1" }); }}>
                 {#snippet icon()}<Plus size="1em" />{/snippet}
-                新建课程
+                {isAdmin ? "新建课程" : "加入课程"}
             </Button>
         {/if}
     {/snippet}
@@ -131,13 +138,16 @@
                                 {#each courses.data.items as course (course.id)}
                                     {@const updated = formatRelativeTime(course.updatedAt)}
                                     <tr>
-                                        <td>{course.code}</td>
-                                        <td><Link href={`/courses/${encodeURIComponent(course.code)}`}>{course.name}</Link></td>
-                                        <td class:muted={!course.currentTeacher}>{teacherLabel(course.currentTeacher)}</td>
+                                        <td>{course.id}</td>
+                                        <td><Link href={`/courses/${encodeURIComponent(course.id)}`}>{course.name}</Link></td>
+                                        <td class:muted={!course.currentTeachers.length}>{teacherLabel(course)}</td>
                                         <td><time datetime={updated.datetime} title={updated.title}>{updated.label}</time></td>
                                         <td><div class="row-actions">
-                                            <Button size="sm" onclick={() => { selected = course; formOpen = true; }} aria-label={`编辑 ${course.code}`}>编辑</Button>
-                                            <Button size="sm" onclick={() => { selected = course; policyOpen = true; }} aria-label={`设置 ${course.code} 的加分规则`}>加分规则</Button>
+                                            {#if isAdmin}
+                                                <Button size="sm" onclick={() => { selected = course; formOpen = true; }}>编辑</Button>
+                                                <Button size="sm" onclick={() => { selected = course; termsOpen = true; }}>开设学期</Button>
+                                            {/if}
+                                            <Button size="sm" onclick={() => { selected = course; classesOpen = true; }}>教学班</Button>
                                         </div></td>
                                     </tr>
                                 {/each}
@@ -153,10 +163,14 @@
     {/if}
 </PageLayout>
 
-{#if canManage}
+{#if isAdmin}
     <CourseFormDialog bind:open={formOpen} course={selected} onsaved={saved} onfailed={courses.reload} onclose={closeCreate} />
-    <BonusPolicyDialog bind:open={policyOpen} course={selected} onsaved={courses.reload} onfailed={courses.reload} />
+    <CourseTermsDialog bind:open={termsOpen} course={selected} onsaved={courses.reload} />
+    <TermSettingsDialog bind:open={termSettingsOpen} onsaved={courses.reload} />
+{:else if canManage}
+    <JoinCourseDialog bind:open={joinOpen} onsaved={saved} onclose={closeCreate} />
 {/if}
+{#if canManage}<CourseClassesDialog bind:open={classesOpen} course={selected} />{/if}
 
 <style>
     .search { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-4); }

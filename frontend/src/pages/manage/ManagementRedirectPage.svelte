@@ -9,9 +9,7 @@
 
     onMount(() => {
         const query = new URLSearchParams(router.query);
-        const creating = router.pathname === "/courses/new";
-        const target = creating || router.pathname === "/admin/courses" ? "/manage/courses" : "/manage/accounts";
-        if (creating) query.set("new", "1");
+        const target = router.pathname === "/admin/courses" ? "/manage/courses" : "/manage/accounts";
         redirect(`${target}${query.size ? `?${query}` : ""}${window.location.hash}`);
     });
 </script>

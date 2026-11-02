@@ -16,7 +16,7 @@
         if (id) {
             const question = await api.get<Content>(`/api/questions/${encode(id)}`, { signal });
             const entry = await courseEntry(question.courseId, signal);
-            return { entry, question, viewer, allowed: question.author.id === viewer || entry.permissions.canManage };
+            return { entry, question, viewer, allowed: question.author.id === viewer || entry.permissions.canManageContent };
         }
         return { entry: await courseByCode(code!, signal), question: undefined, viewer, allowed: Boolean(viewer) };
     });

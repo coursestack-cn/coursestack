@@ -25,7 +25,6 @@ export const routes: readonly Route[] = [
     { path: "/notifications", title: "通知", requiresAuth: true, load: () => import("../../pages/me/NotificationsPage.svelte") },
     { path: "/settings/password", title: "修改密码", requiresAuth: true, load: () => import("../../pages/account/PasswordPage.svelte") },
     { path: "/settings", title: "个人设置", requiresAuth: true, load: () => import("../../pages/account/SettingsPage.svelte") },
-    { path: "/courses/new", title: "新建课程", requiresAuth: true, load: () => import("../../pages/manage/ManagementRedirectPage.svelte") },
     { path: "/manage/courses", title: "管理课程", requiresAuth: true, load: () => import("../../pages/manage/ManageCoursesPage.svelte") },
     { path: "/manage/accounts", title: "账号管理", requiresAuth: true, load: () => import("../../pages/manage/ManageAccountsPage.svelte") },
     { path: "/courses/:courseCode/manage", title: "课程管理", layout: "course", requiresAuth: true, load: () => import("../../pages/manage/CourseManagePage.svelte") },

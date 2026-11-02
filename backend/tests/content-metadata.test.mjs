@@ -196,8 +196,8 @@ test('votes, acceptance, points, visibility, versions and deletion preserve edit
         assert.equal((await h.accept(q, answer)).status, 200); await unchanged();
     }
     for (const deltaPoints of [25, -10]) {
-        assert.equal((await h.api('POST', '/courses/course-a/bonus-adjustments', 'teacher-a',
-            { studentId: 'student-b', termId: 'term-active', deltaPoints })).status, 201);
+        assert.equal((await h.api('POST', '/courses/course-a/terms/term-active/teachers/teacher-a/bonus-adjustments', 'teacher-a',
+            { studentId: 'student-b', deltaPoints })).status, 201);
         await unchanged();
     }
     await h.database.prepare("INSERT INTO file_versions(material_id,version,storage_key,size,mime,uploaded_by,updated_by) VALUES ('material-a',4,'fixture-v4',8,'application/pdf','student-a','student-a')").run();

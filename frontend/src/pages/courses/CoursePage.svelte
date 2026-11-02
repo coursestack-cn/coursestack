@@ -20,11 +20,11 @@
         <dl class="course-info">
             <div>
                 <dt>课程编号</dt>
-                <dd class="course-code">{course.code}</dd>
+                <dd class="course-code">{course.id}</dd>
             </div>
             <div>
                 <dt>本学期教师</dt>
-                <dd class:muted={!course.currentTeacher}>{course.currentTeacher ? displayName(course.currentTeacher) : "本学期未开课"}</dd>
+                <dd class:muted={!course.currentTeachers.length}>{course.currentTeachers.length ? course.currentTeachers.map(teacher => displayName(teacher)).join("、") : course.offeredInCurrentTerm ? "本学期已开设，暂无教师" : "本学期未开课"}</dd>
             </div>
         </dl>
         <section class="introduction" aria-labelledby="course-introduction">

@@ -14,14 +14,15 @@ INSERT INTO accounts (id, nickname, role, school_number, name) VALUES
 ('admin', '管理员', 'admin', NULL, NULL), ('teacher', '公开教师', 'teacher', 'T01', '虚构教师'),
 ('student', '公开同学', 'student', '001', '虚构甲'), ('other', '其他同学', 'student', '002', '虚构乙'), ('free', '未修读同学', 'student', '003', '虚构丙');
 INSERT INTO terms(id,name,current) VALUES ('current','当前学期',0),('past','历史学期',1);
-INSERT INTO enrollments(course_id,term_id,account_id) VALUES ('course','past','teacher');
+INSERT INTO courses(id,name,created_by,request_key,request_hash) VALUES
+('course','当前课程','admin','fixture-course','fixture'),('other-course','其他课程','admin','fixture-other','fixture');
+INSERT INTO course_terms VALUES ('course','past'),('course','current'),('other-course','current');
+INSERT INTO teaching_classes VALUES ('course','past','teacher');
+INSERT INTO class_students VALUES ('course','past','other','teacher');
 UPDATE terms SET current=0;
 UPDATE terms SET current=1 WHERE id='current';
-INSERT INTO enrollments(course_id,term_id,account_id) VALUES ('course','current','teacher'),('other-course','current','teacher');
-INSERT INTO courses (id, name, code, created_by, updated_by, request_key, request_hash) VALUES
-('course', '当前课程', 'COURSE', 'teacher', 'teacher', 'fixture-course', 'fixture'),
-('other-course', '其他课程', 'OTHER', 'teacher', 'teacher', 'fixture-other', 'fixture');
-INSERT INTO enrollments (course_id, term_id, account_id) VALUES ('course', 'current', 'student'), ('course', 'past', 'other');
+INSERT INTO teaching_classes VALUES ('course','current','teacher'),('other-course','current','teacher');
+INSERT INTO class_students VALUES ('course','current','student','teacher');
 `;
 
 before(async () => {
@@ -42,11 +43,13 @@ after(async () => { await runtime?.dispose(); });
 beforeEach(async () => {
     await binding.batch(`
 PRAGMA defer_foreign_keys=ON;
+DELETE FROM class_students;
+DELETE FROM class_bonus_rules;
+DELETE FROM teaching_classes;
+DELETE FROM course_terms;
 DELETE FROM courses;
 DELETE FROM sessions;
 DELETE FROM login_attempts;
-DELETE FROM enrollments WHERE account_id IN (SELECT id FROM accounts WHERE role='student');
-DELETE FROM enrollments;
 DELETE FROM accounts;
 DELETE FROM terms;
 `.split(';').filter(s => s.trim()).map(s => binding.prepare(s)));
@@ -130,7 +133,7 @@ test('student names are optional when creating and editing accounts', async () =
 
 test('role changes mark the old identity deleted, preserve relationships and return a new ID', async () => {
     const admin = await cookie('admin'), oldSession = await cookie('teacher');
-    const enrollmentBefore = (await binding.prepare('SELECT * FROM enrollments').all()).results;
+    const enrollmentBefore = (await binding.prepare('SELECT * FROM class_students').all()).results;
     for (const [id, role] of [['teacher', 'student'], ['student', 'teacher'], ['other', 'teacher']]) {
         const response = await patch(id, { role }, admin);
         assert.equal(response.status, 200, await response.clone().text());
@@ -141,9 +144,9 @@ test('role changes mark the old identity deleted, preserve relationships and ret
         assert.equal((await call('/api/admin/accounts/' + id, { cookie: admin })).status, 404);
         const login = await data(await memberLogin(result.schoolNumber, password));
         assert.equal(login.id, result.id); assert.equal(login.role, role);
-        assert.equal(await binding.prepare('SELECT count(*) AS n FROM enrollments WHERE account_id = ?').bind(result.id).first('n'), 0);
+        assert.equal(await binding.prepare('SELECT count(*) AS n FROM class_students WHERE student_id = ?').bind(result.id).first('n'), 0);
     }
-    assert.deepEqual((await binding.prepare('SELECT * FROM enrollments').all()).results, enrollmentBefore);
+    assert.deepEqual((await binding.prepare('SELECT * FROM class_students').all()).results, enrollmentBefore);
     assert.equal((await call('/api/auth/me', { cookie: oldSession })).status, 401);
     assert.equal((await patch('free', { role: 'admin' }, admin)).status, 400);
 });

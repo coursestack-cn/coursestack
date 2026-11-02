@@ -26,22 +26,22 @@ test('Cookie 写入要求同源 Origin；跨站请求被拒绝', async () => {
     assert.equal((await h.api('POST', '/courses/course-a/questions', undefined, payload, { headers: { ...cookie, Origin: 'http://localhost' } })).status, 201);
     assert.equal((await h.api('POST', '/courses/course-a/questions', 'student-a', payload, { headers: { Origin: 'http://127.0.0.1:9999' } })).status, 403);
 });
-test('教师创建课程建立当期授课关系；学生不能创建课程', async () => {
-    const payload = { name: '算法设计', code: 'CS201', introduction: '算法课程' };
-    assert.equal((await h.api('POST', '/courses', 'student-a', payload)).status, 403);
-    const created = await h.api('POST', '/courses', 'teacher-a', payload, { key: 'create-course-01' });
+test('管理员建课与安排开设，教师加入后共同管理内容，课程元数据仍由管理员维护', async () => {
+    const payload = { name: '算法设计', id: 'CS201', introduction: '算法课程' };
+    for (const who of ['student-a', 'teacher-a']) assert.equal((await h.api('POST', '/courses', who, payload)).status, 403);
+    const created = await h.api('POST', '/courses', 'admin', payload, { key: 'create-course-01' });
     assert.equal(created.status, 201);
-    const relationship = await h.database.prepare("SELECT * FROM enrollments WHERE course_id=? AND account_id IN (SELECT id FROM accounts WHERE role='teacher')").bind(created.data.id).all();
-    assert.equal(relationship.results.length, 1);
-    assert.equal((await h.api('PATCH', `/courses/${created.data.id}`, 'teacher-a', { name: '算法基础' })).status, 200);
-    const saved = await h.api('GET', `/courses/${created.data.id}`);
+    assert.equal((await h.api('PATCH', '/courses/CS201', 'admin', { name: '算法基础' })).status, 200);
+    const saved = await h.api('GET', '/courses/CS201');
     assert.equal(saved.data.introduction, '算法课程'); assert.equal('department' in saved.data, false);
-    assert.deepEqual(saved.data.bonusPolicy, { pointsQuestion: 0, pointsAnswer: 0, pointsAcceptance: 0, pointsComment: 0, pointsMaterial: 0, pointsMaterialVersion: 0 });
-    assert.equal((await h.api('POST', '/courses', 'teacher-a', { ...payload, department: '计算机学院' })).status, 400);
-    assert.equal((await h.api('PATCH', `/courses/${created.data.id}`, 'teacher-a', { department: '计算机学院' })).status, 400);
-    assert.equal((await h.api('GET', `/courses/${created.data.id}/entry`, 'teacher-a')).data.permissions.canManage, true);
-    assert.equal((await h.api('GET', `/courses/${created.data.id}/entry`, 'student-a')).data.permissions.canManage, false);
-    const repeated = await h.api('POST', '/courses', 'teacher-a', payload, { key: 'create-course-01' });
+    assert.equal('bonusPolicy' in saved.data, false); assert.equal(saved.data.offeredInCurrentTerm, false);
+    assert.equal((await h.api('POST', '/courses', 'admin', { ...payload, department: '计算机学院' })).status, 400);
+    assert.equal((await h.api('PATCH', '/courses/CS201', 'admin', { department: '计算机学院' })).status, 400);
+    assert.equal((await h.api('PUT', '/courses/CS201/terms/term-active', 'admin')).status, 200);
+    assert.equal((await h.api('PUT', '/courses/CS201/terms/term-active/teachers/me', 'teacher-a')).status, 200);
+    assert.deepEqual((await h.api('GET', '/courses/CS201/entry', 'teacher-a')).data.permissions, { canManageContent: true, canManageCourse: false });
+    assert.equal((await h.api('GET', '/courses/CS201/entry', 'student-a')).data.permissions.canManageContent, false);
+    const repeated = await h.api('POST', '/courses', 'admin', payload, { key: 'create-course-01' });
     assert.equal(repeated.data.id, created.data.id);
 });
 test('问题发布重试幂等；同一幂等键不同正文返回冲突', async () => {
@@ -185,7 +185,7 @@ test('所有公开 DTO 不包含会话、学籍或内部幂等信息', async () 
         const text = JSON.stringify(result.data);
         for (const field of ['request_hash', 'request_key', 'token_hash', 'email', 'student_number', 'acceptance_id', 'award_cents']) assert.ok(!text.includes(field), field);
     }
-    assert.equal((await h.api('GET', '/courses/course-a/bonus-ledger', 'student-b')).status, 403);
+    assert.equal((await h.api('GET', '/courses/course-a/terms/term-active/teachers/teacher-a/bonus-ledger', 'student-b')).status, 403);
 });
 test('分页、筛选、输入长度、幂等键和 JSON 类型均经过验证', async () => {
     for (const suffix of ['?page=0', '?pageSize=51', '?page=1.5', '?page=NaN']) assert.equal((await h.api('GET', '/courses' + suffix)).status, 400);

@@ -8,6 +8,7 @@ import { accountRoutes } from './accounts/routes.ts';
 import { avatarRoutes } from './accounts/avatar.ts';
 import { authenticate } from './auth/middleware.ts';
 import { courseRoutes } from './courses/routes.ts';
+import { classRoutes } from './courses/classes.ts';
 import { discussionRoutes } from './discussions/routes.ts';
 import { acceptanceRoutes } from './discussions/acceptance.ts';
 import { bonusRoutes } from './discussions/bonus.ts';
@@ -56,6 +57,7 @@ app.get('/api/openapi.json', c => c.json(openapi));
 const api = new Hono<AppEnv>();
 api.use('*', authenticate);
 api.route('/', courseRoutes);
+api.route('/', classRoutes);
 api.route('/', discussionRoutes);
 api.route('/', acceptanceRoutes);
 api.route('/', bonusRoutes);
@@ -78,7 +80,7 @@ app.onError((error, c) => {
     if (/invalid_(content_target|acceptance|enrollment_identity)/.test(detail)) {
         return failure(409, 'INVALID_TARGET', '关联对象不可用、跨课程或状态已改变');
     }
-    if (/course_requires_teacher|enrollment_teacher_required|enrollment_teacher_unique|current_term_required|enrollment_instance_immutable/.test(detail)) return failure(409, 'COURSE_MEMBERSHIP_CONFLICT', '课程必须有且只有一位教师，且新课程实例只能建立在当前学期');
+    if (/invalid_(class_teacher|class_student|bonus_class)|course_admin_required|current_term_required|course_identity_immutable|course_term_identity_immutable|teaching_class_identity_immutable|class_student_identity_immutable/.test(detail)) return failure(409, 'COURSE_MEMBERSHIP_CONFLICT', '课程、学期或教学班关系已变化');
     if (/UNIQUE constraint failed/.test(detail)) return failure(409, 'DUPLICATE_RECORD', '数据已存在，请检查编号或刷新后重试');
     if (/FOREIGN KEY constraint failed/.test(detail)) return failure(409, 'REFERENCE_CONFLICT', '关联数据已改变');
     return failure(500, 'INTERNAL_ERROR', '服务暂时不可用');

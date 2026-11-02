@@ -13,14 +13,16 @@ PRAGMA defer_foreign_keys=ON;
 INSERT INTO accounts(id,nickname,role,school_number,name) VALUES ('student-a','学习者甲','student','student-a','虚构甲'),('student-b','学习者乙','student','student-b','虚构乙'),
 ('visitor','旁听者','student','visitor','虚构丙'),('teacher-a','数学教师','teacher','teacher-a','虚构教师甲'),('teacher-b','物理教师','teacher','teacher-b','虚构教师乙'),('admin','管理员','admin',NULL,NULL);
 INSERT INTO terms(id,name,current) VALUES ('term-active','当前学期',0),('term-old','历史学期',1);
-INSERT INTO enrollments(course_id,account_id,term_id) VALUES ('course-a','teacher-b','term-old');
+INSERT INTO courses(id,name,created_by,created_at,updated_at,request_key,request_hash) VALUES
+ ('course-a','高等数学','admin',1792540800,1792540800,'fixture-course-a','fixture'),
+ ('course-b','大学物理','admin',1792540800,1792540800,'fixture-course-b','fixture');
+INSERT INTO course_terms VALUES ('course-a','term-old'),('course-a','term-active'),('course-b','term-active');
+INSERT INTO teaching_classes VALUES ('course-a','term-old','teacher-b');
+INSERT INTO class_students VALUES ('course-a','term-old','visitor','teacher-b');
 UPDATE terms SET current=0;
 UPDATE terms SET current=1 WHERE id='term-active';
-INSERT INTO enrollments(course_id,account_id,term_id) VALUES ('course-a','teacher-a','term-active'),('course-b','teacher-b','term-active');
-INSERT INTO courses(id,name,code,created_by,updated_by,created_at,updated_at,request_key,request_hash) VALUES
- ('course-a','高等数学','MATH101','teacher-a','teacher-a',1792540800,1792540800,'fixture-course-a','fixture'),
- ('course-b','大学物理','PHYS101','teacher-b','teacher-b',1792540800,1792540800,'fixture-course-b','fixture');
-INSERT INTO enrollments(course_id,account_id,term_id) VALUES ('course-a','student-a','term-active'),('course-a','student-b','term-active'),('course-b','student-b','term-active'),('course-a','visitor','term-old');
+INSERT INTO teaching_classes VALUES ('course-a','term-active','teacher-a'),('course-b','term-active','teacher-b');
+INSERT INTO class_students VALUES ('course-a','term-active','student-a','teacher-a'),('course-a','term-active','student-b','teacher-a'),('course-b','term-active','student-b','teacher-b');
 INSERT INTO contents(id,kind,course_id,author_id,title,body,updated_by,request_key,request_hash) VALUES ('material-a','material','course-a','student-a','微积分讲义',NULL,'student-a','fixture-material-a','fixture'),('material-b','material','course-b','teacher-b','物理讲义',NULL,'teacher-b','fixture-material-b','fixture');
 INSERT INTO file_versions(material_id,version,storage_key,size,mime,uploaded_by,updated_by) VALUES
 ('material-a',1,'fixtures/material-a/1',8,'application/pdf','student-a','student-a'),('material-a',2,'fixtures/material-a/2',8,'application/pdf','student-a','student-a'),
@@ -77,7 +79,7 @@ export async function start(options = {}) {
         const accept = async (question, answer, as = 'teacher-a') => api('PUT', `/questions/${question}/acceptance`, as,
             { answerId: answer });
         async function policy(rules = { pointsAcceptance: 50 }) {
-            const response = await api('PUT', '/courses/course-a/bonus-policy', 'teacher-a', { pointsQuestion: 0, pointsAnswer: 0, pointsAcceptance: 0, pointsComment: 0, pointsMaterial: 0, pointsMaterialVersion: 0, ...rules });
+            const response = await api('PUT', '/courses/course-a/terms/term-active/teachers/teacher-a/bonus-policy', 'teacher-a', { pointsQuestion: 0, pointsAnswer: 0, pointsAcceptance: 0, pointsComment: 0, pointsMaterial: 0, pointsMaterialVersion: 0, ...rules });
             assert.equal(response.status, 200, JSON.stringify(response.data)); return response;
         }
         return { mf, database, env, worker: { fetch }, api, postQuestion, postAnswer, accept, policy, dispose: () => mf.dispose() };

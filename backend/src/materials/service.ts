@@ -4,7 +4,7 @@ import { contentDto, publicDetail, visibleContent } from '../discussions/service
 import { createDatabase } from '../db/index.ts';
 import { editPermission, management } from '../permissions.ts';
 import { HttpError, listResult, queryPage, type page } from '../http.ts';
-import { expandedId, materialId, previewKind, urlId } from './validation.ts';
+import { materialId, previewKind, urlId } from './validation.ts';
 
 export type VersionRow = {
     material_id: string; version: number; storage_key: string; size: number; mime: string; uploaded_by: string; created_at: number;
@@ -17,7 +17,7 @@ export function versionDto(row: VersionRow) {
         downloadUrl: `${base}/download` };
 }
 export async function courseIdentity(c: Ctx, id: string) {
-    const row = await createDatabase(c.env.DB).get<{ id: string }>(sql`SELECT id FROM courses WHERE id IN (${id},${expandedId(id)})`);
+    const row = await createDatabase(c.env.DB).get<{ id: string }>(sql`SELECT id FROM courses WHERE id=${id}`);
     if (!row) throw new HttpError(404, 'COURSE_NOT_FOUND', '课程不存在');
     return row.id;
 }

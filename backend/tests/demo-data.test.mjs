@@ -20,8 +20,8 @@ test('demo preparation creates 100 students and a teacher, enrolls the current t
         const result = await prepareDemoData(db);
         assert.equal(result.courseName, '数据库系统原理');
         assert.equal(result.createdAccounts, 101);
-        assert.equal(await db.prepare("SELECT count(*) AS n FROM enrollments WHERE course_id = ? AND term_id = ? AND account_id IN (SELECT id FROM accounts WHERE role='student')").bind(result.courseId, result.termId).first('n'), 100);
-        assert.equal(await db.prepare("SELECT count(*) AS n FROM enrollments WHERE course_id = ? AND term_id = ? AND account_id IN (SELECT id FROM accounts WHERE role='teacher')").bind(result.courseId, result.termId).first('n'), 1);
+        assert.equal(await db.prepare("SELECT count(*) AS n FROM class_students WHERE course_id = ? AND term_id = ?").bind(result.courseId, result.termId).first('n'), 100);
+        assert.equal(await db.prepare("SELECT count(*) AS n FROM teaching_classes WHERE course_id = ? AND term_id = ?").bind(result.courseId, result.termId).first('n'), 1);
         assert.deepEqual((await db.prepare(`SELECT role, department, major, grade, count(*) AS n FROM accounts
             WHERE school_number GLOB '[ST]0[0-9][0-9][0-9]' GROUP BY role, department, major, grade ORDER BY role`).all()).results, [
             { role: 'student', department: '计算机学院', major: '计算机科学与技术', grade: '2024 级', n: 100 },
@@ -48,10 +48,10 @@ test('demo preparation creates 100 students and a teacher, enrolls the current t
             },
         };
         await assert.rejects(prepareDemoData(switchingTerm), { code: 'DEMO_CONFLICT' });
-        assert.equal(await db.prepare('SELECT count(*) AS n FROM enrollments WHERE course_id = ?').bind(result.courseId).first('n'), 101);
+        assert.equal(await db.prepare('SELECT count(*) AS n FROM class_students WHERE course_id = ?').bind(result.courseId).first('n'), 100);
         await setCurrentTerm(db, null);
         await assert.rejects(prepareDemoData(db), { code: 'DEMO_CONFLICT' });
-        assert.equal(await db.prepare('SELECT count(*) AS n FROM enrollments WHERE course_id=?').bind(result.courseId).first('n'), 101);
+        assert.equal(await db.prepare('SELECT count(*) AS n FROM class_students WHERE course_id=?').bind(result.courseId).first('n'), 100);
     } finally { await app.dispose(); }
 });
 
@@ -64,7 +64,7 @@ test('demo preparation rejects unrelated account collisions and ambiguous course
         await app.database.prepare("UPDATE accounts SET school_number = 'student-a' WHERE id = 'student-a'").run();
         await app.database.prepare("UPDATE courses SET name = '数据库系统原理'").run();
         await assert.rejects(prepareDemoData(app.database, { dryRun: true }), { code: 'DEMO_CONFLICT' });
-        await assert.rejects(prepareDemoData(app.database, { dryRun: true, course: 'course-a' }), { code: 'DEMO_CONFLICT' });
+        assert.equal((await prepareDemoData(app.database, { dryRun: true, course: 'course-a' })).courseId, 'course-a');
         assert.equal(await app.database.prepare('SELECT count(*) AS n FROM accounts').first('n'), 6);
         await app.database.prepare("INSERT INTO terms(id,name) VALUES ('next','下一学期')").run();
         await setCurrentTerm(app.database, 'next');
@@ -129,7 +129,7 @@ test('demo reset rebuilds the database with the demo set and keeps only the admi
         assert.equal(await db.prepare('SELECT count(*) AS n FROM accounts').first('n'), 102);
         assert.equal(await db.prepare('SELECT count(*) AS n FROM sessions').first('n'), 0);
         assert.equal(await db.prepare('SELECT count(*) AS n FROM bonus_ledger').first('n'), 0);
-        assert.deepEqual((await db.prepare('SELECT name, code FROM courses').all()).results, [{ name: '数据库系统原理', code: '304208040' }]);
+        assert.deepEqual((await db.prepare('SELECT name, id FROM courses').all()).results, [{ name: '数据库系统原理', id: '304208040' }]);
         assert.equal(await db.prepare('SELECT id FROM terms WHERE current = 1').first('id'), 'demo-current');
     } finally { await app.dispose(); }
 });
