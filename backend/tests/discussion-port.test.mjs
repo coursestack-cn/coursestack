@@ -104,14 +104,12 @@ test('disabling an account allows an edit that already passed entry authenticati
     assert.deepEqual(JSON.parse(await h.database.prepare('SELECT body FROM contents WHERE id=?').bind(q).first('body')), doc('获准修改'));
 });
 
-test('term switches during course creation cannot grant an assignment or create an orphan course', async () => {
-    const check = beforeWrite(/INSERT INTO courses/, () => setCurrentTerm(h.database, 'term-old'));
-    const r = await h.api('POST', '/courses', 'teacher-a', { name: '切换学期', code: 'RACE01' });
+test('a term switch during teacher join cannot create a historical assignment', async () => {
+    const check = beforeWrite(/INSERT INTO teaching_classes/, () => setCurrentTerm(h.database, 'term-old'));
+    const r = await h.api('PUT', '/courses/course-b/terms/term-active/teachers/me', 'teacher-a');
     check(); assert.equal(r.status, 409);
-    assert.equal(await h.database.prepare("SELECT COUNT(*) AS n FROM courses WHERE code='RACE01'").first('n'), 0);
-    assert.equal(await h.database.prepare("SELECT COUNT(*) AS n FROM enrollments WHERE account_id='teacher-a'").first('n'), 1);
+    assert.equal(await h.database.prepare("SELECT COUNT(*) AS n FROM teaching_classes WHERE course_id='course-b' AND teacher_id='teacher-a'").first('n'), 0);
 });
-
 test('session expiry after admission allows acceptance and bonus ledger entries', async () => {
     await h.policy(); const q = await h.postQuestion(), a = await h.postAnswer(q);
     const check = beforeWrite(/INSERT INTO acceptances/, () => h.database.prepare("UPDATE sessions SET expires_at=1 WHERE account_id='teacher-a'").run());
@@ -119,6 +117,36 @@ test('session expiry after admission allows acceptance and bonus ledger entries'
     check(); assert.equal(r.status, 200);
     assert.equal(await h.database.prepare('SELECT COUNT(*) AS n FROM bonus_ledger').first('n'), 1);
     assert.equal(await h.database.prepare('SELECT answer_id FROM acceptances WHERE question_id=?').bind(q).first('answer_id'), a);
+});
+
+for (const operation of ['students', 'bonus-policy', 'bonus-adjustments']) {
+    test(`a term switch after class preflight blocks ${operation} in the final SQL`, async () => {
+        const url = `/courses/course-a/terms/term-active/teachers/teacher-a/${operation}`;
+        const before = (await h.database.prepare('SELECT * FROM class_bonus_rules ORDER BY course_id,term_id,teacher_id').all()).results;
+        const pattern = operation === 'students' ? /INSERT INTO class_students/ : operation === 'bonus-policy' ? /UPDATE class_bonus_rules/ : /INSERT INTO bonus_ledger/;
+        const check = beforeWrite(pattern, () => setCurrentTerm(h.database, 'term-old'));
+        const body = operation === 'students' ? { schoolNumber: 'visitor' } : operation === 'bonus-adjustments' ? { studentId: 'student-a', deltaPoints: 9 }
+            : { pointsQuestion: 9, pointsAnswer: 9, pointsAcceptance: 9, pointsComment: 9, pointsMaterial: 9, pointsMaterialVersion: 9 };
+        const response = await h.api(operation === 'bonus-policy' ? 'PUT' : 'POST', url, 'teacher-a', body);
+        check(); assert.equal(response.status, 409);
+        assert.equal(await h.database.prepare("SELECT count(*) AS n FROM class_students WHERE student_id='visitor' AND term_id='term-active'").first('n'), 0);
+        assert.equal(await h.database.prepare('SELECT count(*) AS n FROM bonus_ledger').first('n'), 0);
+        assert.deepEqual((await h.database.prepare('SELECT * FROM class_bonus_rules ORDER BY course_id,term_id,teacher_id').all()).results, before);
+    });
+}
+
+test('class detail rechecks current-term permission at the final private read', async () => {
+    const check = beforeWrite(/SELECT tc\.\*/, () => setCurrentTerm(h.database, 'term-old'));
+    const response = await h.api('GET', '/courses/course-a/terms/term-active/teachers/teacher-a', 'teacher-a');
+    check(); assert.equal(response.status, 404);
+    assert.equal(JSON.stringify(response.data).includes('bonusPolicy'), false);
+});
+
+test('an administrator deleted after admission cannot switch the term or report success', async () => {
+    const check = beforeWrite(/UPDATE terms SET current=0/, () => h.database.prepare("UPDATE accounts SET status='deleted' WHERE id='admin'").run());
+    const response = await h.api('PUT', '/terms/current', 'admin', { termId: 'term-old' });
+    check(); assert.equal(response.status, 403);
+    assert.equal(await h.database.prepare('SELECT id FROM terms WHERE current=1').first('id'), 'term-active');
 });
 
 test('deleted identities cannot finish an admitted moderation request', async () => {
@@ -129,21 +157,20 @@ test('deleted identities cannot finish an admitted moderation request', async ()
     assert.equal(await h.database.prepare('SELECT status FROM contents WHERE id=?').bind(q).first('status'), 'visible');
 });
 
-test('concurrent course retries create one course and one assignment', async () => {
-    const body = { name: '并发课程', code: 'CONCURRENT01' }, opts = { key: 'concurrent-course-request' };
-    const responses = await Promise.all([1, 2].map(() => h.api('POST', '/courses', 'teacher-a', body, opts)));
+test('concurrent course retries create one course without assigning teachers', async () => {
+    const body = { name: '并发课程', id: 'CONCURRENT01' }, opts = { key: 'concurrent-course-request' };
+    const responses = await Promise.all([1, 2].map(() => h.api('POST', '/courses', 'admin', body, opts)));
     for (const r of responses) assert.equal(r.status, 201, JSON.stringify(r.data));
     assert.equal(responses[0].data.id, responses[1].data.id);
     const id = responses[0].data.id;
-    for (const table of ['courses', 'enrollments']) {
-        assert.equal(await h.database.prepare(`SELECT COUNT(*) AS n FROM ${table} WHERE ${table === 'courses' ? 'id' : 'course_id'}=?`).bind(id).first('n'), 1);
-    }
+    assert.equal(await h.database.prepare('SELECT COUNT(*) AS n FROM courses WHERE id=?').bind(id).first('n'), 1);
+    assert.equal(await h.database.prepare('SELECT COUNT(*) AS n FROM teaching_classes WHERE course_id=?').bind(id).first('n'), 0);
 });
 
 test('administrator can accept, adjust and cancel awards across courses', async () => {
     await h.policy(); const q = await h.postQuestion(), answer = await h.postAnswer(q);
     assert.equal((await h.accept(q, answer, 'admin')).status, 200);
-    assert.equal((await h.api('POST', '/courses/course-a/bonus-adjustments', 'admin', { studentId: 'student-b', termId: 'term-active', deltaPoints: 25, reason: '管理员调整' })).status, 201);
+    assert.equal((await h.api('POST', '/courses/course-a/terms/term-active/teachers/teacher-a/bonus-adjustments', 'admin', { studentId: 'student-b', deltaPoints: 25, reason: '管理员调整' })).status, 201);
     assert.equal(await h.database.prepare('SELECT SUM(delta_points) AS n FROM bonus_ledger').first('n'), 75);
     assert.equal((await h.accept(q, null, 'admin')).status, 200);
     assert.equal(await h.database.prepare('SELECT SUM(delta_points) AS n FROM bonus_ledger').first('n'), 25);
@@ -166,7 +193,7 @@ test('public times are integer seconds and paged totals use the same visibility 
     assert.ok(bad.headers.get('x-request-id')); assert.equal(bad.headers.get('cache-control'), 'no-store');
 });
 
-const businessTables = ['courses', 'course_bonus_rules', 'terms', 'enrollments',
+const businessTables = ['courses', 'class_bonus_rules', 'terms', 'course_terms', 'teaching_classes', 'class_students',
     'file_versions', 'contents', 'acceptances', 'votes', 'bonus_ledger', 'reports', 'moderation_actions'];
 const businessSnapshot = () => Promise.all(businessTables.map(async table =>
     (await h.database.prepare(`SELECT * FROM ${table} ORDER BY rowid`).all()).results));
@@ -183,7 +210,7 @@ for (const mode of ['switch', 'delete']) {
         assert.equal((await h.api('POST', `/contents/${otherAnswer}/reports`, 'student-a', { reason: '待审查记录' })).status, 201);
         const hidden = await h.postQuestion('student-b');
         assert.equal((await h.api('PUT', `/contents/${hidden}/moderation`, 'teacher-a', { action: 'hide', reason: '保留审查记录' })).status, 200);
-        assert.equal((await h.api('POST', '/courses', 'teacher-a', { name: '保留创建的课程', code: 'RETAINED' })).status, 201);
+        assert.equal((await h.api('POST', '/courses', 'admin', { name: '保留创建的课程', id: 'RETAINED' })).status, 201);
         assert.equal((await h.api('PATCH', '/admin/accounts/student-a', 'admin', { department: '院系', major: '专业', grade: '2024级' })).status, 200);
         await h.env.FILES.put('materials/retained-file', 'fictional material bytes');
         const before = await businessSnapshot();
@@ -216,7 +243,7 @@ for (const mode of ['switch', 'delete']) {
         }
         assert.equal((await h.api('GET', `/contents/${otherAnswer}`)).data.author.nickname, '学习者乙');
         assert.equal((await h.api('GET', `/questions/${teacherQuestion}`)).data.acceptedAnswerId, answer);
-        assert.equal((await h.api('GET', '/courses/course-a/bonus-summary', 'admin')).data.items[0].nickname, '已删除');
+        assert.equal((await h.api('GET', '/courses/course-a/terms/term-active/teachers/teacher-a/bonus-summary', 'admin')).data.items[0].nickname, '已删除');
         const list = await h.api('GET', '/admin/accounts', 'admin');
         assert.ok(list.data.items.every(a => !['teacher-a', 'student-a'].includes(a.id)));
         if (mode === 'switch') {
@@ -226,7 +253,7 @@ for (const mode of ['switch', 'delete']) {
             assert.equal((await h.api('GET', '/me/activity', undefined, undefined, options)).data.total, 0);
             assert.equal((await h.api('GET', '/me/bonus-ledger', undefined, undefined, options)).data.total, 0);
             assert.equal((await h.api('PATCH', `/contents/${question}`, undefined, { body: doc('不能继承所有权') }, options)).status, 403);
-            assert.equal((await h.api('GET', '/courses/course-a/bonus-ledger', undefined, undefined, options)).status, 403);
+            assert.equal((await h.api('GET', '/courses/course-a/terms/term-active/teachers/teacher-a/bonus-ledger', undefined, undefined, options)).status, 403);
         }
         assert.deepEqual((await h.database.prepare('PRAGMA foreign_key_check').all()).results, []);
     });
@@ -246,12 +273,12 @@ for (const mode of ['switch', 'delete']) {
 test('concurrent partial course edits preserve omitted fields and the final submitted value wins', async () => {
     assert.equal((await h.api('PATCH', '/courses/missing', 'admin', { name: '不存在的课程' })).status, 404);
     const check = beforeWrite(/UPDATE courses SET name/, async () => {
-        assert.equal((await h.api('PATCH', '/courses/course-a', 'teacher-a', { name: '先保存的名称', introduction: '并发简介' })).status, 200);
+        assert.equal((await h.api('PATCH', '/courses/course-a', 'admin', { name: '先保存的名称', introduction: '并发简介' })).status, 200);
     });
-    const response = await h.api('PATCH', '/courses/course-a', 'teacher-a', { name: '最后保存的名称', code: 'LAST101' });
+    const response = await h.api('PATCH', '/courses/course-a', 'admin', { name: '最后保存的名称' });
     check(); assert.equal(response.status, 200);
     const saved = (await h.api('GET', '/courses/course-a')).data;
-    assert.equal(saved.name, '最后保存的名称'); assert.equal(saved.code, 'LAST101'); assert.equal(saved.introduction, '并发简介');
+    assert.equal(saved.name, '最后保存的名称'); assert.equal(saved.id, 'course-a'); assert.equal(saved.introduction, '并发简介');
 });
 
 test('concurrent content edits only replace submitted fields', async () => {

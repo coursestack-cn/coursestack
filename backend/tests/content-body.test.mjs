@@ -41,7 +41,7 @@ test('all content writes accept semantic limits above the old JSON and HTTP caps
         title: '请求大小边界', body: doc('正常'), padding: 'x'.repeat(CONTENT_REQUEST_MAX_BYTES)
     });
     assert.equal(oversized.status, 413);
-    const course = await h.api('POST', '/courses', 'teacher-a', { name: 'x'.repeat(128 * 1024), code: 'CAP', introduction: '' });
+    const course = await h.api('POST', '/courses', 'admin', { name: 'x'.repeat(128 * 1024), id: 'CAP', introduction: '' });
     assert.equal(course.status, 413, 'non-content request limits remain unchanged');
 });
 

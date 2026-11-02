@@ -11,39 +11,39 @@ const points = async (student = 'student-b', term = 'term-active') => h.database
 const moderation = async (id, action) => h.api('PUT', `/contents/${id}/moderation`, 'teacher-a', {
     action, reason: '测试上下架原因',
 });
-const adjustment = (deltaPoints, options = {}, as = 'teacher-a') => h.api('POST', '/courses/course-a/bonus-adjustments', as,
-    { studentId: 'student-b', termId: 'term-active', deltaPoints, reason: '课堂贡献调整' }, options);
+const adjustment = (deltaPoints, options = {}, as = 'teacher-a') => h.api('POST', '/courses/course-a/terms/term-active/teachers/teacher-a/bonus-adjustments', as,
+    { studentId: 'student-b', deltaPoints, reason: '课堂贡献调整' }, options);
 
-test('each course has six independent nonnegative integer rules, all initially zero', async () => {
-    const initial = await h.api('GET', '/courses/course-a');
+test('each teaching class has six independent nonnegative integer rules, all initially zero', async () => {
+    const initial = await h.api('GET', '/courses/course-a/terms/term-active/teachers/teacher-a', 'teacher-a');
     assert.deepEqual(initial.data.bonusPolicy, { pointsQuestion: 0, pointsAnswer: 0, pointsAcceptance: 0, pointsComment: 0, pointsMaterial: 0, pointsMaterialVersion: 0 });
-    await assert.rejects(h.database.prepare("INSERT INTO course_bonus_rules(id) VALUES('course-a')").run(), /UNIQUE/);
-    await assert.rejects(h.database.prepare("INSERT INTO course_bonus_rules(id) VALUES('missing-course')").run(), /FOREIGN KEY/);
+    await assert.rejects(h.database.prepare("INSERT INTO class_bonus_rules(course_id,term_id,teacher_id) VALUES('course-a','term-active','teacher-a')").run(), /UNIQUE/);
+    await assert.rejects(h.database.prepare("INSERT INTO class_bonus_rules(course_id,term_id,teacher_id) VALUES('missing-course','term-active','teacher-a')").run(), /FOREIGN KEY/);
     const configured = await h.policy({ pointsQuestion: 10, pointsAnswer: 25, pointsAcceptance: 50, pointsComment: 1, pointsMaterial: 40, pointsMaterialVersion: 10 });
     assert.deepEqual(configured.data.bonusPolicy, { pointsQuestion: 10, pointsAnswer: 25, pointsAcceptance: 50, pointsComment: 1, pointsMaterial: 40, pointsMaterialVersion: 10 });
     assert.equal('bonusEnabled' in configured.data, false);
     for (const [field, column] of [['pointsAnswer', 'points_answer'], ['pointsMaterialVersion', 'points_material_version']]) for (const value of [-1, 1.5]) {
-        const response = await h.api('PUT', '/courses/course-a/bonus-policy', 'teacher-a', { ...configured.data.bonusPolicy, [field]: value });
+        const response = await h.api('PUT', '/courses/course-a/terms/term-active/teachers/teacher-a/bonus-policy', 'teacher-a', { ...configured.data.bonusPolicy, [field]: value });
         assert.equal(response.status, 400);
-        await assert.rejects(h.database.prepare(`UPDATE course_bonus_rules SET ${column}=? WHERE id=?`).bind(value, 'course-a').run(),
-            value < 0 ? /course_bonus_rules_points_/ : /cannot store REAL value in INTEGER column/);
+        await assert.rejects(h.database.prepare(`UPDATE class_bonus_rules SET ${column}=? WHERE course_id=? AND term_id='term-active' AND teacher_id='teacher-a'`).bind(value, 'course-a').run(),
+            value < 0 ? /class_bonus_rules_points_/ : /cannot store REAL value in INTEGER column/);
     }
 });
 
-test('rule changes accept the final submitted rules, enforce authority and roll back with course metadata', async () => {
+test('rule changes accept the final submitted rules, enforce authority and roll back on a failed class policy update', async () => {
     const configured = await h.policy({ pointsAnswer: 25, pointsMaterialVersion: 10 });
     const body = { ...configured.data.bonusPolicy, pointsAnswer: 99 };
     for (const as of ['student-a', 'teacher-b']) {
-        assert.equal((await h.api('PUT', '/courses/course-a/bonus-policy', as, body)).status, 403);
+        assert.equal((await h.api('PUT', '/courses/course-a/terms/term-active/teachers/teacher-a/bonus-policy', as, body)).status, 403);
     }
-    const changed = await h.api('PUT', '/courses/course-a/bonus-policy', 'teacher-a', body);
+    const changed = await h.api('PUT', '/courses/course-a/terms/term-active/teachers/teacher-a/bonus-policy', 'teacher-a', body);
     assert.equal(changed.status, 200); assert.equal(changed.data.bonusPolicy.pointsAnswer, 99);
-    const last = await h.api('PUT', '/courses/course-a/bonus-policy', 'teacher-a', configured.data.bonusPolicy);
+    const last = await h.api('PUT', '/courses/course-a/terms/term-active/teachers/teacher-a/bonus-policy', 'teacher-a', configured.data.bonusPolicy);
     assert.equal(last.status, 200); assert.deepEqual(last.data.bonusPolicy, configured.data.bonusPolicy);
     const before = (await h.database.prepare('SELECT * FROM bonus_ledger ORDER BY id').all()).results;
-    await h.database.prepare("CREATE TRIGGER fail_course_update BEFORE UPDATE ON courses BEGIN SELECT RAISE(ABORT,'simulated_failure'); END").run();
-    assert.equal((await h.api('PUT', '/courses/course-a/bonus-policy', 'teacher-a', body)).status, 500);
-    assert.deepEqual((await h.api('GET', '/courses/course-a')).data, last.data);
+    await h.database.prepare("CREATE TRIGGER fail_class_update BEFORE UPDATE ON class_bonus_rules BEGIN SELECT RAISE(ABORT,'simulated_failure'); END").run();
+    assert.equal((await h.api('PUT', '/courses/course-a/terms/term-active/teachers/teacher-a/bonus-policy', 'teacher-a', body)).status, 500);
+    assert.deepEqual((await h.api('GET', '/courses/course-a/terms/term-active/teachers/teacher-a', 'teacher-a')).data, last.data);
     assert.deepEqual((await h.database.prepare('SELECT * FROM bonus_ledger ORDER BY id').all()).results, before);
 });
 
@@ -61,7 +61,7 @@ test('question, answer and comment rewards belong to the exact course, term and 
     assert.equal(await points('visitor'), 0); assert.equal(await points('teacher-a'), 0);
     await setCurrentTerm(h.database, 'term-old');
     await h.postQuestion('visitor');
-    assert.equal(await points('visitor', 'term-old'), 10);
+    assert.equal(await points('visitor', 'term-old'), 0);
     assert.equal(await points('visitor'), 0);
     assert.equal(await h.database.prepare("SELECT count(*) AS n FROM bonus_ledger WHERE course_id='course-b'").first('n'), 0);
 });
@@ -135,28 +135,28 @@ test('manual positive and negative adjustments are idempotent and independent of
     assert.equal(await points(), 70);
     const q = await h.postQuestion(); await moderation(q, 'hide'); await moderation(q, 'restore');
     assert.equal(await points(), 70);
-    const summary = await h.api('GET', '/courses/course-a/bonus-summary?termId=term-active', 'teacher-a');
+    const summary = await h.api('GET', '/courses/course-a/terms/term-active/teachers/teacher-a/bonus-summary?termId=term-active', 'teacher-a');
     assert.equal(summary.data.items[0].totalPoints, 70); assert.equal('totalCents' in summary.data.items[0], false);
     assert.equal((await h.api('GET', '/me/bonus-ledger', 'student-b')).data.items[0].deltaPoints, -30);
     for (const value of [0, 1.5]) assert.equal((await adjustment(value)).status, 400);
     for (const as of ['student-a','teacher-b']) assert.equal((await adjustment(10, {}, as)).status, 403);
-    assert.equal((await h.api('POST', '/courses/course-a/bonus-adjustments', 'teacher-a',
-        { studentId: 'visitor', termId: 'term-active', deltaPoints: 10, reason: '未修读' })).status, 409);
+    assert.equal((await h.api('POST', '/courses/course-a/terms/term-active/teachers/teacher-a/bonus-adjustments', 'teacher-a',
+        { studentId: 'visitor', deltaPoints: 10, reason: '未修读' })).status, 409);
 });
 
 test('optional ledger notes round-trip without an operation field; manual deductions stay separate from automatic reversals', async () => {
     await h.policy({ pointsQuestion: 25 });
     const q = await h.postQuestion('student-b');
-    const body = { studentId: 'student-b', termId: 'term-active', deltaPoints: -10 };
+    const body = { studentId: 'student-b', deltaPoints: -10 };
     const options = { key: 'optional-ledger-note' };
-    const first = await h.api('POST', '/courses/course-a/bonus-adjustments', 'teacher-a', body, options);
+    const first = await h.api('POST', '/courses/course-a/terms/term-active/teachers/teacher-a/bonus-adjustments', 'teacher-a', body, options);
     assert.equal(first.status, 201); assert.equal(first.data.reason, null);
     assert.equal(first.data.sourceKind, 'manual'); assert.equal(first.data.reversesId, null);
     assert.equal('operation' in first.data, false);
-    const replay = await h.api('POST', '/courses/course-a/bonus-adjustments', 'teacher-a', { ...body, reason: null }, options);
+    const replay = await h.api('POST', '/courses/course-a/terms/term-active/teachers/teacher-a/bonus-adjustments', 'teacher-a', { ...body, reason: null }, options);
     assert.equal(replay.status, 201); assert.equal(replay.data.id, first.data.id);
     assert.equal(replay.headers.get('Idempotency-Replayed'), 'true');
-    assert.equal((await h.api('POST', '/courses/course-a/bonus-adjustments', 'teacher-a', { ...body, reason: '补充原因' }, options)).status, 409);
+    assert.equal((await h.api('POST', '/courses/course-a/terms/term-active/teachers/teacher-a/bonus-adjustments', 'teacher-a', { ...body, reason: '补充原因' }, options)).status, 409);
     assert.equal(await points(), 15);
     await moderation(q, 'hide'); assert.equal(await points(), -10);
     await moderation(q, 'restore'); assert.equal(await points(), 15);
@@ -196,12 +196,12 @@ test('ledger reversal chains are immutable and cannot change amount, recipient o
     assert.equal(revoke.reverses_id, award.id); assert.equal(revoke.delta_points, -10);
     await assert.rejects(h.database.prepare('UPDATE bonus_ledger SET delta_points=1').run(), /immutable_ledger/);
     await assert.rejects(h.database.prepare('DELETE FROM bonus_ledger').run(), /immutable_ledger/);
-    await assert.rejects(h.database.prepare(`INSERT INTO bonus_ledger(course_id,term_id,student_id,delta_points,source_kind,source_id,operator_id,reason,reverses_id)
-        VALUES ('course-a','term-active','student-b',10,'question',?,'teacher-a','错误收款人',?)`).bind(q,revoke.id).run(), /invalid_bonus_reversal/);
-    await assert.rejects(h.database.prepare(`INSERT INTO bonus_ledger(course_id,term_id,student_id,delta_points,source_kind,source_id,operator_id)
-        SELECT course_id,term_id,student_id,delta_points,source_kind,source_id,operator_id FROM bonus_ledger WHERE id=?`).bind(award.id).run(), /UNIQUE/);
-    await assert.rejects(h.database.prepare(`INSERT INTO bonus_ledger(course_id,term_id,student_id,delta_points,source_kind,source_id,operator_id,reverses_id)
-        SELECT course_id,term_id,student_id,-delta_points,source_kind,source_id,operator_id,id FROM bonus_ledger WHERE id=?`).bind(award.id).run(), /UNIQUE/);
-    await assert.rejects(h.database.prepare(`INSERT INTO bonus_ledger(course_id,term_id,student_id,delta_points,source_kind,source_id,operator_id)
-        VALUES ('course-a','term-active','student-a',-10,'question','unlinked-deduction','teacher-a')`).run(), /bonus_ledger_shape/);
+    await assert.rejects(h.database.prepare(`INSERT INTO bonus_ledger(course_id,term_id,teacher_id,student_id,delta_points,source_kind,source_id,operator_id,reason,reverses_id)
+        VALUES ('course-a','term-active','teacher-a','student-b',10,'question',?,'teacher-a','错误收款人',?)`).bind(q,revoke.id).run(), /invalid_bonus_reversal/);
+    await assert.rejects(h.database.prepare(`INSERT INTO bonus_ledger(course_id,term_id,teacher_id,student_id,delta_points,source_kind,source_id,operator_id)
+        SELECT course_id,term_id,teacher_id,student_id,delta_points,source_kind,source_id,operator_id FROM bonus_ledger WHERE id=?`).bind(award.id).run(), /UNIQUE/);
+    await assert.rejects(h.database.prepare(`INSERT INTO bonus_ledger(course_id,term_id,teacher_id,student_id,delta_points,source_kind,source_id,operator_id,reverses_id)
+        SELECT course_id,term_id,teacher_id,student_id,-delta_points,source_kind,source_id,operator_id,id FROM bonus_ledger WHERE id=?`).bind(award.id).run(), /UNIQUE/);
+    await assert.rejects(h.database.prepare(`INSERT INTO bonus_ledger(course_id,term_id,teacher_id,student_id,delta_points,source_kind,source_id,operator_id)
+        VALUES ('course-a','term-active','teacher-a','student-a',-10,'question','unlinked-deduction','teacher-a')`).run(), /bonus_ledger_shape/);
 });

@@ -6,7 +6,7 @@ import { after, before, beforeEach, test } from 'node:test';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
 import { eq } from 'drizzle-orm';
 import { createDatabase } from '../src/db/index.ts';
-import { accounts, terms, enrollments } from '../src/db/schema.ts';
+import { accounts, terms } from '../src/db/schema.ts';
 import { getPublicProfile, isAdministrator, isCurrentCourseTeacher } from '../src/permissions.ts';
 import worker from '../src/index.ts';
 import { initializeAdministrator } from '../src/auth/service.ts';
@@ -23,14 +23,15 @@ INSERT INTO accounts (id, nickname, role, school_number, name) VALUES
 ('history', '历年同学', 'student', 'TEST-002', '虚构乙'), ('outsider', '其他同学', 'student', 'TEST-003', '虚构丙');
 INSERT INTO terms (id, name) VALUES ('current', '当前学期'), ('previous', '历年学期'), ('next', '下个学期');
 UPDATE terms SET current=1 WHERE id='previous';
-INSERT INTO enrollments(course_id,term_id,account_id) VALUES ('course','previous','other-teacher');
+INSERT INTO courses(id,name,created_by,request_key,request_hash) VALUES
+('course','课程甲','admin','fixture-course','fixture'),('other-course','课程乙','admin','fixture-other','fixture');
+INSERT INTO course_terms VALUES ('course','previous'),('course','current'),('other-course','current'),('course','next');
+INSERT INTO teaching_classes VALUES ('course','previous','other-teacher');
+INSERT INTO class_students VALUES ('course','previous','history','other-teacher');
 UPDATE terms SET current=0;
 UPDATE terms SET current=1 WHERE id='current';
-INSERT INTO enrollments(course_id,term_id,account_id) VALUES ('course','current','teacher'),('other-course','current','other-teacher');
-INSERT INTO courses (id, name, code, created_by, updated_by, request_key, request_hash) VALUES
-('course', '课程甲', 'COURSE', 'teacher', 'teacher', 'fixture-course', 'fixture'),
-('other-course', '课程乙', 'OTHER', 'other-teacher', 'other-teacher', 'fixture-other', 'fixture');
-INSERT INTO enrollments (course_id, term_id, account_id) VALUES ('course', 'current', 'student'), ('course', 'previous', 'history'), ('other-course', 'current', 'outsider');
+INSERT INTO teaching_classes VALUES ('course','current','teacher'),('other-course','current','other-teacher');
+INSERT INTO class_students VALUES ('course','current','student','teacher'),('other-course','current','outsider','other-teacher');
 `;
 
 before(async () => {
@@ -53,13 +54,15 @@ beforeEach(async () => {
     // Delete only isolated in-memory test data, in foreign-key dependency order.
     await binding.batch(`
 PRAGMA defer_foreign_keys=ON;
+DELETE FROM class_students;
+DELETE FROM class_bonus_rules;
+DELETE FROM teaching_classes;
+DELETE FROM course_terms;
 DELETE FROM courses;
 DELETE FROM file_versions;
 DELETE FROM contents;
 DELETE FROM sessions;
 DELETE FROM login_attempts;
-DELETE FROM enrollments WHERE account_id IN (SELECT id FROM accounts WHERE role='student');
-DELETE FROM enrollments;
 DELETE FROM accounts;
 DELETE FROM terms;
 `.split(';').filter(s => s.trim()).map(s => binding.prepare(s)));
@@ -89,11 +92,12 @@ test('course teacher permission requires a current teaching assignment', async (
     }
 });
 
-test('disabling a teacher or revoking teaching immediately removes access', async () => {
+test('disabled or deleted teacher identities lose access while other current teachers keep theirs', async () => {
     await db.update(accounts).set({ status: 'disabled' }).where(eq(accounts.id, 'teacher'));
     assert.equal(await isCurrentCourseTeacher(db, 'teacher', 'course'), false);
     await db.update(accounts).set({ status: 'active' }).where(eq(accounts.id, 'teacher'));
-    await db.update(enrollments).set({ accountId: 'other-teacher' }).where(eq(enrollments.accountId, 'teacher'));
+    await binding.prepare("INSERT INTO teaching_classes VALUES ('course','current','other-teacher')").run();
+    await db.update(accounts).set({ status: 'deleted' }).where(eq(accounts.id, 'teacher'));
     assert.equal(await isCurrentCourseTeacher(db, 'teacher', 'course'), false);
     assert.equal(await isCurrentCourseTeacher(db, 'other-teacher', 'course'), true);
 });
@@ -101,25 +105,25 @@ test('disabling a teacher or revoking teaching immediately removes access', asyn
 test('term changes remove old access without deleting history; no term grants nothing', async () => {
     await setCurrentTerm(binding, 'next');
     assert.equal(await isCurrentCourseTeacher(db, 'teacher', 'course'), false);
-    const count = await binding.prepare("SELECT COUNT(*) AS count FROM enrollments WHERE account_id IN (SELECT id FROM accounts WHERE role='student')").first('count');
+    const count = await binding.prepare("SELECT COUNT(*) AS count FROM class_students").first('count');
     assert.equal(count, 3);
-    await binding.prepare("INSERT INTO enrollments (course_id, term_id, account_id) VALUES ('course', 'next', 'teacher')").run();
+    await binding.prepare("INSERT INTO teaching_classes VALUES ('course', 'next', 'teacher')").run();
     assert.equal(await isCurrentCourseTeacher(db, 'teacher', 'course'), true);
-    await binding.prepare("INSERT INTO enrollments (course_id, term_id, account_id) VALUES ('course', 'next', 'student')").run();
+    await binding.prepare("INSERT INTO class_students VALUES ('course', 'next', 'student', 'teacher')").run();
     await setCurrentTerm(binding, null);
     assert.equal(await isCurrentCourseTeacher(db, 'teacher', 'course'), false);
 });
 
 test('foreign keys and checks reject wrong identities, orphan relations and duplicate enrollment', async () => {
     const invalid = [
-        "INSERT INTO enrollments (course_id, term_id, account_id) VALUES ('course', 'current', 'missing')",
+        "INSERT INTO class_students VALUES ('course', 'current', 'missing', 'teacher')",
         "INSERT INTO accounts (id, nickname, role) VALUES ('invalid', '错误', 'root')",
         "UPDATE accounts SET role = 'student' WHERE id = 'teacher'",
-        "INSERT INTO enrollments (course_id, term_id, account_id) VALUES ('course', 'current', 'student')",
-        "INSERT INTO enrollments (course_id, term_id, account_id) VALUES ('course', 'current', 'teacher')",
-        "INSERT INTO enrollments (course_id, term_id, account_id) VALUES ('missing', 'current', 'student')",
-        "INSERT INTO enrollments (course_id, term_id, account_id) VALUES ('course', 'missing', 'student')",
-        "INSERT INTO enrollments (course_id, term_id, account_id) VALUES ('course', 'current', 'student')",
+        "INSERT INTO class_students VALUES ('course', 'current', 'student', 'teacher')",
+        "INSERT INTO class_students VALUES ('course', 'current', 'teacher', 'teacher')",
+        "INSERT INTO class_students VALUES ('missing', 'current', 'student', 'teacher')",
+        "INSERT INTO class_students VALUES ('course', 'missing', 'student', 'teacher')",
+        "INSERT INTO class_students VALUES ('course', 'current', 'student', 'teacher')",
         "UPDATE accounts SET school_number = 'TEST-001' WHERE id = 'history'",
         "UPDATE accounts SET school_number = NULL WHERE id = 'student'",
         "UPDATE accounts SET school_number = NULL WHERE id = 'teacher'",
@@ -132,15 +136,16 @@ test('foreign keys and checks reject wrong identities, orphan relations and dupl
         "DELETE FROM courses WHERE id = 'course'",
     ];
     for (const sql of invalid) {
-        await assert.rejects(binding.prepare(sql).run(), /constraint|replace_account_identity|invalid_.*identity|enrollment_teacher_required|enrollment_teacher_unique|current_term_required/i, sql);
+        await assert.rejects(binding.prepare(sql).run(), /constraint|replace_account_identity|invalid_class_student|invalid_class_teacher|current_term_required/i, sql);
     }
-    await assert.rejects(() => binding.prepare("INSERT INTO enrollments (course_id, term_id, account_id) VALUES ('course', 'current', 'other-teacher')").run(), /enrollment_teacher_unique/);
+    await binding.prepare("INSERT INTO teaching_classes VALUES ('course','current','other-teacher')").run();
+    await assert.rejects(() => binding.prepare("INSERT INTO class_students VALUES ('course','current','student','other-teacher')").run(), /UNIQUE/);
 });
 
 test('D1 batches roll back all writes when a membership constraint fails', async () => {
     await assert.rejects(binding.batch([
         binding.prepare("INSERT INTO accounts (id, nickname, role, school_number) VALUES ('rollback', '回滚用户', 'teacher', 'ROLLBACK')"),
-        binding.prepare("INSERT INTO enrollments (course_id, term_id, account_id) VALUES ('course', 'current', 'rollback')"),
+        binding.prepare("INSERT INTO class_students VALUES ('course', 'current', 'rollback', 'teacher')"),
     ]));
     assert.equal(await binding.prepare("SELECT id FROM accounts WHERE id = 'rollback'").first(), null);
 });
@@ -289,7 +294,8 @@ test('login attempts are limited atomically, including nonexistent members', asy
 });
 
 test('concurrent first initialization creates exactly one administrator without orphan accounts', async () => {
-    await binding.prepare("DELETE FROM accounts WHERE id = 'admin'").run();
+    await binding.batch(['DELETE FROM class_students', 'DELETE FROM class_bonus_rules', 'DELETE FROM teaching_classes',
+        'DELETE FROM course_terms', 'DELETE FROM courses', "DELETE FROM accounts WHERE id='admin'"].map(s => binding.prepare(s)));
     const outcomes = await Promise.allSettled([
         initializeAdministrator(binding, testPassword),
         initializeAdministrator(binding, nextPassword),

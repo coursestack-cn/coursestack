@@ -12,6 +12,16 @@ export function activeUser(a: Actor): SQL {
     return sql`EXISTS(SELECT 1 FROM accounts account WHERE account.id=${a.id}
         AND account.status<>'deleted')`;
 }
+export function administration(a: Actor): SQL {
+    return sql`(${a.role}='admin' AND ${activeUser(a)})`;
+}
+export async function requireAdministrator(c: Ctx) {
+    const a = actor(c);
+    if (!await createDatabase(c.env.DB).get(sql`SELECT 1 WHERE ${administration(a)}`)) {
+        throw new HttpError(403, 'ADMIN_REQUIRED', '需要管理员权限');
+    }
+    return a;
+}
 export function management(a: Actor, course: SQL): SQL {
     return sql`(${activeUser(a)} AND (${a.role}='admin' OR (${a.role}='teacher' AND EXISTS(
         SELECT 1 FROM teaching_classes assignment

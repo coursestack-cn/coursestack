@@ -1,32 +1,26 @@
 import { Hono } from 'hono';
 import { sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { HttpError, respond, assertChanged, input, listResult, page, pointsSchema, requestIdentity, idSchema, queryPage, parsedEnum } from '../http.ts';
-import { activeUser, management, requireManagement } from '../permissions.ts';
+import { HttpError, respond, assertChanged, input, listResult, page, requestIdentity, queryPage, parsedEnum } from '../http.ts';
+import { administration, management, requireAdministrator } from '../permissions.ts';
 import { actor } from '../auth/middleware.ts';
-import type { AppEnv, Ctx } from '../discussions/types.ts';
-import { createDatabase, prepareStatement } from '../db/index.ts';
-import { urlId } from '../materials/validation.ts';
+import { type AppEnv, type Ctx } from '../discussions/types.ts';
+import { createDatabase } from '../db/index.ts';
+import { courseIdSchema } from './validation.ts';
 const now = () => Math.floor(Date.now() / 1000);
-const uid = () => crypto.randomUUID();
-
-const courseInput = z.object({ name: z.string().trim().min(1).max(120), code: z.string().trim().min(1).max(40),
+const courseInput = z.object({ id: courseIdSchema, name: z.string().trim().min(1).max(120),
     introduction: z.string().trim().max(5000).default('') }).strict();
-type Course = { id: string; name: string; code: string; introduction: string;
-    points_question: number; points_answer: number; points_acceptance: number; points_comment: number; points_material: number; points_material_version: number; created_at: number; updated_at: number; request_hash: string;
-    teacher_id: string | null; teacher_name: string | null; teacher_deleted: number | null };
-// Each current-term instance has exactly one teacher, so the join adds at most one row per course.
-const courseSelect = sql`SELECT c.*,r.points_question,r.points_answer,r.points_acceptance,r.points_comment,r.points_material,r.points_material_version,
-    t.id AS teacher_id,CASE WHEN t.status='deleted' THEN '已删除' ELSE t.nickname END AS teacher_name,t.status='deleted' AS teacher_deleted
-    FROM courses c JOIN course_bonus_rules r ON r.id=c.id
-    LEFT JOIN (SELECT e.course_id,a.id,a.nickname,a.status FROM enrollments e JOIN terms s ON s.id=e.term_id AND s.current=1
-        JOIN accounts a ON a.id=e.account_id AND a.role='teacher') t ON t.course_id=c.id`;
-export const courseDto = (r: Course) => ({ id: r.id, name: r.name, code: r.code,
-    introduction: r.introduction, bonusPolicy: { pointsQuestion: r.points_question, pointsAnswer: r.points_answer,
-        pointsAcceptance: r.points_acceptance, pointsComment: r.points_comment, pointsMaterial: r.points_material,
-        pointsMaterialVersion: r.points_material_version },
-    currentTeacher: r.teacher_id ? { id: r.teacher_id, nickname: r.teacher_name, isDeleted: Boolean(r.teacher_deleted) } : null,
-    createdAt: r.created_at, updatedAt: r.updated_at });
+type Course = { id: string; name: string; introduction: string; created_at: number; updated_at: number;
+    term_id: string | null; term_name: string | null; offered: number; teachers: string };
+const courseSelect = sql`SELECT c.*,term.id AS term_id,term.name AS term_name,
+    EXISTS(SELECT 1 FROM course_terms offering WHERE offering.course_id=c.id AND offering.term_id=term.id) AS offered,
+    (SELECT json_group_array(json_object('id',a.id,'nickname',CASE WHEN a.status='deleted' THEN '已删除' ELSE a.nickname END,
+        'isDeleted',json(CASE WHEN a.status='deleted' THEN 'true' ELSE 'false' END))) FROM teaching_classes tc
+        JOIN accounts a ON a.id=tc.teacher_id WHERE tc.course_id=c.id AND tc.term_id=term.id) AS teachers
+    FROM courses c LEFT JOIN terms term ON term.current=1`;
+export const courseDto = (r: Course) => ({ id: r.id, name: r.name, introduction: r.introduction,
+    currentTerm: r.term_id ? { id: r.term_id, name: r.term_name } : null,
+    offeredInCurrentTerm: Boolean(r.offered), currentTeachers: JSON.parse(r.teachers), createdAt: r.created_at, updatedAt: r.updated_at });
 export async function getCourse(c: Ctx, id: string) {
     const r = await createDatabase(c.env.DB).get<Course>(sql`${courseSelect} WHERE c.id=${id}`);
     if (!r) throw new HttpError(404, 'COURSE_NOT_FOUND', '课程不存在');
@@ -34,109 +28,71 @@ export async function getCourse(c: Ctx, id: string) {
 }
 export const courseRoutes = new Hono<AppEnv>();
 courseRoutes.get('/me/courses', async c => {
-    const a = actor(c), p = page(c);
-    const q = (c.req.query('q') ?? '').trim();
+    const a = actor(c), p = page(c), q = (c.req.query('q') ?? '').trim();
     if (q.length > 100) throw new HttpError(400, 'INVALID_FILTER', '课程关键词最长 100 字');
     const scope = parsedEnum(c.req.query('scope'), ['current', 'history'] as const, 'current')!;
     const current = scope === 'current' ? 1 : 0;
+    const memberships = sql`SELECT course_id,term_id FROM teaching_classes WHERE teacher_id=${a.id}
+        UNION SELECT course_id,term_id FROM class_students WHERE student_id=${a.id}`;
     const db = createDatabase(c.env.DB);
     const [{ rows, total }, currentTerm] = await Promise.all([
-        queryPage<Course>(c, p, sql`${courseSelect}
-            WHERE EXISTS(SELECT 1 FROM enrollments e JOIN terms term ON term.id=e.term_id
-                WHERE e.course_id=c.id AND e.account_id=${a.id} AND term.current=${current})
-                AND (instr(c.name,${q})>0 OR instr(c.code,${q})>0)
-            ORDER BY c.code ASC,c.id ASC`),
+        queryPage<Course>(c, p, sql`${courseSelect} WHERE EXISTS(SELECT 1 FROM (${memberships}) m
+            JOIN terms t ON t.id=m.term_id WHERE m.course_id=c.id AND t.current=${current})
+            AND (instr(c.name,${q})>0 OR instr(c.id,${q})>0) ORDER BY c.id`),
         db.get<{ id: string; name: string }>(sql`SELECT id,name FROM terms WHERE current=1`),
     ]);
-    const memberships = rows.length ? await db.all<{ courseId: string; id: string; name: string; current: number }>(sql`
-        SELECT e.course_id AS courseId,term.id,term.name,term.current FROM enrollments e JOIN terms term ON term.id=e.term_id
-        WHERE e.account_id=${a.id} AND term.current=${current}
-            AND e.course_id IN (${sql.join(rows.map(row => sql`${row.id}`), sql`,`)})
-        ORDER BY term.name DESC,term.id DESC`) : [];
-    const items = rows.map(row => ({ course: courseDto(row), terms: memberships.filter(term => term.courseId === row.id)
+    const terms = rows.length ? await db.all<{ courseId: string; id: string; name: string; current: number }>(sql`
+        SELECT m.course_id AS courseId,t.id,t.name,t.current FROM (${memberships}) m JOIN terms t ON t.id=m.term_id
+        WHERE t.current=${current} AND m.course_id IN (${sql.join(rows.map(row => sql`${row.id}`), sql`,`)}) ORDER BY t.id DESC`) : [];
+    const items = rows.map(row => ({ course: courseDto(row), terms: terms.filter(term => term.courseId === row.id)
         .map(term => ({ id: term.id, name: term.name, current: Boolean(term.current) })) }));
     return respond(c, { ...listResult(items, p, total), scope, currentTerm: currentTerm ?? null });
 });
 courseRoutes.get('/courses', async c => {
-    const p = page(c), q = (c.req.query('q') ?? '').trim();
-    const code = c.req.query('code')?.trim();
-    if (q.length > 100) throw new HttpError(400, 'INVALID_FILTER', '课程关键词最长 100 字');
-    if (code !== undefined && (!code || code.length > 40)) throw new HttpError(400, 'INVALID_FILTER', '课程编号需为 1–40 字');
+    const p = page(c), q = (c.req.query('q') ?? '').trim(), id = c.req.query('id'), term = c.req.query('termId');
+    if (c.req.query('code') !== undefined) throw new HttpError(400, 'INVALID_FILTER', '课程号请使用 id 参数');
+    if (q.length > 100 || (id !== undefined && !courseIdSchema.safeParse(id).success)) throw new HttpError(400, 'INVALID_FILTER', '课程筛选无效');
     const { rows, total } = await queryPage<Course>(c, p, sql`${courseSelect}
-        WHERE ${code === undefined ? sql`1` : sql`c.code=${code}`} AND (instr(c.name,${q})>0 OR instr(c.code,${q})>0)
+        WHERE ${id === undefined ? sql`1` : sql`c.id=${id}`} AND (instr(c.name,${q})>0 OR instr(c.id,${q})>0)
+        ${term === undefined ? sql`` : sql`AND EXISTS(SELECT 1 FROM course_terms ct WHERE ct.course_id=c.id AND ct.term_id=${term})`}
         ORDER BY c.created_at DESC,c.id ASC`);
     return respond(c, listResult(rows.map(courseDto), p, total));
 });
 courseRoutes.post('/courses', async c => {
-    const a = actor(c), data = await input(c, courseInput.extend({ teacherId: idSchema.optional() }).strict()), identity = await requestIdentity(c, data);
-    if (!['teacher', 'admin'].includes(a.role)) throw new HttpError(403, 'TEACHER_REQUIRED', '只有教师或管理员可以创建课程');
-    const existing = await createDatabase(c.env.DB).get<Pick<Course, 'id' | 'request_hash'>>(sql`SELECT id,request_hash FROM courses WHERE created_by=${a.id} AND request_key=${identity.key}`);
-    if (existing) {
-        if (existing.request_hash !== identity.fingerprint) throw new HttpError(409, 'IDEMPOTENCY_CONFLICT', '幂等键已用于其他请求');
-        c.header('Idempotency-Replayed', 'true'); return respond(c, { id: existing.id }, 201);
-    }
-    const sem = await createDatabase(c.env.DB).get<{ id: string }>(sql`SELECT id FROM terms WHERE current=1`);
-    if (!sem) throw new HttpError(409, 'NO_CURRENT_TERM', '创建课程需先指定当前学期');
-    const teacherId = data.teacherId ?? (a.role === 'teacher' ? a.id : undefined);
-    if (!teacherId) throw new HttpError(400, 'TEACHER_REQUIRED', '管理员创建课程时必须指定 teacherId');
-    if (a.role === 'teacher' && teacherId !== a.id) throw new HttpError(403, 'TEACHER_REQUIRED', '教师建课时必须由本人任教');
-    const teacher = await createDatabase(c.env.DB).get(sql`SELECT id FROM accounts WHERE id=${teacherId} AND role='teacher' AND status<>'deleted'`);
-    if (!teacher) throw new HttpError(400, 'TEACHER_REQUIRED', '任课教师不存在或已删除');
-    const id = uid(), at = now();
-    // Insert the teacher first; defer its course FK until this atomic batch commits.
-    // The course INSERT trigger requires a teacher in the current term.
-    await c.env.DB.batch([
-        sql`PRAGMA defer_foreign_keys=ON`,
-        sql`INSERT INTO enrollments(course_id,term_id,account_id)
-            SELECT ${id},id,${teacherId} FROM terms WHERE id=${sem.id} AND current=1 AND ${activeUser(a)}
-            AND NOT EXISTS(SELECT 1 FROM courses WHERE code=${data.code} OR (created_by=${a.id} AND request_key=${identity.key}))`,
-        sql`INSERT INTO courses(id,name,code,introduction,created_by,updated_by,created_at,updated_at,request_key,request_hash)
-            SELECT ${id},${data.name},${data.code},${data.introduction},${a.id},${a.id},${at},${at},${identity.key},${identity.fingerprint}
-            WHERE EXISTS(SELECT 1 FROM enrollments WHERE course_id=${id} AND term_id=${sem.id} AND account_id=${teacherId})`,
-    ].map(statement => prepareStatement(c.env.DB, statement)));
-    const made = await createDatabase(c.env.DB).get<Pick<Course, 'id' | 'request_hash'>>(sql`SELECT id,request_hash FROM courses WHERE created_by=${a.id} AND request_key=${identity.key}`);
-    if (!made) throw new HttpError(409, 'COURSE_CONFLICT', '课程编号已存在或创建条件已变化');
+    const a = await requireAdministrator(c), data = await input(c, courseInput), identity = await requestIdentity(c, data);
+    const db = createDatabase(c.env.DB);
+    const previous = () => db.get<{ id: string; request_hash: string }>(sql`SELECT id,request_hash FROM courses
+        WHERE created_by=${a.id} AND request_key=${identity.key}`);
+    const existing = await previous();
+    if (!existing) await db.run(sql`INSERT INTO courses(id,name,introduction,created_by,created_at,updated_at,request_key,request_hash)
+        SELECT ${data.id},${data.name},${data.introduction},${a.id},${now()},${now()},${identity.key},${identity.fingerprint}
+        WHERE ${administration(a)} ON CONFLICT DO NOTHING`);
+    const made = existing ?? await previous();
+    if (!made) throw new HttpError(409, 'COURSE_CONFLICT', '课程号已存在或创建权限已变化');
     if (made.request_hash !== identity.fingerprint) throw new HttpError(409, 'IDEMPOTENCY_CONFLICT', '幂等键已用于其他请求');
-    if (made.id !== id) c.header('Idempotency-Replayed', 'true');
-    c.header('Location', `/api/courses/${made.id}`);
+    if (existing) c.header('Idempotency-Replayed', 'true');
+    c.header('Location', `/api/courses/${encodeURIComponent(made.id)}`);
     return respond(c, { id: made.id }, 201);
 });
 courseRoutes.get('/courses/:id', async c => respond(c, courseDto(await getCourse(c, c.req.param('id')))));
 courseRoutes.patch('/courses/:id', async c => {
-    const id = c.req.param('id'), a = await requireManagement(c, id);
-    const data = await input(c, courseInput.pick({ name: true, code: true }).partial().extend({
-        introduction: z.string().trim().max(5000).optional() }).strict());
+    const id = c.req.param('id'), a = await requireAdministrator(c);
+    const data = await input(c, courseInput.pick({ name: true }).partial().extend({ introduction: z.string().trim().max(5000).optional() }));
     await getCourse(c, id);
-    const result = await createDatabase(c.env.DB).run(sql`UPDATE courses SET name=${data.name ?? sql`name`},code=${data.code ?? sql`code`},
-        introduction=${data.introduction ?? sql`introduction`},
-        updated_by=${a.id},updated_at=${now()} WHERE id=${id} AND ${management(a, sql`courses.id`)}`);
+    const result = await createDatabase(c.env.DB).run(sql`UPDATE courses SET name=${data.name ?? sql`name`},
+        introduction=${data.introduction ?? sql`introduction`},updated_at=${now()} WHERE id=${id} AND ${administration(a)}`);
     assertChanged(result); return respond(c, courseDto(await getCourse(c, id)));
 });
-courseRoutes.put('/courses/:id/bonus-policy', async c => {
-    const id = c.req.param('id'), a = await requireManagement(c, id);
-    const data = await input(c, z.object({ pointsQuestion: pointsSchema, pointsAnswer: pointsSchema,
-        pointsAcceptance: pointsSchema, pointsComment: pointsSchema, pointsMaterial: pointsSchema, pointsMaterialVersion: pointsSchema }).strict());
-    const result = await c.env.DB.batch([
-        sql`UPDATE course_bonus_rules SET points_question=${data.pointsQuestion},points_answer=${data.pointsAnswer},
-            points_acceptance=${data.pointsAcceptance},points_comment=${data.pointsComment},points_material=${data.pointsMaterial},points_material_version=${data.pointsMaterialVersion}
-            WHERE id=${id} AND EXISTS(SELECT 1 FROM courses WHERE id=course_bonus_rules.id AND ${management(a, sql`courses.id`)})`,
-        sql`UPDATE courses SET updated_by=${a.id},updated_at=${now()}
-            WHERE id=${id} AND ${management(a, sql`courses.id`)}
-            AND EXISTS(SELECT 1 FROM course_bonus_rules WHERE id=courses.id)`,
-    ].map(statement => prepareStatement(c.env.DB, statement)));
-    assertChanged(result[0]!); return respond(c, courseDto(await getCourse(c, id)));
-});
 courseRoutes.get('/courses/:id/entry', async c => {
-    const id = c.req.param('id'), course = await getCourse(c, id);
-    const viewer = c.get('actor');
-    const canManage = viewer ? Boolean(await createDatabase(c.env.DB).get(sql`SELECT 1 WHERE ${management(viewer, sql`${id}`)}`)) : false;
+    const id = c.req.param('id'), course = await getCourse(c, id), viewer = c.get('actor');
+    const canManageContent = viewer ? Boolean(await createDatabase(c.env.DB).get(sql`SELECT 1 WHERE ${management(viewer, sql`${id}`)}`)) : false;
     const summary = await createDatabase(c.env.DB).get<{ questions: number; unresolved: number; answers: number }>(sql`SELECT
         COUNT(CASE WHEN kind='question' THEN 1 END) AS questions,
         COUNT(CASE WHEN kind='question' AND NOT EXISTS(SELECT 1 FROM public_acceptances a WHERE a.question_id=public_contents.id) THEN 1 END) AS unresolved,
         COUNT(CASE WHEN kind='answer' THEN 1 END) AS answers FROM public_contents WHERE course_id=${id}`);
-    return respond(c, { course: courseDto(course), summary, permissions: { canManage },
-        links: { questions: `/api/courses/${id}/questions`, activity: `/api/courses/${id}/activity`,
-            materials: `/api/courses/${urlId(id)}/contents?kind=material`, contents: `/api/courses/${urlId(id)}/contents` } });
+    const path = `/api/courses/${encodeURIComponent(id)}`;
+    return respond(c, { course: courseDto(course), summary, permissions: { canManageContent, canManageCourse: viewer?.role === 'admin' },
+        links: { questions: `${path}/questions`, activity: `${path}/activity`, materials: `${path}/contents?kind=material`, contents: `${path}/contents` } });
 });
 courseRoutes.get('/courses/:id/activity', async c => {
     const id = c.req.param('id'), p = page(c);

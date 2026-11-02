@@ -152,7 +152,7 @@ test('current teachers share content permission but only manage their own curren
     assert.equal(await isCurrentCourseTeacher(db, 'teacher-a', 'COURSE'), false);
 });
 
-test('existing score endpoints isolate class reads and manual adjustments, including idempotent replay', async () => {
+test('teaching class score endpoints isolate class reads and manual adjustments, including idempotent replay', async () => {
     const db = await database(); await seed(db);
     const app = new Hono();
     app.use('*', async (c, next) => { const id = c.req.header('X-Test-Actor'); c.set('actor', { id, role: id === 'admin' ? 'admin' : 'teacher' }); await next(); });
@@ -163,15 +163,15 @@ test('existing score endpoints isolate class reads and manual adjustments, inclu
             body: body ? JSON.stringify(body) : undefined }, { DB: db });
         return { status: response.status, ...await response.json() };
     };
-    const body = { studentId: 'student-b', termId: 'current', deltaPoints: 9 };
-    assert.equal((await request('POST', '/courses/COURSE/bonus-adjustments', 'teacher-a', body)).status, 409);
-    const made = await request('POST', '/courses/COURSE/bonus-adjustments', 'teacher-b', body);
+    const body = { studentId: 'student-b', deltaPoints: 9 };
+    assert.equal((await request('POST', '/courses/COURSE/terms/current/teachers/teacher-a/bonus-adjustments', 'teacher-a', body)).status, 409);
+    const made = await request('POST', '/courses/COURSE/terms/current/teachers/teacher-b/bonus-adjustments', 'teacher-b', body);
     assert.equal(made.status, 201);
-    assert.equal((await request('POST', '/courses/COURSE/bonus-adjustments', 'teacher-b', body)).data.id, made.data.id);
-    assert.equal((await request('GET', '/courses/COURSE/bonus-ledger', 'teacher-a')).data.total, 0);
-    assert.equal((await request('GET', '/courses/COURSE/bonus-summary', 'teacher-a')).data.total, 0);
-    assert.equal((await request('GET', '/courses/COURSE/bonus-ledger', 'teacher-b')).data.total, 1);
-    assert.equal((await request('GET', '/courses/COURSE/bonus-ledger', 'admin')).data.total, 1);
+    assert.equal((await request('POST', '/courses/COURSE/terms/current/teachers/teacher-b/bonus-adjustments', 'teacher-b', body)).data.id, made.data.id);
+    assert.equal((await request('GET', '/courses/COURSE/terms/current/teachers/teacher-a/bonus-ledger', 'teacher-a')).data.total, 0);
+    assert.equal((await request('GET', '/courses/COURSE/terms/current/teachers/teacher-a/bonus-summary', 'teacher-a')).data.total, 0);
+    assert.equal((await request('GET', '/courses/COURSE/terms/current/teachers/teacher-b/bonus-ledger', 'teacher-b')).data.total, 1);
+    assert.equal((await request('GET', '/courses/COURSE/terms/current/teachers/teacher-b/bonus-ledger', 'admin')).data.total, 1);
     assert.equal(await db.prepare('SELECT teacher_id FROM bonus_ledger').first('teacher_id'), 'teacher-b');
 });
 

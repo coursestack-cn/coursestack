@@ -51,9 +51,9 @@ test('个人空间限定本人，教师加分报表限定课程且支持学期�
     assert.equal((await h.api('GET', '/me/activity?kind=answer', 'student-b')).data.items[0].id, a);
     assert.equal((await h.api('GET', '/me/bonus-ledger', 'student-a')).data.items.length, 0);
     assert.equal((await h.api('GET', '/me/bonus-ledger', 'student-b')).data.items[0].deltaPoints, 50);
-    assert.equal((await h.api('GET', '/courses/course-a/bonus-summary?termId=term-active', 'teacher-a')).data.items[0].totalPoints, 50);
-    assert.equal((await h.api('GET', '/courses/course-a/bonus-ledger?termId=term-old', 'teacher-a')).data.items.length, 0);
-    assert.equal((await h.api('GET', '/courses/course-a/bonus-summary', 'teacher-b')).status, 403);
+    assert.equal((await h.api('GET', '/courses/course-a/terms/term-active/teachers/teacher-a/bonus-summary?termId=term-active', 'teacher-a')).data.items[0].totalPoints, 50);
+    assert.equal((await h.api('GET', '/courses/course-a/terms/term-old/teachers/teacher-b/bonus-ledger', 'teacher-a')).status, 403);
+    assert.equal((await h.api('GET', '/courses/course-a/terms/term-active/teachers/teacher-a/bonus-summary', 'teacher-b')).status, 403);
 });
 test('模拟写入流水失败时，采纳状态和奖励一起回滚', async () => {
     await h.policy(); const q = await h.postQuestion(), a = await h.postAnswer(q);
@@ -62,12 +62,12 @@ test('模拟写入流水失败时，采纳状态和奖励一起回滚', async ()
     assert.equal((await h.api('GET', `/questions/${q}`)).data.solved, false);
     assert.equal(await h.database.prepare('SELECT COUNT(*) AS n FROM bonus_ledger').first('n'), 0);
 });
-test('课程创建时授课关系失败，课程及默认积分规则整体回滚', async () => {
-    await h.database.prepare("CREATE TRIGGER fail_teaching BEFORE INSERT ON enrollments BEGIN SELECT RAISE(ABORT,'simulated_failure'); END;").run();
-    const r = await h.api('POST', '/courses', 'teacher-a', { name: '回滚课程', code: 'ROLLBACK1' });
+test('教学班默认积分规则失败时，加入教学班整体回滚', async () => {
+    await h.database.prepare("CREATE TRIGGER fail_policy BEFORE INSERT ON class_bonus_rules BEGIN SELECT RAISE(ABORT,'simulated_failure'); END;").run();
+    const r = await h.api('PUT', '/courses/course-b/terms/term-active/teachers/me', 'teacher-a');
     assert.equal(r.status, 500);
-    assert.equal(await h.database.prepare("SELECT COUNT(*) AS n FROM courses WHERE code='ROLLBACK1'").first('n'), 0);
-    assert.equal(await h.database.prepare('SELECT COUNT(*) AS n FROM course_bonus_rules').first('n'), 2);
+    assert.equal(await h.database.prepare("SELECT count(*) AS n FROM teaching_classes WHERE course_id='course-b' AND teacher_id='teacher-a'").first('n'), 0);
+    assert.equal(await h.database.prepare('SELECT COUNT(*) AS n FROM class_bonus_rules').first('n'), 3);
 });
 test('删除问题撤销奖励并阻止后续回答，管理员可以跨课程审查', async () => {
     await h.policy(); const q = await h.postQuestion(), a = await h.postAnswer(q); await h.accept(q, a);
@@ -83,7 +83,7 @@ test('数据库拒绝跨问题采纳及内容身份迁移', async () => {
     await assert.rejects(() => h.database.prepare("UPDATE contents SET course_id='course-b' WHERE id=?").bind(q1).run(), /content_identity_immutable/);
 });
 test('无效加分小数和过大正文被拒绝，报错不返回SQL或令牌', async () => {
-    const invalid = await h.api('PUT', '/courses/course-a/bonus-policy', 'teacher-a', { pointsQuestion: 0, pointsAnswer: 2.345, pointsAcceptance: 0, pointsComment: 0, pointsMaterial: 0, pointsMaterialVersion: 0 });
+    const invalid = await h.api('PUT', '/courses/course-a/terms/term-active/teachers/teacher-a/bonus-policy', 'teacher-a', { pointsQuestion: 0, pointsAnswer: 2.345, pointsAcceptance: 0, pointsComment: 0, pointsMaterial: 0, pointsMaterialVersion: 0 });
     assert.equal(invalid.status, 400);
     const long = await h.api('POST', '/courses/course-a/questions', 'student-a', { title: '过长正文', body: doc('中'.repeat(50000)) });
     assert.equal(long.status, 400);
