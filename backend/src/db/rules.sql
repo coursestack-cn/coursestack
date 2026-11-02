@@ -48,40 +48,50 @@ WHEN NEW.target_id IS NOT NULL BEGIN
             AND (NEW.kind<>'answer' OR p.kind='question'));
 END;
 --> statement-breakpoint
-CREATE TRIGGER course_creator_guard BEFORE INSERT ON courses
-WHEN NOT EXISTS(SELECT 1 FROM accounts WHERE id=NEW.created_by AND role='admin' AND status<>'deleted')
-BEGIN SELECT RAISE(ABORT,'course_admin_required'); END;
---> statement-breakpoint
-CREATE TRIGGER course_identity_immutable BEFORE UPDATE OF id ON courses WHEN NEW.id<>OLD.id
-BEGIN SELECT RAISE(ABORT,'course_identity_immutable'); END;
---> statement-breakpoint
-CREATE TRIGGER course_term_identity_immutable BEFORE UPDATE ON course_terms
-WHEN NEW.course_id<>OLD.course_id OR NEW.term_id<>OLD.term_id
-BEGIN SELECT RAISE(ABORT,'course_term_identity_immutable'); END;
---> statement-breakpoint
-CREATE TRIGGER teaching_class_insert_guard BEFORE INSERT ON teaching_classes BEGIN
-  SELECT RAISE(ABORT,'invalid_class_teacher') WHERE NOT EXISTS(
-    SELECT 1 FROM accounts WHERE id=NEW.teacher_id AND role='teacher' AND status<>'deleted');
-  SELECT RAISE(ABORT,'current_term_required') WHERE NOT EXISTS(SELECT 1 FROM terms WHERE id=NEW.term_id AND current=1);
+CREATE TRIGGER course_bonus_rules_created AFTER INSERT ON courses BEGIN
+  INSERT INTO course_bonus_rules(id) VALUES(NEW.id);
 END;
 --> statement-breakpoint
-CREATE TRIGGER teaching_class_identity_immutable BEFORE UPDATE ON teaching_classes
-WHEN NEW.course_id<>OLD.course_id OR NEW.term_id<>OLD.term_id OR NEW.teacher_id<>OLD.teacher_id
-BEGIN SELECT RAISE(ABORT,'teaching_class_identity_immutable'); END;
+CREATE TRIGGER course_teacher_insert BEFORE INSERT ON courses
+WHEN NOT EXISTS(SELECT 1 FROM courses WHERE id=NEW.id)
+  AND NOT EXISTS(SELECT 1 FROM enrollments e JOIN accounts a ON a.id=e.account_id AND a.role='teacher' AND a.status<>'deleted'
+    JOIN terms t ON t.id=e.term_id AND t.current=1 WHERE e.course_id=NEW.id)
+BEGIN SELECT RAISE(ABORT,'course_requires_teacher'); END;
 --> statement-breakpoint
-CREATE TRIGGER class_bonus_rules_created AFTER INSERT ON teaching_classes BEGIN
-  INSERT INTO class_bonus_rules(course_id,term_id,teacher_id) VALUES(NEW.course_id,NEW.term_id,NEW.teacher_id);
+CREATE TRIGGER enrollment_identity_insert BEFORE INSERT ON enrollments BEGIN
+  SELECT RAISE(ABORT,'invalid_enrollment_identity') WHERE NOT EXISTS(
+    SELECT 1 FROM accounts WHERE id=NEW.account_id AND role IN ('teacher','student') AND status<>'deleted');
+  SELECT RAISE(ABORT,'current_term_required') WHERE NOT EXISTS(
+    SELECT 1 FROM enrollments WHERE course_id=NEW.course_id AND term_id=NEW.term_id)
+    AND NOT EXISTS(SELECT 1 FROM terms WHERE id=NEW.term_id AND current=1);
+  SELECT RAISE(ABORT,'enrollment_teacher_unique') WHERE (SELECT role FROM accounts WHERE id=NEW.account_id)='teacher'
+    AND EXISTS(SELECT 1 FROM enrollments e JOIN accounts a ON a.id=e.account_id AND a.role='teacher'
+      WHERE e.course_id=NEW.course_id AND e.term_id=NEW.term_id AND e.account_id<>NEW.account_id);
+  SELECT RAISE(ABORT,'enrollment_teacher_required') WHERE (SELECT role FROM accounts WHERE id=NEW.account_id)='student'
+    AND NOT EXISTS(SELECT 1 FROM enrollments e JOIN accounts a ON a.id=e.account_id AND a.role='teacher'
+      WHERE e.course_id=NEW.course_id AND e.term_id=NEW.term_id);
 END;
 --> statement-breakpoint
-CREATE TRIGGER class_student_insert_guard BEFORE INSERT ON class_students BEGIN
-  SELECT RAISE(ABORT,'invalid_class_student') WHERE NOT EXISTS(
-    SELECT 1 FROM accounts WHERE id=NEW.student_id AND role='student' AND status<>'deleted');
-  SELECT RAISE(ABORT,'current_term_required') WHERE NOT EXISTS(SELECT 1 FROM terms WHERE id=NEW.term_id AND current=1);
+CREATE TRIGGER enrollment_identity_update BEFORE UPDATE ON enrollments BEGIN
+  SELECT RAISE(ABORT,'enrollment_instance_immutable') WHERE NEW.course_id<>OLD.course_id OR NEW.term_id<>OLD.term_id;
+  SELECT RAISE(ABORT,'invalid_enrollment_identity') WHERE NOT EXISTS(
+    SELECT 1 FROM accounts WHERE id=NEW.account_id AND role IN ('teacher','student') AND status<>'deleted');
+  SELECT RAISE(ABORT,'enrollment_teacher_unique') WHERE (SELECT role FROM accounts WHERE id=NEW.account_id)='teacher'
+    AND EXISTS(SELECT 1 FROM enrollments e JOIN accounts a ON a.id=e.account_id AND a.role='teacher'
+      WHERE e.course_id=NEW.course_id AND e.term_id=NEW.term_id AND e.account_id<>OLD.account_id);
+  SELECT RAISE(ABORT,'enrollment_teacher_required') WHERE (SELECT role FROM accounts WHERE id=NEW.account_id)='student'
+    AND NOT EXISTS(SELECT 1 FROM enrollments e JOIN accounts a ON a.id=e.account_id AND a.role='teacher'
+      WHERE e.course_id=NEW.course_id AND e.term_id=NEW.term_id AND e.account_id<>OLD.account_id);
 END;
 --> statement-breakpoint
-CREATE TRIGGER class_student_identity_immutable BEFORE UPDATE ON class_students
-WHEN NEW.course_id<>OLD.course_id OR NEW.term_id<>OLD.term_id OR NEW.student_id<>OLD.student_id OR NEW.teacher_id<>OLD.teacher_id
-BEGIN SELECT RAISE(ABORT,'class_student_identity_immutable'); END;
+CREATE TRIGGER enrollment_teacher_delete BEFORE DELETE ON enrollments
+WHEN (SELECT role FROM accounts WHERE id=OLD.account_id)='teacher' BEGIN
+  SELECT RAISE(ABORT,'enrollment_teacher_required') WHERE EXISTS(
+    SELECT 1 FROM enrollments WHERE course_id=OLD.course_id AND term_id=OLD.term_id AND account_id<>OLD.account_id);
+  SELECT RAISE(ABORT,'course_requires_teacher') WHERE EXISTS(SELECT 1 FROM courses WHERE id=OLD.course_id)
+    AND NOT EXISTS(SELECT 1 FROM enrollments e JOIN accounts a ON a.id=e.account_id AND a.role='teacher'
+      WHERE e.course_id=OLD.course_id AND (e.term_id<>OLD.term_id OR e.account_id<>OLD.account_id));
+END;
 --> statement-breakpoint
 CREATE TRIGGER ledger_no_delete BEFORE DELETE ON bonus_ledger
 BEGIN SELECT RAISE(ABORT,'immutable_ledger'); END;
@@ -91,14 +101,14 @@ BEGIN SELECT RAISE(ABORT,'immutable_ledger'); END;
 --> statement-breakpoint
 CREATE TRIGGER content_created_bonus AFTER INSERT ON contents
 WHEN NEW.kind IN ('question','answer','comment') BEGIN
-  INSERT INTO bonus_ledger(course_id,term_id,teacher_id,student_id,delta_points,source_kind,source_id,operator_id,created_at)
-  SELECT NEW.course_id,t.id,r.teacher_id,NEW.author_id,
+  INSERT INTO bonus_ledger(course_id,term_id,student_id,delta_points,source_kind,source_id,operator_id,created_at)
+  SELECT NEW.course_id,t.id,NEW.author_id,
     CASE NEW.kind WHEN 'question' THEN r.points_question WHEN 'answer' THEN r.points_answer ELSE r.points_comment END,
     NEW.kind,NEW.id,NEW.updated_by,NEW.created_at
-  FROM class_bonus_rules r JOIN terms t ON t.id=r.term_id AND t.current=1
+  FROM course_bonus_rules r JOIN terms t ON t.current=1
   JOIN accounts student ON student.id=NEW.author_id AND student.role='student' AND student.status<>'deleted'
-  JOIN class_students e ON e.course_id=r.course_id AND e.term_id=t.id AND e.teacher_id=r.teacher_id AND e.student_id=student.id
-  WHERE r.course_id=NEW.course_id AND NEW.id IN (SELECT id FROM public_contents)
+  JOIN enrollments e ON e.course_id=r.id AND e.term_id=t.id AND e.account_id=student.id
+  WHERE r.id=NEW.course_id AND NEW.id IN (SELECT id FROM public_contents)
     AND CASE NEW.kind WHEN 'question' THEN r.points_question WHEN 'answer' THEN r.points_answer ELSE r.points_comment END>0;
 END;
 --> statement-breakpoint
@@ -106,8 +116,8 @@ CREATE TRIGGER content_status_bonus AFTER UPDATE OF status ON contents WHEN NEW.
   UPDATE acceptances SET operator_id=NEW.updated_by
     WHERE NEW.status='deleted' AND (question_id=NEW.id OR answer_id=NEW.id);
   DELETE FROM acceptances WHERE NEW.status='deleted' AND (question_id=NEW.id OR answer_id=NEW.id);
-  INSERT INTO bonus_ledger(course_id,term_id,teacher_id,student_id,delta_points,source_kind,source_id,operator_id,created_at,reverses_id)
-  SELECT l.course_id,l.term_id,l.teacher_id,l.student_id,-l.delta_points,l.source_kind,l.source_id,NEW.updated_by,NEW.updated_at,l.id
+  INSERT INTO bonus_ledger(course_id,term_id,student_id,delta_points,source_kind,source_id,operator_id,created_at,reverses_id)
+  SELECT l.course_id,l.term_id,l.student_id,-l.delta_points,l.source_kind,l.source_id,NEW.updated_by,NEW.updated_at,l.id
   FROM bonus_state l LEFT JOIN bonus_sources s ON s.source_kind=l.source_kind AND s.source_id=l.source_id
   WHERE l.course_id=NEW.course_id AND ((l.delta_points>0 AND s.source_id IS NULL) OR (l.delta_points<0 AND s.source_id IS NOT NULL));
 END;
@@ -128,36 +138,36 @@ CREATE TRIGGER acceptance_update_guard BEFORE UPDATE OF question_id,answer_id ON
 END;
 --> statement-breakpoint
 CREATE TRIGGER acceptance_created AFTER INSERT ON acceptances BEGIN
-  INSERT INTO bonus_ledger(course_id,term_id,teacher_id,student_id,delta_points,source_kind,source_id,operator_id,created_at)
-  SELECT q.course_id,t.id,r.teacher_id,answer.author_id,r.points_acceptance,'acceptance',answer.id,NEW.operator_id,NEW.created_at
+  INSERT INTO bonus_ledger(course_id,term_id,student_id,delta_points,source_kind,source_id,operator_id,created_at)
+  SELECT q.course_id,t.id,answer.author_id,r.points_acceptance,'acceptance',answer.id,NEW.operator_id,NEW.created_at
   FROM public_contents q JOIN public_contents answer ON answer.id=NEW.answer_id
-  JOIN class_bonus_rules r ON r.course_id=q.course_id JOIN terms t ON t.id=r.term_id AND t.current=1
+  JOIN course_bonus_rules r ON r.id=q.course_id JOIN terms t ON t.current=1
   JOIN accounts student ON student.id=answer.author_id AND student.role='student' AND student.status<>'deleted'
-  JOIN class_students e ON e.course_id=q.course_id AND e.term_id=t.id AND e.teacher_id=r.teacher_id AND e.student_id=student.id
+  JOIN enrollments e ON e.course_id=q.course_id AND e.term_id=t.id AND e.account_id=student.id
   WHERE q.id=NEW.question_id AND r.points_acceptance>0 ON CONFLICT DO NOTHING;
-  INSERT INTO bonus_ledger(course_id,term_id,teacher_id,student_id,delta_points,source_kind,source_id,operator_id,created_at,reverses_id)
-  SELECT l.course_id,l.term_id,l.teacher_id,l.student_id,-l.delta_points,l.source_kind,l.source_id,NEW.operator_id,unixepoch(),l.id
+  INSERT INTO bonus_ledger(course_id,term_id,student_id,delta_points,source_kind,source_id,operator_id,created_at,reverses_id)
+  SELECT l.course_id,l.term_id,l.student_id,-l.delta_points,l.source_kind,l.source_id,NEW.operator_id,unixepoch(),l.id
   FROM bonus_state l LEFT JOIN bonus_sources s ON s.source_kind=l.source_kind AND s.source_id=l.source_id
   WHERE l.course_id=(SELECT course_id FROM contents WHERE id=NEW.question_id) AND ((l.delta_points>0 AND s.source_id IS NULL) OR (l.delta_points<0 AND s.source_id IS NOT NULL));
 END;
 --> statement-breakpoint
 CREATE TRIGGER acceptance_changed AFTER UPDATE OF answer_id ON acceptances WHEN NEW.answer_id<>OLD.answer_id BEGIN
-  INSERT INTO bonus_ledger(course_id,term_id,teacher_id,student_id,delta_points,source_kind,source_id,operator_id,created_at)
-  SELECT q.course_id,t.id,r.teacher_id,answer.author_id,r.points_acceptance,'acceptance',answer.id,NEW.operator_id,NEW.created_at
+  INSERT INTO bonus_ledger(course_id,term_id,student_id,delta_points,source_kind,source_id,operator_id,created_at)
+  SELECT q.course_id,t.id,answer.author_id,r.points_acceptance,'acceptance',answer.id,NEW.operator_id,NEW.created_at
   FROM public_contents q JOIN public_contents answer ON answer.id=NEW.answer_id
-  JOIN class_bonus_rules r ON r.course_id=q.course_id JOIN terms t ON t.id=r.term_id AND t.current=1
+  JOIN course_bonus_rules r ON r.id=q.course_id JOIN terms t ON t.current=1
   JOIN accounts student ON student.id=answer.author_id AND student.role='student' AND student.status<>'deleted'
-  JOIN class_students e ON e.course_id=q.course_id AND e.term_id=t.id AND e.teacher_id=r.teacher_id AND e.student_id=student.id
+  JOIN enrollments e ON e.course_id=q.course_id AND e.term_id=t.id AND e.account_id=student.id
   WHERE q.id=NEW.question_id AND r.points_acceptance>0 ON CONFLICT DO NOTHING;
-  INSERT INTO bonus_ledger(course_id,term_id,teacher_id,student_id,delta_points,source_kind,source_id,operator_id,created_at,reverses_id)
-  SELECT l.course_id,l.term_id,l.teacher_id,l.student_id,-l.delta_points,l.source_kind,l.source_id,NEW.operator_id,unixepoch(),l.id
+  INSERT INTO bonus_ledger(course_id,term_id,student_id,delta_points,source_kind,source_id,operator_id,created_at,reverses_id)
+  SELECT l.course_id,l.term_id,l.student_id,-l.delta_points,l.source_kind,l.source_id,NEW.operator_id,unixepoch(),l.id
   FROM bonus_state l LEFT JOIN bonus_sources s ON s.source_kind=l.source_kind AND s.source_id=l.source_id
   WHERE l.course_id=(SELECT course_id FROM contents WHERE id=NEW.question_id) AND ((l.delta_points>0 AND s.source_id IS NULL) OR (l.delta_points<0 AND s.source_id IS NOT NULL));
 END;
 --> statement-breakpoint
 CREATE TRIGGER acceptance_removed AFTER DELETE ON acceptances BEGIN
-  INSERT INTO bonus_ledger(course_id,term_id,teacher_id,student_id,delta_points,source_kind,source_id,operator_id,created_at,reverses_id)
-  SELECT l.course_id,l.term_id,l.teacher_id,l.student_id,-l.delta_points,l.source_kind,l.source_id,OLD.operator_id,unixepoch(),l.id
+  INSERT INTO bonus_ledger(course_id,term_id,student_id,delta_points,source_kind,source_id,operator_id,created_at,reverses_id)
+  SELECT l.course_id,l.term_id,l.student_id,-l.delta_points,l.source_kind,l.source_id,OLD.operator_id,unixepoch(),l.id
   FROM bonus_state l LEFT JOIN bonus_sources s ON s.source_kind=l.source_kind AND s.source_id=l.source_id
   WHERE l.course_id=(SELECT course_id FROM contents WHERE id=OLD.question_id) AND ((l.delta_points>0 AND s.source_id IS NULL) OR (l.delta_points<0 AND s.source_id IS NOT NULL));
 END;
@@ -177,35 +187,32 @@ END;
 CREATE TRIGGER file_version_created_bonus AFTER INSERT ON file_versions BEGIN
   INSERT INTO material_next_versions(material_id,next_version) VALUES(NEW.material_id,NEW.version+1)
     ON CONFLICT(material_id) DO UPDATE SET next_version=MAX(next_version,excluded.next_version);
-  INSERT INTO bonus_ledger(course_id,term_id,teacher_id,student_id,delta_points,source_kind,source_id,operator_id,created_at)
-  SELECT m.course_id,t.id,r.teacher_id,NEW.uploaded_by,
+  INSERT INTO bonus_ledger(course_id,term_id,student_id,delta_points,source_kind,source_id,operator_id,created_at)
+  SELECT m.course_id,t.id,NEW.uploaded_by,
     CASE WHEN NEW.version=1 THEN r.points_material ELSE r.points_material_version END,'material',NEW.material_id||'@'||NEW.version,
     NEW.updated_by,NEW.created_at
-  FROM public_contents m JOIN class_bonus_rules r ON r.course_id=m.course_id JOIN terms t ON t.id=r.term_id AND t.current=1
+  FROM public_contents m JOIN course_bonus_rules r ON r.id=m.course_id JOIN terms t ON t.current=1
   JOIN accounts student ON student.id=NEW.uploaded_by AND student.role='student' AND student.status<>'deleted'
-  JOIN class_students e ON e.course_id=m.course_id AND e.term_id=t.id AND e.teacher_id=r.teacher_id AND e.student_id=student.id
+  JOIN enrollments e ON e.course_id=m.course_id AND e.term_id=t.id AND e.account_id=student.id
   WHERE m.id=NEW.material_id
     AND CASE WHEN NEW.version=1 THEN r.points_material ELSE r.points_material_version END>0 ON CONFLICT DO NOTHING;
-  INSERT INTO bonus_ledger(course_id,term_id,teacher_id,student_id,delta_points,source_kind,source_id,operator_id,created_at,reverses_id)
-  SELECT l.course_id,l.term_id,l.teacher_id,l.student_id,-l.delta_points,l.source_kind,l.source_id,NEW.updated_by,unixepoch(),l.id
+  INSERT INTO bonus_ledger(course_id,term_id,student_id,delta_points,source_kind,source_id,operator_id,created_at,reverses_id)
+  SELECT l.course_id,l.term_id,l.student_id,-l.delta_points,l.source_kind,l.source_id,NEW.updated_by,unixepoch(),l.id
   FROM bonus_state l LEFT JOIN bonus_sources s ON s.source_kind=l.source_kind AND s.source_id=l.source_id
   WHERE l.course_id=(SELECT course_id FROM contents WHERE id=NEW.material_id) AND ((l.delta_points>0 AND s.source_id IS NULL) OR (l.delta_points<0 AND s.source_id IS NOT NULL));
 END;
 --> statement-breakpoint
 CREATE TRIGGER file_version_deleted_bonus AFTER DELETE ON file_versions BEGIN
-  INSERT INTO bonus_ledger(course_id,term_id,teacher_id,student_id,delta_points,source_kind,source_id,operator_id,created_at,reverses_id)
-  SELECT l.course_id,l.term_id,l.teacher_id,l.student_id,-l.delta_points,l.source_kind,l.source_id,OLD.updated_by,unixepoch(),l.id
+  INSERT INTO bonus_ledger(course_id,term_id,student_id,delta_points,source_kind,source_id,operator_id,created_at,reverses_id)
+  SELECT l.course_id,l.term_id,l.student_id,-l.delta_points,l.source_kind,l.source_id,OLD.updated_by,unixepoch(),l.id
   FROM bonus_state l LEFT JOIN bonus_sources s ON s.source_kind=l.source_kind AND s.source_id=l.source_id
   WHERE l.course_id=(SELECT course_id FROM contents WHERE id=OLD.material_id) AND ((l.delta_points>0 AND s.source_id IS NULL) OR (l.delta_points<0 AND s.source_id IS NOT NULL));
 END;
 --> statement-breakpoint
 CREATE TRIGGER bonus_ledger_guard BEFORE INSERT ON bonus_ledger BEGIN
-  SELECT RAISE(ABORT,'invalid_bonus_class') WHERE NEW.reverses_id IS NULL AND NOT EXISTS(
-    SELECT 1 FROM class_students WHERE course_id=NEW.course_id AND term_id=NEW.term_id
-      AND teacher_id=NEW.teacher_id AND student_id=NEW.student_id);
   SELECT RAISE(ABORT,'invalid_bonus_student') WHERE NOT EXISTS(SELECT 1 FROM accounts WHERE id=NEW.student_id AND role='student');
   SELECT RAISE(ABORT,'invalid_bonus_reversal') WHERE NEW.reverses_id IS NOT NULL AND NOT EXISTS(
     SELECT 1 FROM bonus_ledger previous WHERE previous.id=NEW.reverses_id AND previous.source_kind<>'manual'
-      AND previous.course_id=NEW.course_id AND previous.term_id=NEW.term_id AND previous.teacher_id=NEW.teacher_id AND previous.student_id=NEW.student_id
+      AND previous.course_id=NEW.course_id AND previous.term_id=NEW.term_id AND previous.student_id=NEW.student_id
       AND previous.source_kind=NEW.source_kind AND previous.source_id=NEW.source_id AND previous.delta_points=-NEW.delta_points);
 END;
