@@ -6,6 +6,40 @@ let h;
 beforeEach(async () => { h = await start(); });
 afterEach(async () => { await h?.dispose(); });
 
+test('my course search filters before pagination and keeps current/history membership boundaries', async () => {
+    assert.equal((await h.api('GET', '/me/courses?q=MATH')).status, 401);
+    const physics = await h.api('GET', `/me/courses?pageSize=1&q=${encodeURIComponent('  物理  ')}`, 'student-b');
+    assert.equal(physics.status, 200);
+    assert.equal(physics.data.total, 1);
+    assert.deepEqual(physics.data.items.map(item => item.course.code), ['PHYS101']);
+    assert.equal(physics.data.currentTerm.id, 'term-active');
+    assert.equal((await h.api('GET', '/me/courses?q=PHYS', 'teacher-a')).data.total, 0);
+    assert.equal((await h.api('GET', '/me/courses?q=MATH', 'teacher-b')).data.total, 0);
+    const history = await h.api('GET', '/me/courses?scope=history&q=MATH', 'teacher-b');
+    assert.equal(history.data.total, 1);
+    assert.deepEqual(history.data.items[0].terms.map(term => term.id), ['term-old']);
+    assert.equal((await h.api('GET', '/me/courses?q=MATH', 'admin')).data.total, 0);
+    assert.equal((await h.api('GET', `/me/courses?q=${'x'.repeat(101)}`, 'teacher-a')).status, 400);
+    assert.equal((await h.api('GET', `/me/courses?q=${encodeURIComponent("' OR 1=1 --")}`, 'teacher-a')).data.total, 0);
+});
+
+test('teacher creation assigns the current teacher and retries do not create another course', async () => {
+    const body = { name: '离散数学', code: 'DISCRETE101', introduction: '图论与组合数学' };
+    const first = await h.api('POST', '/courses', 'teacher-a', body, { key: 'create-course-once' });
+    assert.equal(first.status, 201);
+    const replay = await h.api('POST', '/courses', 'teacher-a', body, { key: 'create-course-once' });
+    assert.equal(replay.status, 201);
+    assert.equal(replay.data.id, first.data.id);
+    assert.equal(replay.headers.get('Idempotency-Replayed'), 'true');
+    const mine = await h.api('GET', '/me/courses?q=DISCRETE101', 'teacher-a');
+    assert.equal(mine.data.total, 1);
+    assert.equal(mine.data.items[0].course.currentTeacher.id, 'teacher-a');
+    assert.deepEqual(mine.data.items[0].terms.map(term => term.id), ['term-active']);
+    assert.equal((await h.api('GET', '/me/courses?q=DISCRETE101', 'teacher-b')).data.total, 0);
+    assert.equal((await h.api('PATCH', `/courses/${first.data.id}`, 'teacher-b', { name: '越权修改' })).status, 403);
+    assert.equal((await h.api('POST', '/courses', 'student-a', body)).status, 403);
+});
+
 test('terms.current is binary and unique; switching terms preserves all memberships', async () => {
     const before = (await h.database.prepare('SELECT * FROM enrollments ORDER BY course_id,term_id,account_id').all()).results;
     await assert.rejects(() => h.database.prepare("UPDATE terms SET current=1 WHERE id='term-old'").run(), /UNIQUE/);

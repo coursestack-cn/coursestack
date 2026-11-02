@@ -2914,6 +2914,15 @@
               ],
               "default": "current"
             }
+          },
+          {
+            "name": "q",
+            "in": "query",
+            "required": false,
+            "schema": {
+              "type": "string",
+              "maxLength": 100
+            }
           }
         ],
         "responses": {

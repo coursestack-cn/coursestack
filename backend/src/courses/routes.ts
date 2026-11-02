@@ -35,6 +35,8 @@ export async function getCourse(c: Ctx, id: string) {
 export const courseRoutes = new Hono<AppEnv>();
 courseRoutes.get('/me/courses', async c => {
     const a = actor(c), p = page(c);
+    const q = (c.req.query('q') ?? '').trim();
+    if (q.length > 100) throw new HttpError(400, 'INVALID_FILTER', '课程关键词最长 100 字');
     const scope = parsedEnum(c.req.query('scope'), ['current', 'history'] as const, 'current')!;
     const current = scope === 'current' ? 1 : 0;
     const db = createDatabase(c.env.DB);
@@ -42,6 +44,7 @@ courseRoutes.get('/me/courses', async c => {
         queryPage<Course>(c, p, sql`${courseSelect}
             WHERE EXISTS(SELECT 1 FROM enrollments e JOIN terms term ON term.id=e.term_id
                 WHERE e.course_id=c.id AND e.account_id=${a.id} AND term.current=${current})
+                AND (instr(c.name,${q})>0 OR instr(c.code,${q})>0)
             ORDER BY c.code ASC,c.id ASC`),
         db.get<{ id: string; name: string }>(sql`SELECT id,name FROM terms WHERE current=1`),
     ]);
