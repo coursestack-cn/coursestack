@@ -15,13 +15,7 @@
 
     type Term = { id: string; name: string; current: boolean };
     type MyCourse = {
-        course: {
-            id: string;
-            name: string;
-            code: string;
-            introduction: string;
-            currentTeacher: { id: string; nickname: string | null; isDeleted: boolean } | null;
-        };
+        course: import("../manage/course").Course;
         terms: Term[];
     };
     type MyCourseList = {
@@ -61,7 +55,7 @@
         {#if canCreate}
             <Button href="/manage/courses?new=1" variant="primary">
                 {#snippet icon()}<Plus size="1em" />{/snippet}
-                新建课程
+                {session.hasRole("admin") ? "新建课程" : "加入课程"}
             </Button>
         {/if}
     {/snippet}
@@ -83,16 +77,16 @@
                         {#each data.items as item (item.course.id)}
                             {@const course = item.course}
                             <li>
-                                <Card href={`/courses/${encodeURIComponent(course.code)}`} padding="lg" class="my-course-card" aria-label={`查看课程：${course.name}`}>
+                                <Card href={`/courses/${encodeURIComponent(course.id)}`} padding="lg" class="my-course-card" aria-label={`查看课程：${course.name}`}>
                                     <div class="course-content">
-                                        <div class="course-code"><BookOpen size="1.25em" aria-hidden="true" /><span>{course.code}</span></div>
+                                        <div class="course-code"><BookOpen size="1.25em" aria-hidden="true" /><span>{course.id}</span></div>
                                         <h2>{course.name}</h2>
                                         <p class="introduction" class:muted={!course.introduction.trim()}>{course.introduction.trim() || "暂无课程简介"}</p>
                                         <div class="course-footer">
                                             {#if scope === "current"}
                                                 <div class="detail">
                                                     <UserRound size="1em" aria-hidden="true" />
-                                                    <span><span class="detail-label">本学期教师</span>{course.currentTeacher ? displayName(course.currentTeacher) : "暂无教师信息"}</span>
+                                                    <span><span class="detail-label">本学期教师</span>{course.currentTeachers.length ? course.currentTeachers.map(teacher => displayName(teacher)).join("、") : "暂无教师信息"}</span>
                                                 </div>
                                             {:else}
                                                 <div class="detail">

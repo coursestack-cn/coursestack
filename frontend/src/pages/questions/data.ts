@@ -5,8 +5,8 @@ import { entityId, urlId } from "$lib/router/ids";
 export { urlId } from "$lib/router/ids";
 
 export type Page<T> = { items: T[]; page: number; pageSize: number; total: number };
-export type Course = { id: string; code: string; name: string };
-export type CourseEntry = { course: Course; permissions: { canManage: boolean } };
+export type Course = { id: string; name: string };
+export type CourseEntry = { course: Course; permissions: { canManageContent: boolean; canManageCourse: boolean } };
 type Parent = { id: string; author: { nickname: string | null; isDeleted: boolean }; isDeleted: boolean };
 export type Content = {
     id: string; kind: "question" | "answer" | "comment" | "material"; courseId: string;
@@ -22,7 +22,7 @@ export type Tombstone = Pick<Content, "id" | "courseId" | "targetId" | "targetKi
 export type Comment = Content | Tombstone;
 export const encode = encodeURIComponent;
 export const questionHref = (id: string) => `/questions/${encode(urlId(id))}`;
-export const courseQuestionsHref = (course: Course) => `/courses/${encode(course.code)}`;
+export const courseQuestionsHref = (course: Course) => `/courses/${encode(course.id)}`;
 export const pageNumber = (value: string | null) => {
     const number = Number(value ?? 1);
     return Number.isInteger(number) && number >= 1 && number <= 10000 ? number : 1;
@@ -31,11 +31,7 @@ export const pageCount = (data: Page<unknown>) => Math.max(1, Math.min(10000, Ma
 export const emptyDoc = () => structuredClone(EMPTY_DOC);
 
 export async function courseByCode(code: string, signal: AbortSignal): Promise<CourseEntry> {
-    const query = new URLSearchParams({ code, pageSize: "1" });
-    const courses = await api.get<Page<Course>>(`/api/courses?${query}`, { signal });
-    const course = courses.items[0];
-    if (!course) throw new ApiError(404, "COURSE_NOT_FOUND", "课程不存在");
-    return courseEntry(course.id, signal);
+    return courseEntry(code, signal);
 }
 export const courseEntry = (id: string, signal: AbortSignal) => api.get<CourseEntry>(`/api/courses/${encode(id)}/entry`, { signal });
 export const getContent = (id: string, signal?: AbortSignal) => api.get<Comment>(`/api/contents/${encode(id)}`, { signal });

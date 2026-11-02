@@ -111,7 +111,7 @@
     {#if unavailable}<StateBlock kind="unavailable" title="内容不可用" />
     {:else}
         {#if question.tags?.length}<div class="tags" aria-label="问题标签">{#each question.tags as tag}<Link href={`${courseQuestionsHref(entry.course)}?${new URLSearchParams({ tag })}`}>{tag}</Link>{/each}</div>{/if}
-        <DiscussionBlock content={question} canManage={entry.permissions.canManage}
+        <DiscussionBlock content={question} canManage={entry.permissions.canManageContent}
             focusComment={!activeFocus?.answerId ? activeFocus?.commentId : undefined} onchange={refresh} onremove={removed} onlocated={() => { void locate(); }} />
         {#if focus.status === "error"}<div class="focus-error"><ContentState status="error" error={focus.error} reload={focus.reload} /></div>{/if}
         <section class="answers" aria-label="回答列表">
@@ -119,7 +119,7 @@
             <ContentState status={answers.status} error={answers.error} refreshing={answers.refreshing} reload={answers.reload}>
                 {#if answers.data}
                     {#each answers.data.items as answer (answer.id)}
-                        <DiscussionBlock content={{ ...answer, isAccepted: question.acceptedAnswerId === answer.id }} canManage={entry.permissions.canManage}
+                        <DiscussionBlock content={{ ...answer, isAccepted: question.acceptedAnswerId === answer.id }} canManage={entry.permissions.canManageContent}
                             otherAccepted={Boolean(question.acceptedAnswerId && question.acceptedAnswerId !== answer.id)}
                             focusComment={activeFocus?.answerId === answer.id ? activeFocus.commentId : undefined}
                             onaccept={() => accept(answer.id)} onunaccept={() => accept(null)} onchange={refresh} onremove={removed} onlocated={() => { void locate(); }} />
