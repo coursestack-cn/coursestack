@@ -82,5 +82,7 @@
     .tag-filter > :global(.field) { flex: 1; min-width: 10rem; }
     .summary { color: var(--color-text-secondary); font-size: var(--font-size-sm); }
     .items { border: 1px solid var(--color-border); border-radius: var(--radius-lg); overflow: hidden; background: var(--color-surface); }
+    .items > :global(article:first-child > .course-content-link) { border-top-left-radius: calc(var(--radius-lg) - 1px); border-top-right-radius: calc(var(--radius-lg) - 1px); }
+    .items > :global(article:last-child > .course-content-link) { border-bottom-left-radius: calc(var(--radius-lg) - 1px); border-bottom-right-radius: calc(var(--radius-lg) - 1px); }
     .items :global(article:last-child) { border-bottom: 0; }
 </style>
