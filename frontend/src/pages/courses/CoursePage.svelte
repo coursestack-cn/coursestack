@@ -3,6 +3,7 @@
     import { setTitle } from "$lib/router/router.svelte.js";
     import type { PageProps } from "$lib/router/types";
     import { getCourse } from "$lib/components/shell/CourseLayout.svelte";
+    import CourseContents from "./CourseContents.svelte";
     import Card from "$lib/components/ui/Card.svelte";
 
     let {}: PageProps = $props();
@@ -31,6 +32,7 @@
             <p class:muted={!course.introduction.trim()}>{course.introduction.trim() || "暂无课程简介"}</p>
         </section>
     </Card>
+    <CourseContents course={course} />
 {/if}
 
 <style>

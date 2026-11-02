@@ -8,6 +8,7 @@
     import Link from "$lib/components/ui/Link.svelte";
     import Toaster from "$lib/components/ui/Toaster.svelte";
     import AppHeader from "$lib/components/shell/AppHeader.svelte";
+    import PageLoading from "$lib/components/shell/PageLoading.svelte";
 
     let { children }: Props = $props();
     let main: HTMLElement;
@@ -20,6 +21,7 @@
         main.scrollIntoView({ block: "start" });
     }}>跳到主要内容</Link>
     <AppHeader />
+    <PageLoading />
     <main id="main" tabindex="-1" bind:this={main}>{@render children()}</main>
     <Toaster />
 </div>

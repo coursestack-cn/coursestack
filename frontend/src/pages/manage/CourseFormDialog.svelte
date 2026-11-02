@@ -2,13 +2,15 @@
     import type { Course } from "./course";
 
     // A null course opens the dialog in create mode.
-    export type Props = { open?: boolean; course: Course | null; onsaved: () => void; onfailed?: () => void };
+    export type Props = { open?: boolean; course: Course | null; onsaved: () => void; onfailed?: () => void; onclose?: () => void };
 </script>
 
 <script lang="ts">
     import { onDestroy, untrack } from "svelte";
     import { api, toApiError } from "$lib/api/client";
+    import { resource } from "$lib/api/resource.svelte.js";
     import { isAborted, userMessage } from "$lib/api/errors";
+    import { session } from "$lib/session.svelte.js";
     import Button from "$lib/components/ui/Button.svelte";
     import Dialog from "$lib/components/ui/Dialog.svelte";
     import Field from "$lib/components/ui/Field.svelte";
@@ -20,8 +22,17 @@
     type Teacher = { id: string; schoolNumber: string | null; nickname: string | null; name: string | null };
     type ErrorKey = "name" | "code" | "teacher";
 
-    let { open = $bindable(false), course, onsaved, onfailed }: Props = $props();
+    let { open = $bindable(false), course, onsaved, onfailed, onclose }: Props = $props();
     const creating = $derived(course === null);
+    const isAdmin = $derived(session.hasRole("admin"));
+    const term = resource((signal) => {
+        if (!open || !creating) return Promise.resolve(null);
+        return api.get<{ currentTerm: { id: string; name: string } | null }>("/api/me/courses?scope=current&pageSize=1", { signal });
+    });
+    const termReady = $derived(term.status === "ready" && !term.refreshing && Boolean(term.data?.currentTerm));
+    const termError = $derived(term.error ? userMessage(term.error, { default: "未能读取当前学期，请重试。" })
+        : term.status === "ready" && !term.refreshing && term.data && !term.data.currentTerm
+            ? isAdmin ? "尚未设置当前学期，配置后才能创建课程。" : "尚未设置当前学期，请联系管理员。" : undefined);
     let name = $state<string | number>("");
     let code = $state<string | number>("");
     let introduction = $state("");
@@ -41,7 +52,7 @@
 
     $effect(() => {
         if (!open) return;
-        const current = course;
+        const current = course, admin = isAdmin;
         untrack(() => {
             name = current?.name ?? "";
             code = current?.code ?? "";
@@ -51,8 +62,9 @@
             errors = {};
             formError = "";
             attempt = null;
-            if (!current) void loadTeachers();
+            if (!current && admin) void loadTeachers();
         });
+        return () => teacherRequest?.abort();
     });
 
     const teacherOptions = $derived([{ value: "", label: teachers.length ? "请选择任课教师" : "没有可选的教师", disabled: true },
@@ -63,12 +75,14 @@
         : "只能选择状态正常的教师；课程会在当前学期由该教师任教。");
 
     async function loadTeachers() {
+        if (!isAdmin) return;
         teacherRequest?.abort();
         const controller = teacherRequest = new AbortController();
         const search = new URLSearchParams({ role: "teacher", status: "active", pageSize: "20" });
         const q = String(teacherQuery).trim();
         if (q) search.set("q", q);
         teachersLoading = true;
+        errors = { ...errors, teacher: undefined };
         try {
             const result = await api.get<{ items: Teacher[]; total: number }>(`/api/admin/accounts?${search}`, { signal: controller.signal });
             if (controller.signal.aborted) return;
@@ -90,17 +104,17 @@
         for (const key of ["name", "code", "introduction"] as const) {
             if (creating || values[key] !== course?.[key]) body[key] = values[key];
         }
-        if (creating) body.teacherId = teacherId;
+        if (creating && isAdmin) body.teacherId = teacherId;
         return body;
     });
 
     async function save(event: SubmitEvent) {
         event.preventDefault();
-        if (pending) return;
+        if (pending || (creating && !termReady)) return;
         const next: typeof errors = {};
         if (!String(name).trim()) next.name = "课程名称不能为空。";
         if (!String(code).trim()) next.code = "课程编号不能为空。";
-        if (creating && !teacherId) next.teacher = "请选择任课教师。";
+        if (creating && isAdmin && !teacherId) next.teacher = "请选择任课教师。";
         errors = next;
         if (Object.keys(next).length) return;
         const body = changes;
@@ -126,10 +140,12 @@
             const failure = toApiError(cause);
             if (failure.code === "DUPLICATE_RECORD") errors = { code: "该课程编号已存在。" };
             else if (failure.code === "COURSE_CONFLICT") errors = { code: "该课程编号已存在，或当前学期刚刚变化。" };
-            else if (failure.code === "TEACHER_REQUIRED") { errors = { teacher: "该教师已不可选，请重新选择。" }; void loadTeachers(); }
+            else if (failure.code === "TEACHER_REQUIRED" && isAdmin) { errors = { teacher: "该教师已不可选，请重新选择。" }; void loadTeachers(); }
             else {
+                if (failure.code === "NO_CURRENT_TERM") term.reload();
                 if (failure.code === "IDEMPOTENCY_CONFLICT") attempt = null;
                 formError = userMessage(cause, {
+                    TEACHER_REQUIRED: "当前账号已不能创建课程，请刷新页面后重试。",
                     NO_CURRENT_TERM: "尚未设置当前学期，暂时不能创建课程。",
                     IDEMPOTENCY_CONFLICT: "提交内容与上次请求不一致，请再次提交。",
                     COURSE_NOT_FOUND: "课程不存在或已被删除，请关闭弹窗并刷新列表。",
@@ -144,7 +160,7 @@
     }
 </script>
 
-<Dialog bind:open title={creating ? "新建课程" : "编辑课程"} description={course ? `${course.code} · ${course.name}` : undefined} dismissible={!pending}>
+<Dialog bind:open title={creating ? "新建课程" : "编辑课程"} description={course ? `${course.code} · ${course.name}` : undefined} dismissible={!pending} {onclose}>
     <form class="course-form" onsubmit={save} aria-busy={pending || undefined}>
         <div class="grid">
             <Field label="课程名称" required error={errors.name}>
@@ -152,7 +168,7 @@
                     <TextInput {id} {invalid} aria-describedby={describedBy} name="name" maxlength={120} autocomplete="off" bind:value={name} disabled={pending} />
                 {/snippet}
             </Field>
-            <Field label="课程编号" required error={errors.code}>
+            <Field label="课程编号" required help="课程编号在全站唯一，同一课程跨学期沿用。" error={errors.code}>
                 {#snippet children({ id, describedBy, invalid })}
                     <TextInput {id} {invalid} aria-describedby={describedBy} name="code" maxlength={40} autocomplete="off" bind:value={code} disabled={pending} />
                 {/snippet}
@@ -163,7 +179,7 @@
                 <Textarea {id} {invalid} aria-describedby={describedBy} name="introduction" maxlength={5000} rows={4} bind:value={introduction} disabled={pending} />
             {/snippet}
         </Field>
-        {#if creating}
+        {#if creating && isAdmin}
             <Field label="任课教师" required help={teacherHelp} error={errors.teacher}>
                 {#snippet children({ id, describedBy, invalid })}
                     <div class="teacher-search">
@@ -171,14 +187,19 @@
                             disabled={pending} onkeydown={(event) => { if (event.key === "Enter") { event.preventDefault(); void loadTeachers(); } }} />
                         <Button disabled={pending} loading={teachersLoading} onclick={() => { void loadTeachers(); }}>查找</Button>
                     </div>
-                    <Select {id} {invalid} aria-describedby={describedBy} name="teacherId" options={teacherOptions} bind:value={teacherId} disabled={pending} />
+                    <Select {id} {invalid} aria-describedby={describedBy} name="teacherId" options={teacherOptions} bind:value={teacherId} disabled={pending || teachersLoading} />
                 {/snippet}
             </Field>
+        {/if}
+        {#if creating && termError}
+            <p class="error" role="alert">{termError}</p>
+            {#if term.error}<div><Button size="sm" onclick={term.reload}>重试读取学期</Button></div>{/if}
         {/if}
         {#if formError}<p class="error" role="alert">{formError}</p>{/if}
         <div class="actions">
             <Button disabled={pending} onclick={() => { open = false; }}>取消</Button>
-            <Button type="submit" variant="primary" loading={pending} disabled={!creating && !Object.keys(changes).length}>{creating ? "创建课程" : "保存"}</Button>
+            <Button type="submit" variant="primary" loading={pending || (creating && (term.status === "loading" || term.refreshing))}
+                disabled={creating ? !termReady || (isAdmin && teachersLoading) : !Object.keys(changes).length}>{creating ? "创建课程" : "保存"}</Button>
         </div>
     </form>
 </Dialog>

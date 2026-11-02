@@ -14,11 +14,12 @@
     import TextInput from "$lib/components/ui/TextInput.svelte";
     import Button from "$lib/components/ui/Button.svelte";
     import { toast } from "$lib/components/ui/toast.svelte.js";
+    import AvatarEditor from "./AvatarEditor.svelte";
 
     type Profile = {
         id: string; nickname: string | null; role: Role; schoolNumber: string | null;
         name: string | null; department: string | null; major: string | null;
-        grade: string | null; lastLoginAt: number | null;
+        grade: string | null; lastLoginAt: number | null; avatarUrl: string | null;
     };
     const roleNames: Record<Role, string> = { student: "学生", teacher: "教师", admin: "管理员" };
     const academicFields = [
@@ -82,20 +83,23 @@
     <ResourceState status={profile.status} error={profile.error} refreshing={profile.refreshing} reload={profile.reload}>
         {#if profile.data}
             <Card padding="lg">
-                <form class="section" onsubmit={saveNickname} aria-label="修改昵称" aria-busy={pending || undefined}>
+                <div class="section">
                     <h2>个人资料</h2>
-                    <Field label="昵称" help="公开展示的名称，最多 80 个字符；留空可清除昵称。" error={nicknameError}>
-                        {#snippet children({ id, describedBy, invalid })}
-                            <TextInput {id} {invalid} aria-describedby={describedBy} name="nickname" autocomplete="nickname"
-                                maxlength={80} clearable bind:value={nickname} disabled={pending}
-                                oninput={() => { nicknameError = saveError = ""; }} />
-                        {/snippet}
-                    </Field>
-                    {#if saveError}<p class="error" role="alert">{saveError}</p>{/if}
-                    <div class="actions">
-                        <Button type="submit" variant="primary" loading={pending} disabled={!dirty}>保存昵称</Button>
-                    </div>
-                </form>
+                    <AvatarEditor accountId={profile.data.id} name={savedNickname} src={profile.data.avatarUrl ?? undefined} />
+                    <form class="section" onsubmit={saveNickname} aria-label="修改昵称" aria-busy={pending || undefined}>
+                        <Field label="昵称" help="公开展示的名称，最多 80 个字符；留空可清除昵称。" error={nicknameError}>
+                            {#snippet children({ id, describedBy, invalid })}
+                                <div class="nickname-control">
+                                    <TextInput {id} {invalid} aria-describedby={describedBy} name="nickname" autocomplete="nickname"
+                                        maxlength={80} clearable bind:value={nickname} disabled={pending}
+                                        oninput={() => { nicknameError = saveError = ""; }} />
+                                    <Button type="submit" loading={pending} disabled={!dirty}>保存昵称</Button>
+                                </div>
+                            {/snippet}
+                        </Field>
+                        {#if saveError}<p class="error" role="alert">{saveError}</p>{/if}
+                    </form>
+                </div>
             </Card>
             <Card padding="lg">
                 <section class="section" aria-labelledby="account-info-heading">
@@ -129,7 +133,7 @@
 <style>
     .section { display: grid; gap: var(--space-4); }
     .section-heading { display: grid; gap: var(--space-2); }
-    .actions { display: flex; flex-wrap: wrap; gap: var(--space-3); }
+    .nickname-control { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: start; gap: var(--space-3); }
     .account-details { display: grid; grid-template-columns: repeat(auto-fit, minmax(min(100%, 12rem), 1fr)); gap: var(--space-5); }
     .account-details > div { display: grid; align-content: start; gap: var(--space-1); min-width: 0; }
     dt { color: var(--color-text-secondary); font-size: var(--font-size-sm); }

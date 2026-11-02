@@ -18,6 +18,7 @@ export type ContentRow = {
 export type PublicRow = ContentRow & {
     parent_kind: ContentRow['kind'] | null;
     author_name: string | null; author_role: string | null; author_deleted: number; course_teacher: number; score: number; my_vote: number;
+    author_avatar_key: string | null;
     reply_to_id: string | null; reply_to_name: string | null; reply_to_author_deleted: number | null; reply_to_deleted: number | null;
     answer_count: number; comment_count: number;
 };

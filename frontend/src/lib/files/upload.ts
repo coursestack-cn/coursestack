@@ -1,8 +1,8 @@
-import type {
-    UploadBackend, UploadController, UploadFailure, UploadSnapshot, UploadStage, UploadTicket,
-} from "./types.js";
-import { validateFile } from "./validation.js";
-import { safeUploadUrl } from "./urls.js";
+import {
+    type UploadBackend, type UploadController, type UploadFailure, type UploadSnapshot, type UploadStage, type UploadTicket, type UploadPublished,
+} from "./types";
+import { validateFile } from "./validation";
+import { safeUploadUrl } from "./urls";
 
 export type UploadOptions<T> = { backend: UploadBackend<T>; maxBytes: number; timeoutMs?: number };
 
@@ -95,7 +95,14 @@ function failureFrom(error: unknown, stage: UploadStage): UploadFailure {
     const detail = error && typeof error === "object" ? error as { status?: unknown; code?: unknown } : undefined;
     const status = typeof detail?.status === "number" && Number.isInteger(detail.status) ? detail.status : undefined;
     const code = typeof detail?.code === "string" && /^[A-Z0-9_]{1,64}$/u.test(detail.code) ? detail.code : "UPLOAD_FAILED";
-    return { stage, code, message: serviceMessage(status, stage), ...(status === undefined ? {} : { status }) };
+    const messages: Record<string, string> = {
+        UPLOAD_INCOMPLETE: "文件没有完整上传，请移除后重新选择文件。",
+        UPLOAD_SIZE_MISMATCH: "收到的文件大小不一致，请移除后重新上传。",
+        UPLOAD_TYPE_MISMATCH: "文件内容与声明的类型不一致，请选择正确的文件。",
+        UPLOAD_EXPIRED: "上传记录已过期，请移除后重新上传。",
+        UPLOAD_BUSY: "文件正在确认发布，稍后重试即可获取结果。"
+    };
+    return { stage, code, message: messages[code] ?? serviceMessage(status, stage), ...(status === undefined ? {} : { status }) };
 }
 
 function putFile(file: File, ticket: UploadTicket, signal: AbortSignal, timeout: number, onProgress: (loaded: number) => void): Promise<void> {
@@ -137,7 +144,9 @@ function putFile(file: File, ticket: UploadTicket, signal: AbortSignal, timeout:
             xhr.open("PUT", ticket.url, true);
             xhr.withCredentials = false;
             xhr.timeout = timeout;
-            for (const [name, value] of Object.entries(ticket.headers)) xhr.setRequestHeader(name, value);
+            for (const [name, value] of Object.entries(ticket.headers)) {
+                if (name.toLowerCase() !== "content-length") xhr.setRequestHeader(name, value);
+            }
             if (signal.aborted) abort();
             else xhr.send(file);
         } catch {
@@ -183,7 +192,7 @@ export function createUploadController<T>({ backend, maxBytes, timeoutMs = 120_0
         const current = () => !disposed && token === generation && !abort.signal.aborted;
         const ensureCurrent = () => { if (!current()) throw abortError(); };
 
-        async function prepareFresh(): Promise<UploadTicket> {
+        async function prepareFresh(): Promise<UploadTicket | UploadPublished<T>> {
             stage = "preparing";
             // A bounded refresh handles an already-expired ticket without an endless loop.
             for (let attempt = 0; attempt < 2; attempt += 1) {
@@ -193,7 +202,8 @@ export function createUploadController<T>({ backend, maxBytes, timeoutMs = 120_0
                 if (!validation.ok) throw new UploadIssue(validation.code, validation.message);
                 const result = await abortable(backend.prepare({ name: file.name, size: file.size, type: validation.mime }, abort.signal), abort.signal);
                 ensureCurrent();
-                const prepared = normalizedTicket(result);
+                if ("status" in result && result.status === "published") return result;
+                const prepared = normalizedTicket(result as UploadTicket);
                 if (!expired(prepared)) return prepared;
             }
             throw new UploadIssue("TICKET_EXPIRED", "上传地址已过期，重试以获取新地址。");
@@ -209,6 +219,10 @@ export function createUploadController<T>({ backend, maxBytes, timeoutMs = 120_0
                 if (!validation.ok) throw new UploadIssue(validation.code, validation.message);
                 const prepared = await prepareFresh();
                 ensureCurrent();
+                if ("status" in prepared) {
+                    publish({ status: "done", file, loaded: file.size, total: file.size, result: prepared.result });
+                    return;
+                }
                 ticket = prepared;
             } else if (!ticket) {
                 throw new UploadIssue("MISSING_UPLOAD_TICKET", "上传记录已不可用，重新选择文件后上传。");
@@ -219,6 +233,10 @@ export function createUploadController<T>({ backend, maxBytes, timeoutMs = 120_0
                 if (expired(ticket!)) {
                     const prepared = await prepareFresh();
                     ensureCurrent();
+                    if ("status" in prepared) {
+                        publish({ status: "done", file, loaded: file.size, total: file.size, result: prepared.result });
+                        return;
+                    }
                     ticket = prepared;
                 }
                 ensureCurrent();

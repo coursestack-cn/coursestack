@@ -155,7 +155,7 @@ export const openapi = {
             Content: { type: 'object', required: ['id', 'kind', 'courseId', 'author', 'body', 'score', 'targetKind', 'targetId', ...Object.keys(contentMetadata)],
                 allOf: [questionCounts],
                 properties: { id, kind: enumeration('material', 'question', 'answer', 'comment'), courseId: id,
-                    author: object({ id, nickname, isDeleted: { type: 'boolean' }, isTeacher: { type: 'boolean' }, isCourseTeacher: { type: 'boolean' } }),
+                    author: object({ id, nickname, avatarUrl: { type: ['string', 'null'], description: '当前头像的同源 Worker 地址；未设置、禁用或已删除账号为 null' }, isDeleted: { type: 'boolean' }, isTeacher: { type: 'boolean' }, isCourseTeacher: { type: 'boolean' } }),
                     title: { type: ['string', 'null'] }, body: nullableBody, format: { const: 'prosemirror' }, tags, latestVersion: { anyOf: [ref('FileVersion'), { type: 'null' }] },
                     targetKind: nullableKind, targetId: nullableId, ...contentMetadata, answerCount, acceptedAnswerId: { type: ['string', 'null'] }, solved: { type: 'boolean' },
                     isAccepted: { type: 'boolean' }, score: { type: 'integer' }, myVote: { type: 'integer', enum: [-1, 0, 1] }, createdAt: { type: 'integer' }, updatedAt: { type: 'integer' } } },

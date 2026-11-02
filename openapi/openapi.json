@@ -11027,6 +11027,13 @@
                 ],
                 "maxLength": 80
               },
+              "avatarUrl": {
+                "type": [
+                  "string",
+                  "null"
+                ],
+                "description": "当前头像的同源 Worker 地址；未设置、禁用或已删除账号为 null"
+              },
               "isDeleted": {
                 "type": "boolean"
               },
@@ -11040,6 +11047,7 @@
             "required": [
               "id",
               "nickname",
+              "avatarUrl",
               "isDeleted",
               "isTeacher",
               "isCourseTeacher"

@@ -19,7 +19,6 @@
     import Spinner from "../ui/Spinner.svelte";
     import StateBlock from "../ui/StateBlock.svelte";
     import FileInfo from "./FileInfo.svelte";
-    import { classifyFile } from "../../files/validation";
     import { isInlinePreviewUrl, safeDownloadHref } from "../../files/urls";
 
     let { src, name, mime, size, downloadHref, class: className = "", ...rest }: Props = $props();
@@ -33,15 +32,14 @@
     let retryCount = $state(0);
     let alive = true;
     const imageMimes = new Set(["image/png", "image/jpeg", "image/webp", "image/gif"]);
-    const kind = $derived(classifyFile(name, mime));
     const mediaType = $derived(mime.split(";", 1)[0]!.trim().toLowerCase());
     const source = $derived(isInlinePreviewUrl(src) ? src : null);
-    const mode = $derived(source && kind === "image" && imageMimes.has(mediaType) ? "image"
-        : source && kind === "pdf" && mediaType === "application/pdf" && pdfEnabled ? "pdf" : "info");
+    const mode = $derived(source && imageMimes.has(mediaType) ? "image"
+        : source && mediaType === "application/pdf" && pdfEnabled ? "pdf" : "info");
     const key = $derived(JSON.stringify([source, name, mime, mode, retryCount]));
     const download = $derived(downloadHref ? safeDownloadHref(downloadHref) : null);
     const externalDownload = $derived(Boolean(download && !download.startsWith("/") && !download.startsWith("blob:")));
-    const fallbackMessage = $derived(source && kind === "pdf" && mediaType === "application/pdf" && !pdfEnabled
+    const fallbackMessage = $derived(source && mediaType === "application/pdf" && !pdfEnabled
         ? "当前浏览器无法预览此 PDF，下载后查看。" : "此文件暂不支持在线预览，下载后查看。");
 
     onMount(() => { pdfEnabled = navigator.pdfViewerEnabled === true; });

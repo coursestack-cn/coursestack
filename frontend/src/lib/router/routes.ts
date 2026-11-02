@@ -25,7 +25,9 @@ export const routes: readonly Route[] = [
     { path: "/notifications", title: "通知", requiresAuth: true, load: () => import("../../pages/me/NotificationsPage.svelte") },
     { path: "/settings/password", title: "修改密码", requiresAuth: true, load: () => import("../../pages/account/PasswordPage.svelte") },
     { path: "/settings", title: "个人设置", requiresAuth: true, load: () => import("../../pages/account/SettingsPage.svelte") },
-    { path: "/courses/new", title: "新建课程", requiresAuth: true, load: () => import("../../pages/courses/CourseNewPage.svelte") },
+    { path: "/courses/new", title: "新建课程", requiresAuth: true, load: () => import("../../pages/manage/ManagementRedirectPage.svelte") },
+    { path: "/manage/courses", title: "管理课程", requiresAuth: true, load: () => import("../../pages/manage/ManageCoursesPage.svelte") },
+    { path: "/manage/accounts", title: "账号管理", requiresAuth: true, load: () => import("../../pages/manage/ManageAccountsPage.svelte") },
     { path: "/courses/:courseCode/manage", title: "课程管理", layout: "course", requiresAuth: true, load: () => import("../../pages/manage/CourseManagePage.svelte") },
     { path: "/courses/:courseCode/manage/info", title: "课程信息", layout: "course", requiresAuth: true, load: () => import("../../pages/manage/CourseInfoPage.svelte") },
     { path: "/courses/:courseCode/manage/teachers", title: "授课教师", layout: "course", requiresAuth: true, load: () => import("../../pages/manage/CourseTeachersPage.svelte") },
@@ -33,10 +35,9 @@ export const routes: readonly Route[] = [
     { path: "/courses/:courseCode/manage/scoring", title: "课程加分", layout: "course", requiresAuth: true, load: () => import("../../pages/manage/CourseScoringPage.svelte") },
     { path: "/courses/:courseCode/manage/reports", title: "举报处理", layout: "course", requiresAuth: true, load: () => import("../../pages/manage/CourseReportsPage.svelte") },
     { path: "/admin/login", title: "管理员登录", requiresAuth: false, load: () => import("../../pages/account/AdminLoginPage.svelte") },
-    { path: "/admin", title: "账号管理", requiresAuth: true, load: () => import("../../pages/admin/AdminAccountsPage.svelte") },
-    { path: "/admin/accounts", title: "账号管理", requiresAuth: true, load: () => import("../../pages/admin/AdminAccountsPage.svelte") },
-    { path: "/admin/courses", title: "课程管理", requiresAuth: true, load: () => import("../../pages/admin/AdminCoursesPage.svelte") },
-    { path: "/admin/*", title: "管理端", requiresAuth: true, load: () => import("../../pages/admin/AdminPage.svelte") }
+    { path: "/admin", title: "账号管理", requiresAuth: true, load: () => import("../../pages/manage/ManagementRedirectPage.svelte") },
+    { path: "/admin/accounts", title: "账号管理", requiresAuth: true, load: () => import("../../pages/manage/ManagementRedirectPage.svelte") },
+    { path: "/admin/courses", title: "课程管理", requiresAuth: true, load: () => import("../../pages/manage/ManagementRedirectPage.svelte") }
 ];
 
 export const notFoundRoute: Route = {

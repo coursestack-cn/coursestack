@@ -25,7 +25,7 @@
 
 <span {...rest} class={`author-signature ${size} ${className}`}>
     <!-- A blank name makes Avatar show its neutral placeholder instead of an initial. -->
-    <Avatar name={author.isDeleted ? "" : author.nickname ?? ""} src={author.isDeleted ? undefined : author.avatarUrl ?? undefined}
+    <Avatar accountId={author.isDeleted ? undefined : author.id} name={author.isDeleted ? "" : author.nickname ?? ""} src={author.isDeleted ? undefined : author.avatarUrl ?? undefined}
         {size} alt="" aria-hidden="true" />
     <span class="details">
         <span class="identity"><span class="name">{name}</span>{#if teacher}<Badge tone="teacher">{teacher}</Badge>{/if}</span>

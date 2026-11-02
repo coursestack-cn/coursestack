@@ -115,7 +115,7 @@
             focusComment={!activeFocus?.answerId ? activeFocus?.commentId : undefined} onchange={refresh} onremove={removed} onlocated={() => { void locate(); }} />
         {#if focus.status === "error"}<div class="focus-error"><ContentState status="error" error={focus.error} reload={focus.reload} /></div>{/if}
         <section class="answers" aria-label="回答列表">
-            <div class="answers-heading"><h2>{question.answerCount ?? answers.data?.total ?? ""} 个回答</h2><span>采纳优先 · 其余按净赞数</span></div>
+            <div class="answers-heading"><h2>{question.answerCount ?? answers.data?.total ?? ""} 个回答</h2></div>
             <ContentState status={answers.status} error={answers.error} refreshing={answers.refreshing} reload={answers.reload}>
                 {#if answers.data}
                     {#each answers.data.items as answer (answer.id)}
@@ -143,7 +143,6 @@
     .tags :global(a) { padding: var(--space-1) var(--space-3); border-radius: var(--radius-md); background: var(--color-accent-soft); font-size: var(--font-size-sm); }
     .answers, .answer-composer { display: grid; gap: var(--space-5); min-width: 0; }
     .answers-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); }
-    .answers-heading span { color: var(--color-text-secondary); font-size: var(--font-size-sm); }
     .answer-composer { padding-top: var(--space-4); border-top: 1px solid var(--color-border); }
     h2 { font-size: var(--font-size-xl); }
     :global(.content-block.question-target), :global(.comment-item.question-target) { background: var(--color-accent-soft); }
