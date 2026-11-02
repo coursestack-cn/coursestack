@@ -73,7 +73,7 @@
     --shadow-popover: 0 var(--space-2) var(--space-8) light-dark(rgb(28 27 24 / 0.16), rgb(0 0 0 / 0.6));
 
     --width-prose: 720px;
-    --width-page: 1200px;
+    --width-page: 1100px;
     --z-sticky: 10;
     --z-dropdown: 20;
     --z-dialog: 30;
