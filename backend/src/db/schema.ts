@@ -32,20 +32,37 @@ export const accounts = sqliteTable('accounts', {
     uniqueIndex('accounts_single_admin').on(t.role).where(sql`${t.role} = 'admin'`),
 ]);
 
-// The course number is the primary key; offerings and teachers are independent.
+// A new course requires a current-term teacher row in the same transaction (rules.sql).
 export const courses = sqliteTable('courses', {
     id: text('id').primaryKey().notNull(),
     name: text('name').notNull(),
     createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
+    code: text('code').notNull(),
     introduction: text('introduction').notNull().default(''),
     createdBy: text('created_by').notNull().references(() => accounts.id),
+    updatedBy: text('updated_by').notNull().references(() => accounts.id),
     updatedAt: integer('updated_at').notNull().default(sql`(unixepoch())`),
     requestKey: text('request_key').notNull(),
     requestHash: text('request_hash').notNull(),
 }, (t) => [
     check('courses_name', sql`length(trim(${t.name})) > 0`),
-    check('courses_id', sql`length(trim(${t.id})) > 0`),
+    check('courses_code', sql`length(trim(${t.code})) > 0`),
+    uniqueIndex('courses_code_unique').on(t.code),
     uniqueIndex('courses_request_unique').on(t.createdBy, t.requestKey),
+]);
+
+// Course creation initializes one rule row, with all rewards disabled by default.
+export const courseBonusRules = sqliteTable('course_bonus_rules', {
+    id: text('id').primaryKey().notNull().references(() => courses.id, { onDelete: 'cascade' }),
+    pointsQuestion: integer('points_question').notNull().default(0),
+    pointsAnswer: integer('points_answer').notNull().default(0),
+    pointsAcceptance: integer('points_acceptance').notNull().default(0),
+    pointsComment: integer('points_comment').notNull().default(0),
+    pointsMaterial: integer('points_material').notNull().default(0),
+    pointsMaterialVersion: integer('points_material_version').notNull().default(0),
+}, (t) => [
+    ...[t.pointsQuestion, t.pointsAnswer, t.pointsAcceptance, t.pointsComment, t.pointsMaterial, t.pointsMaterialVersion].map(column =>
+        check(`course_bonus_rules_${column.name}`, sql`${column} BETWEEN 0 AND 9007199254740991`)),
 ]);
 
 export const terms = sqliteTable('terms', {
@@ -58,54 +75,14 @@ export const terms = sqliteTable('terms', {
     uniqueIndex('terms_one_current').on(t.current).where(sql`${t.current} = 1`),
 ]);
 
-// An administrator schedules an offering, even before any teacher joins it.
-export const courseTerms = sqliteTable('course_terms', {
+// SQL triggers enforce exactly one teacher per instance and current-term creation.
+export const enrollments = sqliteTable('enrollments', {
     courseId: text('course_id').notNull().references(() => courses.id, { onDelete: 'restrict' }),
     termId: text('term_id').notNull().references(() => terms.id, { onDelete: 'restrict' }),
+    accountId: text('account_id').notNull().references(() => accounts.id, { onDelete: 'restrict' }),
 }, (t) => [
-    primaryKey({ columns: [t.courseId, t.termId] }),
-    index('course_terms_term').on(t.termId, t.courseId),
-]);
-
-export const teachingClasses = sqliteTable('teaching_classes', {
-    courseId: text('course_id').notNull(),
-    termId: text('term_id').notNull(),
-    teacherId: text('teacher_id').notNull().references(() => accounts.id, { onDelete: 'restrict' }),
-}, (t) => [
-    primaryKey({ columns: [t.courseId, t.termId, t.teacherId] }),
-    foreignKey({ columns: [t.courseId, t.termId], foreignColumns: [courseTerms.courseId, courseTerms.termId] }).onDelete('restrict'),
-    index('teaching_classes_teacher_term').on(t.teacherId, t.termId, t.courseId),
-]);
-
-export const classStudents = sqliteTable('class_students', {
-    courseId: text('course_id').notNull(),
-    termId: text('term_id').notNull(),
-    studentId: text('student_id').notNull().references(() => accounts.id, { onDelete: 'restrict' }),
-    teacherId: text('teacher_id').notNull(),
-}, (t) => [
-    // A student can belong to only one teacher in each course and term.
-    primaryKey({ columns: [t.courseId, t.termId, t.studentId] }),
-    foreignKey({ columns: [t.courseId, t.termId, t.teacherId], foreignColumns: [teachingClasses.courseId, teachingClasses.termId, teachingClasses.teacherId] }).onDelete('restrict'),
-    index('class_students_student_term').on(t.studentId, t.termId, t.courseId),
-    index('class_students_class').on(t.courseId, t.termId, t.teacherId, t.studentId),
-]);
-
-// Joining a teaching class initializes its rules, with all rewards disabled.
-export const classBonusRules = sqliteTable('class_bonus_rules', {
-    courseId: text('course_id').notNull(),
-    termId: text('term_id').notNull(),
-    teacherId: text('teacher_id').notNull(),
-    pointsQuestion: integer('points_question').notNull().default(0),
-    pointsAnswer: integer('points_answer').notNull().default(0),
-    pointsAcceptance: integer('points_acceptance').notNull().default(0),
-    pointsComment: integer('points_comment').notNull().default(0),
-    pointsMaterial: integer('points_material').notNull().default(0),
-    pointsMaterialVersion: integer('points_material_version').notNull().default(0),
-}, (t) => [
-    primaryKey({ columns: [t.courseId, t.termId, t.teacherId] }),
-    foreignKey({ columns: [t.courseId, t.termId, t.teacherId], foreignColumns: [teachingClasses.courseId, teachingClasses.termId, teachingClasses.teacherId] }).onDelete('restrict'),
-    ...[t.pointsQuestion, t.pointsAnswer, t.pointsAcceptance, t.pointsComment, t.pointsMaterial, t.pointsMaterialVersion].map(column =>
-        check(`class_bonus_rules_${column.name}`, sql`${column} BETWEEN 0 AND 9007199254740991`)),
+    primaryKey({ columns: [t.courseId, t.termId, t.accountId] }),
+    index('enrollments_account_term').on(t.accountId, t.termId, t.courseId),
 ]);
 
 export const sessions = sqliteTable('sessions', {
@@ -228,7 +205,6 @@ export const bonusLedger = sqliteTable('bonus_ledger', {
     id: integer('id').primaryKey({ autoIncrement: true }),
     courseId: text('course_id').notNull().references(() => courses.id),
     termId: text('term_id').notNull().references(() => terms.id),
-    teacherId: text('teacher_id').notNull(),
     studentId: text('student_id').notNull().references(() => accounts.id),
     deltaPoints: integer('delta_points').notNull(),
     sourceKind: text('source_kind', { enum: ['question', 'answer', 'acceptance', 'comment', 'material', 'manual'] }).notNull(),
@@ -242,8 +218,6 @@ export const bonusLedger = sqliteTable('bonus_ledger', {
     createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
 }, (t) => [
     foreignKey({ columns: [t.reversesId], foreignColumns: [t.id] }),
-    // Keep the historical class even if the student's current membership changes.
-    foreignKey({ columns: [t.courseId, t.termId, t.teacherId], foreignColumns: [teachingClasses.courseId, teachingClasses.termId, teachingClasses.teacherId] }).onDelete('restrict'),
     check('bonus_ledger_source_kind', sql`${t.sourceKind} IN ('question', 'answer', 'acceptance', 'comment', 'material', 'manual')`),
     check('bonus_ledger_delta', sql`${t.deltaPoints} <> 0 AND abs(${t.deltaPoints}) <= 9007199254740991`),
     check('bonus_ledger_shape', sql`(${t.sourceKind} = 'manual' AND ${t.reversesId} IS NULL AND ${t.requestHash} IS NOT NULL)
@@ -253,7 +227,6 @@ export const bonusLedger = sqliteTable('bonus_ledger', {
     uniqueIndex('bonus_reversal_once').on(t.reversesId),
     uniqueIndex('bonus_manual_request').on(t.operatorId, t.sourceId).where(sql`${t.sourceKind} = 'manual'`),
     index('bonus_course_term_student').on(t.courseId, t.termId, t.studentId),
-    index('bonus_class_student').on(t.courseId, t.termId, t.teacherId, t.studentId),
 ]);
 
 export const reports = sqliteTable('reports', {

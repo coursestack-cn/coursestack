@@ -47,8 +47,8 @@ export function publicSelect(c: Ctx, includeDeleted = false) {
     return sql`SELECT c.*,parent.kind AS parent_kind,accepted.answer_id AS acceptedAnswerId,CASE WHEN u.status='deleted' THEN '已删除' ELSE u.nickname END AS author_name,
         CASE WHEN u.status='deleted' THEN NULL ELSE u.role END AS author_role,u.status='deleted' AS author_deleted,
         CASE WHEN u.status='active' THEN u.avatar_key ELSE NULL END AS author_avatar_key,
-        EXISTS(SELECT 1 FROM teaching_classes ct JOIN terms term ON term.id=ct.term_id AND term.current=1
-            WHERE ct.teacher_id=c.author_id AND ct.course_id=c.course_id AND u.role='teacher' AND u.status='active') AS course_teacher,
+        EXISTS(SELECT 1 FROM enrollments ct JOIN terms term ON term.id=ct.term_id AND term.current=1
+            WHERE ct.account_id=c.author_id AND ct.course_id=c.course_id AND u.role='teacher' AND u.status='active') AS course_teacher,
         COALESCE((SELECT SUM(v.value) FROM votes v WHERE v.content_id=c.id),0) AS score,
         COALESCE((SELECT value FROM votes v WHERE v.content_id=c.id AND v.user_id=${viewerId}),0) AS my_vote,
         parent.id AS reply_to_id,CASE WHEN parent_author.status='deleted' THEN '已删除' ELSE parent_author.nickname END AS reply_to_name,

@@ -40,17 +40,6 @@ VALUES ('demo-course', '演示课程', 'DEMO-COURSE', 'demo-teacher', 'demo-teac
 INSERT INTO contents (id, kind, course_id, author_id, title, updated_by, request_key, request_hash)
 VALUES ('demo-material', 'material', 'demo-course', 'demo-teacher', '演示讲义', 'demo-teacher', 'fixture-material', 'fixture-material');`;
 
-const currentFixture = `
-INSERT INTO accounts(id,nickname,role,school_number) VALUES
-    ('demo-admin','管理员','admin',NULL),('demo-teacher','演示教师','teacher','DEMO-T01'),('demo-student','演示同学','student','DEMO-001');
-INSERT INTO terms(id,name,current) VALUES('demo-current','演示当前学期',1);
-INSERT INTO courses(id,name,created_by,request_key,request_hash) VALUES('DEMO-COURSE','演示课程','demo-admin','fixture-course','fixture-course');
-INSERT INTO course_terms VALUES('DEMO-COURSE','demo-current');
-INSERT INTO teaching_classes VALUES('DEMO-COURSE','demo-current','demo-teacher');
-INSERT INTO class_students VALUES('DEMO-COURSE','demo-current','demo-student','demo-teacher');
-INSERT INTO contents(id,kind,course_id,author_id,title,updated_by,request_key,request_hash)
-VALUES('demo-material','material','DEMO-COURSE','demo-teacher','演示讲义','demo-teacher','fixture-material','fixture-material');`;
-
 async function structure(db) {
     const tables = await rows(db, "SELECT name FROM sqlite_schema WHERE type = 'table' AND name NOT LIKE 'sqlite_%' AND name NOT LIKE '_cf_%' ORDER BY name");
     return Promise.all(tables.map(async ({ name }) => {
@@ -134,26 +123,13 @@ test('upgrading the baseline preserves accounts, sessions, courses, discussions,
     const before = new Map(await Promise.all(tables.map(async ({ name }) => [name, sorted(await rows(db, `SELECT * FROM ${identifier(name)}`))])));
     assert.ok(before.get('bonus_ledger').length > 0);
     await apply(db, migrations.slice(1));
-    for (const [name, records] of before) {
-        if (name === 'enrollments' || name === 'course_bonus_rules') continue;
-        const expected = records.map(record => {
-            if (name === 'courses') {
-                const { code, updated_by, ...course } = record;
-                return { ...course, id: code };
-            }
-            const row = Object.hasOwn(record, 'course_id') ? { ...record, course_id: 'DEMO-COURSE' } : record;
-            return name === 'bonus_ledger' ? { ...row, teacher_id: 'demo-teacher' } : row;
-        });
-        assert.deepEqual(sorted(await rows(db, `SELECT * FROM ${identifier(name)}`)), sorted(expected), name);
-    }
-    assert.deepEqual(await rows(db, 'SELECT * FROM teaching_classes'), [{ course_id: 'DEMO-COURSE', term_id: 'demo-current', teacher_id: 'demo-teacher' }]);
-    assert.deepEqual(await rows(db, 'SELECT * FROM class_students'), [{ course_id: 'DEMO-COURSE', term_id: 'demo-current', student_id: 'demo-student', teacher_id: 'demo-teacher' }]);
+    for (const [name, records] of before) assert.deepEqual(sorted(await rows(db, `SELECT * FROM ${identifier(name)}`)), records, name);
     assert.deepEqual(await definitions(db), await definitions(await runtime.getD1Database('SCHEMA')));
     assert.deepEqual(await rows(db, 'PRAGMA foreign_key_check'), []);
 
     // Newly installed file triggers must work after an upgrade without replaying historical awards.
     await db.prepare(`INSERT INTO contents(id,kind,course_id,author_id,title,updated_by,request_key,request_hash)
-        VALUES('new-material','material','DEMO-COURSE','demo-student','讲义.pdf','demo-student','new-material','fixture')`).run();
+        VALUES('new-material','material','demo-course','demo-student','讲义.pdf','demo-student','new-material','fixture')`).run();
     await db.prepare(`INSERT INTO file_versions(material_id,version,storage_key,size,mime,uploaded_by,updated_by)
         VALUES('new-material',1,'new-material-object',8,'application/pdf','demo-student','demo-student')`).run();
     assert.equal(await db.prepare("SELECT next_version FROM material_next_versions WHERE material_id='new-material'").first('next_version'), 2);
@@ -183,11 +159,11 @@ test('SQL statement markers preserve trigger bodies containing semicolons', () =
 
 test('current rows require course identity, actors, timestamps and creation request identity', async () => {
     const db = await runtime.getD1Database('MIGRATED');
-    await db.batch(currentFixture.split(';').filter(sql => sql.trim()).map(sql => db.prepare(sql)));
-    for (const field of ['id', 'created_by', 'created_at', 'updated_at', 'request_key', 'request_hash']) {
-        await assert.rejects(db.prepare(`UPDATE courses SET ${field}=NULL WHERE id='DEMO-COURSE'`).run(), /NOT NULL constraint/);
+    await db.batch(fixture.split(';').filter(sql => sql.trim()).map(sql => db.prepare(sql)));
+    for (const field of ['code', 'created_by', 'updated_by', 'updated_at', 'request_key', 'request_hash']) {
+        await assert.rejects(db.prepare(`UPDATE courses SET ${field}=NULL WHERE id='demo-course'`).run(), /NOT NULL constraint/);
     }
-    await assert.rejects(db.prepare("INSERT INTO courses(id,name,created_by,request_key,request_hash) VALUES('','空编号','demo-admin','blank-id','blank-id')").run(), /courses_id/);
+    await assert.rejects(db.prepare("UPDATE courses SET code='' WHERE id='demo-course'").run(), /courses_code/);
     for (const field of ['request_key', 'request_hash']) {
         await assert.rejects(db.prepare(`UPDATE contents SET ${field}=NULL WHERE id='demo-material'`).run(), /NOT NULL constraint/);
     }
@@ -211,8 +187,8 @@ test('STRICT enforces storage types while preserving nullable values, lossless c
         VALUES('demo-material',?,'fixture-file',8,'application/pdf','demo-teacher','demo-teacher')`);
     await assert.rejects(file.bind(1.5).run(), /cannot store REAL value in INTEGER column file_versions.version/);
     await assert.rejects(file.bind(0).run(), /file_versions_version/);
-    await assert.rejects(db.prepare(`INSERT INTO bonus_ledger(course_id,term_id,teacher_id,student_id,delta_points,source_kind,source_id,operator_id,reason,request_hash)
-        VALUES('DEMO-COURSE','demo-current','demo-teacher','demo-student',1.5,'manual','strict-test','demo-teacher','测试','strict-test')`).run(),
+    await assert.rejects(db.prepare(`INSERT INTO bonus_ledger(course_id,term_id,student_id,delta_points,source_kind,source_id,operator_id,reason,request_hash)
+        VALUES('demo-course','demo-current','demo-student',1.5,'manual','strict-test','demo-teacher','测试','strict-test')`).run(),
         /cannot store REAL value in INTEGER column bonus_ledger.delta_points/);
     await assert.rejects(db.prepare("UPDATE contents SET status='invalid' WHERE id='demo-material'").run(), /contents_status/);
     await assert.rejects(db.prepare("UPDATE contents SET body='invalid JSON' WHERE id='demo-material'").run(), /contents_body_json/);
@@ -288,7 +264,7 @@ test('the version contract migration preserves creation drafts, files, counters 
     const versions = await rows(db, 'SELECT material_id,version,storage_key,size,mime,uploaded_by,updated_by,created_at FROM file_versions');
     const sessions = (await rows(db, 'SELECT * FROM material_upload_sessions')).map(({ payload, change_note, ...row }) => ({ ...row, creation_draft: payload }));
     const counters = await rows(db, 'SELECT * FROM material_next_versions');
-    await apply(db, migrations.slice(contractIndex, contractIndex + 1));
+    await apply(db, migrations.slice(contractIndex));
     assert.deepEqual(await rows(db, 'SELECT * FROM file_versions'), versions);
     assert.deepEqual(await rows(db, 'SELECT * FROM material_upload_sessions'), sessions);
     assert.deepEqual(await rows(db, 'SELECT * FROM material_next_versions'), counters);
