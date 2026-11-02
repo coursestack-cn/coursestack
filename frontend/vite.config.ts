@@ -43,7 +43,7 @@ export default defineConfig(({ mode }) => {
         },
         server: {
             host: "127.0.0.1",
-            port: 5173,
+            port: 6317,
             strictPort: true,
             fs: { allow: [fileURLToPath(new URL("..", import.meta.url))] },
             proxy: {
