@@ -133,12 +133,15 @@ pnpm check
 
 `0004_teaching_classes.sql` 将课程号作为课程主键，拆分课程学期、教学班和学生归属，按教学班保存积分规则及流水归属。已有内容、上传会话、文件版本、版本计数、积分金额与撤回链保留；迁移不会重新奖励旧内容。课程旧 ID 与新编号交叉重合也按完整映射处理。迁移前置校验的 `academic_valid_member_roles`、`academic_unique_legacy_teacher`、`academic_legacy_rules_required` 分别表示成员身份错误、教师归属无法唯一确定和旧积分规则缺失，应核实数据后处理，不能跳过校验。
 
-本次数据层的定向检查（不执行完整构建）：
+课程与教学班采用目标契约，迁移、后端和前端必须一同集成发布；旧的教师建课、code 字段和课程级积分接口不兼容。演示脚本也使用新模型：账号、开课安排、教学班及学生归属在同一批次写入；空库会创建无登录密码的管理员占位，仍需 admin:init 初始化登录。
+
+集成检查（不执行完整构建）：
 
 ```sh
 pnpm db:check
 pnpm check
-node --experimental-strip-types --test tests/migrations.test.mjs tests/teaching-classes.test.mjs
+pnpm test
+pnpm openapi:check
 ```
 
 local、production 使用同一组迁移；生产迁移由部署工作流在发布 Worker 前执行，见[数据库结构变更](../docs/部署与运维.md#数据库结构变更)。
