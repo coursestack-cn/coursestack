@@ -428,13 +428,16 @@ test('identity deletion during sealing prevents the admitted upload from publish
     assert.equal(await h.database.prepare('SELECT COUNT(*) AS n FROM contents WHERE id=?').bind(row.material_id).first('n'), 0);
 });
 
-test('course entry publishes working compact UUID URLs for the combined list', async () => {
-    const course = await h.api('POST', '/courses', 'teacher-a', { name: '文件接口课程', code: 'MATERIAL-URL', introduction: '' });
-    assert.equal(course.status, 201);
-    const entry = await h.api('GET', `/courses/${course.data.id}/entry`);
-    assert.match(entry.data.links.contents, /^\/api\/courses\/[a-f\d]{32}\/contents$/);
-    for (const link of [entry.data.links.contents, entry.data.links.materials]) {
-        const list = await h.api('GET', link.slice(4));
-        assert.equal(list.status, 200); assert.equal(list.data.total, 0);
+test('course URLs preserve Unicode, separators and UUID-like course numbers exactly', async () => {
+    for (const id of ['课程/资料 01', '12345678-abcd-abcd-abcd-123456789012', '12345678abcdabcdabcd123456789012']) {
+        const course = await h.api('POST', '/courses', 'admin', { name: '文件接口课程', id, introduction: '' });
+        assert.equal(course.status, 201, JSON.stringify(course.data));
+        const path = `/courses/${encodeURIComponent(id)}`;
+        const entry = await h.api('GET', `${path}/entry`);
+        assert.equal(entry.data.links.contents, `/api${path}/contents`);
+        for (const link of [entry.data.links.contents, entry.data.links.materials]) {
+            const list = await h.api('GET', link.slice(4));
+            assert.equal(list.status, 200); assert.equal(list.data.total, 0);
+        }
     }
 });

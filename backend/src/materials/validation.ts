@@ -2,6 +2,7 @@ import { z } from 'zod';
 import { type Env } from '../env.ts';
 import { HttpError, idSchema, tagsSchema } from '../http.ts';
 import { bodySchema } from '../discussions/body.ts';
+import { courseIdSchema } from '../courses/validation.ts';
 
 export const filenameSchema = z.string().trim().min(1).max(200)
     .refine(name => !/[\u0000-\u001f\u007f/\\]/.test(name) && name !== '.' && name !== '..', '文件名不能包含路径或控制字符');
@@ -14,7 +15,7 @@ export const materialMimes = [
 ] as const;
 const file = z.object({ size: z.number().int().positive().max(Number.MAX_SAFE_INTEGER), type: z.enum(materialMimes) }).strict();
 export const uploadInput = z.discriminatedUnion('mode', [
-    z.object({ mode: z.literal('create'), courseId: idSchema, title: filenameSchema, body: bodySchema,
+    z.object({ mode: z.literal('create'), courseId: courseIdSchema, title: filenameSchema, body: bodySchema,
         tags: tagsSchema.nullable().default(null), file }).strict(),
     z.object({ mode: z.literal('version'), materialId: idSchema, file }).strict(),
 ]);
@@ -24,9 +25,6 @@ export const now = () => Math.floor(Date.now() / 1000);
 export const newId = () => crypto.randomUUID().replaceAll('-', '');
 export const urlId = (id: string) => /^[\da-f]{8}(?:-[\da-f]{4}){3}-[\da-f]{12}$/i.test(id) ? id.replaceAll('-', '').toLowerCase() : id;
 export const materialId = (id: string) => urlId(id);
-export function expandedId(id: string) {
-    return /^[\da-f]{32}$/i.test(id) ? id.replace(/(.{8})(.{4})(.{4})(.{4})(.{12})/, '$1-$2-$3-$4-$5').toLowerCase() : id;
-}
 export function versionNumber(value: string | undefined) {
     if (!value || !/^[1-9]\d*$/.test(value) || !Number.isSafeInteger(Number(value))) {
         throw new HttpError(400, 'INVALID_VERSION', '版本号必须是正整数');
