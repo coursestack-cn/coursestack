@@ -19,9 +19,9 @@ export const notificationDefinitions: Definition[] = [
         response: object({ id: positiveId, read: { const: true }, readAt: integer, unreadCount: integer }) },
 ];
 export const notificationSchemas = {
-    Notification: object({ id: positiveId, type: { type: 'string', enum: ['answer', 'comment', 'reply', 'accepted', 'unaccepted', 'moderation', 'bonus'] },
+    Notification: object({ id: positiveId, type: { type: 'string', enum: ['answer', 'comment', 'reply', 'accepted', 'unaccepted', 'moderation', 'bonus', 'favorite'] },
         contentId: nullableText, kind: { type: ['string', 'null'], enum: ['question', 'answer', 'comment', 'material', null] },
-        title: nullableText, courseId: text, courseName: text, createdAt: integer, readAt: nullableInteger,
+        title: nullableText, eventType: nullableText, newAnswerId: nullableText, oldAnswerId: nullableText, courseId: text, courseName: text, createdAt: integer, readAt: nullableInteger,
         available: bool, isPublic: bool, status: nullableText, contentStatus: nullableText, version: nullableInteger,
         reason: text, deltaPoints: nullableInteger, href: nullableText }),
     NotificationPage: object({ viewer: text, items: { type: 'array', maxItems: 20, items: ref('Notification') }, unreadCount: integer,

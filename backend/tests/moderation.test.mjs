@@ -64,16 +64,22 @@ test('report outcomes are atomic and notices are private, durable and idempotent
     const notifications = await h.api('GET', '/notifications', 'student-a');
     assert.equal(notifications.data.items.length, 2); assert.equal(notifications.data.unreadCount, 2);
     const notice = notifications.data.items.find(n => n.type === 'moderation');
+    assert.equal(notifications.data.items.filter(item => item.type === 'moderation').length, 1);
     assert.equal(notice.contentId, q); assert.equal(notice.reason, '下架等待作者修订'); assert.equal('reporterId' in notice, false);
     assert.equal((await h.api('GET', '/notifications', 'student-b')).data.items.length, 0);
     assert.equal((await h.api('PUT', `/notifications/${notice.id}/read`, 'student-b')).status, 404);
     for (let i = 0; i < 2; i++) assert.equal((await h.api('PUT', `/notifications/${notice.id}/read`, 'student-a')).status, 200);
     const remaining = (await h.api('GET', '/notifications', 'student-a')).data;
     assert.equal(remaining.unreadCount, 1); assert.equal(remaining.items[0].type, 'bonus');
+    assert.equal((await h.api('GET', '/notifications?status=unread', 'student-a')).data.unreadCount, notifications.data.unreadCount - 1);
     await moderate(q, 'restore'); await moderate(q, 'restore');
     const restored = await h.api('GET', '/notifications?status=all', 'student-a');
     assert.equal(restored.data.items.length, 4); assert.equal(restored.data.unreadCount, 3);
     assert.equal(restored.data.items.find(n => n.type === 'moderation').status, 'visible');
+    const restoredNotices = restored.data.items.filter(item => item.type === 'moderation');
+    assert.equal(restoredNotices.length, 2);
+    assert.equal(restoredNotices[0].readAt, null); assert.ok(restoredNotices[1].readAt);
+    assert.equal(restored.data.unreadCount, restored.data.items.filter(item => item.readAt === null).length);
     assert.equal((await h.api('GET', '/notifications')).status, 401);
 });
 
@@ -167,7 +173,7 @@ test('reasons are optional for reports and management actions, and blank reasons
 
 test('hiding and restoring notify branch owners like deletion but skip children hidden on their own', async () => {
     const comment = async (as, targetKind, targetId) => (await h.api('POST', '/comments', as, { targetKind, targetId, body: doc('补充说明') })).data.id;
-    const notices = async as => (await h.api('GET', '/notifications', as)).data.items.filter(n => n.type === 'moderation');
+    const notices = async as => (await h.api('GET', '/notifications?status=all', as)).data.items.filter(notice => notice.type === 'moderation');
     const ids = list => list.map(n => n.contentId).sort();
     const q = await h.postQuestion(), a = await h.postAnswer(q), closed = await h.postAnswer(q);
     const open = await comment('student-b', 'question', q), below = await comment('student-a', 'answer', closed);

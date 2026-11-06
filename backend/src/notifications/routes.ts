@@ -14,6 +14,7 @@ type NoticeRow = {
     id: number; type: string; contentId: string | null; kind: string | null; title: string | null;
     courseId: string; courseName: string; termId: string | null; createdAt: number; readAt: number | null;
     authorId: string | null; contentStatus: string | null; isPublic: number;
+    eventType: string | null; rootId: string | null; rootTitle: string | null; newAnswerId: string | null; oldAnswerId: string | null;
     status: string | null; version: number | null; reason: string | null; deltaPoints: number | null;
 };
 
@@ -21,15 +22,17 @@ const notices = sql`SELECT n.id,n.kind AS type,n.content_id AS contentId,c.kind,
     COALESCE(c.course_id,l.course_id) AS courseId,course.name AS courseName,l.term_id AS termId,
     n.created_at AS createdAt,n.read_at AS readAt,c.author_id AS authorId,c.status AS contentStatus,
     EXISTS(SELECT 1 FROM public_contents p WHERE p.id=c.id) AS isPublic,
-    m.new_status AS status,m.version,COALESCE(m.reason,l.reason) AS reason,l.delta_points AS deltaPoints
+    e.kind AS eventType,e.root_id AS rootId,root.title AS rootTitle,e.new_answer_id AS newAnswerId,e.old_answer_id AS oldAnswerId,
+    m.new_status AS status,COALESCE(m.version,e.version) AS version,COALESCE(m.reason,l.reason) AS reason,l.delta_points AS deltaPoints
     FROM notifications n LEFT JOIN contents c ON c.id=n.content_id
+    LEFT JOIN content_events e ON e.id=n.event_id LEFT JOIN public_contents root ON root.id=e.root_id
     LEFT JOIN moderation_actions m ON n.kind='moderation' AND m.id=CAST(n.source_id AS INTEGER)
     LEFT JOIN bonus_ledger l ON n.kind='bonus' AND l.id=CAST(n.source_id AS INTEGER) AND l.student_id=n.account_id
     JOIN courses course ON course.id=COALESCE(c.course_id,l.course_id)`;
 
 function dto(row: NoticeRow, viewer: string) {
     const isOwner = row.authorId === viewer;
-    const available = Boolean(row.isPublic) || (isOwner && row.contentStatus !== 'deleted');
+    const available = Boolean(row.isPublic) || (row.type !== 'favorite' && isOwner && row.contentStatus !== 'deleted');
     const enc = encodeURIComponent;
     let href: string | null = null;
     if (row.type === 'bonus') href = `/courses/${enc(row.courseId)}?bonus=history&bonusTerm=${enc(row.termId!)}`;
@@ -37,7 +40,7 @@ function dto(row: NoticeRow, viewer: string) {
     else if (row.contentId && available) href = isOwner && !row.isPublic ? `/me/contents/${enc(row.contentId)}`
         : `/${row.kind === 'material' ? 'materials' : row.kind === 'question' ? 'questions' : row.kind === 'answer' ? 'answers' : 'comments'}/${enc(row.contentId)}`;
     return { id: row.id, type: row.type, contentId: row.contentId, kind: row.kind,
-        title: available ? row.title : null, courseId: row.courseId, courseName: row.courseName,
+        title: available ? row.title ?? row.rootTitle : null, eventType: row.eventType, newAnswerId: row.newAnswerId, oldAnswerId: row.oldAnswerId, courseId: row.courseId, courseName: row.courseName,
         createdAt: row.createdAt, readAt: row.readAt, available, isPublic: Boolean(row.isPublic),
         status: row.status, contentStatus: row.contentStatus, version: row.version, reason: row.reason ?? '', deltaPoints: row.deltaPoints, href };
 }
