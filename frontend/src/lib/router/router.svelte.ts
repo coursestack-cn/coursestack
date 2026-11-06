@@ -11,6 +11,13 @@ type NavigationKind = "initial" | "push" | "replace" | "pop";
 export type NavigationOptions = { replace?: boolean; scroll?: "top" };
 export type QueryChanges = Record<string, string | number | boolean | readonly string[] | null | undefined>;
 
+// Dev only: after an edit anywhere in the route graph, Vite can evaluate this module again inside a running page.
+// A second copy keeps its own location state, so its navigations change the URL while RouterOutlet stays on the old page.
+if (import.meta.hot) {
+    if (import.meta.hot.data.loaded) window.location.reload();
+    import.meta.hot.data.loaded = true;
+}
+
 const stateKey = "coursestack";
 const zeroScroll = () => ({ x: 0, y: 0 });
 let entry: Entry = { index: 0, scroll: zeroScroll() };
