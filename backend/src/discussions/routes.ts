@@ -1,3 +1,4 @@
+import { bodySearchText } from '../search/text.ts';
 import { CONTENT_REQUEST_MAX_BYTES } from '../../../shared/rich-text/index.ts';
 import { Hono } from 'hono';
 import { sql } from 'drizzle-orm';
@@ -26,9 +27,9 @@ async function insertContent(c: Ctx, data: NewContent) {
         c.header('Idempotency-Replayed', 'true'); return old.id;
     }
     const id = uid(), at = now();
-    await createDatabase(c.env.DB).run(sql`INSERT INTO contents(id,kind,course_id,term_id,author_id,title,body,tags,target_id,reply_to_id,
+    await createDatabase(c.env.DB).run(sql`INSERT INTO contents(id,kind,course_id,term_id,author_id,title,body,body_text,tags,target_id,reply_to_id,
         created_at,updated_at,updated_by,request_key,request_hash)
-        SELECT ${id},${data.kind},${data.courseId},(SELECT id FROM terms WHERE current=1),${a.id},${data.title ?? null},${JSON.stringify(data.body)},${data.tags?.length ? JSON.stringify(data.tags) : null},
+        SELECT ${id},${data.kind},${data.courseId},(SELECT id FROM terms WHERE current=1),${a.id},${data.title ?? null},${JSON.stringify(data.body)},${data.kind === 'comment' ? '' : bodySearchText(data.body)},${data.tags?.length ? JSON.stringify(data.tags) : null},
         ${data.targetId ?? null},${data.replyToId ?? null},
         ${at},${at},${a.id},${identity.key},${identity.fingerprint} WHERE ${activeUser(a)}
         ON CONFLICT(author_id,request_key) DO NOTHING`);

@@ -1,3 +1,4 @@
+import { bodySearchText } from '../search/text.ts';
 import { parseBody, bodySchema, jsonChanged, type ProseMirrorDocument } from './body.ts';
 import { CONTENT_REQUEST_MAX_BYTES } from '../../../shared/rich-text/index.ts';
 import { z } from 'zod';
@@ -125,6 +126,7 @@ export async function editContent(c: Ctx, id: string, kind?: ContentRow['kind'])
     const titleChanged = data.title === undefined ? sql`0` : sql`title IS NOT ${data.title}`, at = Math.floor(Date.now() / 1000);
     const result = await createDatabase(c.env.DB).run(sql`UPDATE contents SET title=${data.title ?? sql`title`},
         body=${body === undefined ? sql`body` : sql`CASE WHEN ${bodyChanged} THEN ${body} ELSE body END`},
+        body_text=${data.body === undefined ? sql`body_text` : row.kind === 'comment' ? '' : bodySearchText(data.body)},
         tags=${tags === undefined ? sql`tags` : sql`CASE WHEN ${tagsChanged} THEN ${tags} ELSE tags END`},
         edited_at=CASE WHEN ${titleChanged} OR ${bodyChanged} OR ${tagsChanged} THEN ${at} ELSE edited_at END,
         updated_at=${at},updated_by=${a.id} WHERE id=${row.id} AND status<>'deleted'

@@ -1,3 +1,4 @@
+import { bodySearchText } from '../search/text.ts';
 import { Hono } from 'hono';
 import { sql } from 'drizzle-orm';
 import { CONTENT_REQUEST_MAX_BYTES } from '../../../shared/rich-text/index.ts';
@@ -115,9 +116,9 @@ materialUploadRoutes.post('/material-uploads/:id/confirm', async c => {
         const gate = sql`u.id=${row.id} AND u.owner_id=${a.id} AND u.status='confirming' AND u.lease_token=${lease}
             AND u.lease_until>=${finishedAt} AND u.expires_at>${finishedAt} AND ${activeUser(a)}`;
         await c.env.DB.batch([
-            sql`INSERT INTO contents(id,kind,course_id,term_id,author_id,title,body,tags,updated_by,created_at,updated_at,request_key,request_hash)
+            sql`INSERT INTO contents(id,kind,course_id,term_id,author_id,title,body,body_text,tags,updated_by,created_at,updated_at,request_key,request_hash)
                 SELECT u.material_id,'material',u.course_id,(SELECT id FROM terms WHERE current=1),u.owner_id,json_extract(u.creation_draft,'$.title'),json_extract(u.creation_draft,'$.body'),
-                    json_extract(u.creation_draft,'$.tags'),${a.id},${finishedAt},${finishedAt},'material-upload:'||u.id,u.request_hash
+                    ${bodySearchText(row.creation_draft ? JSON.parse(row.creation_draft).body : null)},json_extract(u.creation_draft,'$.tags'),${a.id},${finishedAt},${finishedAt},'material-upload:'||u.id,u.request_hash
                 FROM material_upload_sessions u WHERE ${gate} AND u.mode='create' ON CONFLICT(author_id,request_key) DO NOTHING`,
             sql`INSERT INTO file_versions(material_id,version,storage_key,size,mime,uploaded_by,updated_by,created_at)
                 SELECT u.material_id,COALESCE(counter.next_version,1),${key},u.expected_size,u.mime,${a.id},${a.id},${finishedAt}
