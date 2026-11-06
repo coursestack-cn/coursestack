@@ -57,6 +57,13 @@
       "when": 1793777383816,
       "tag": "0007_content_deletion",
       "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1793995036542,
+      "tag": "0008_notifications",
+      "breakpoints": true
     }
   ]
 }

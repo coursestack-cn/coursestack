@@ -268,3 +268,60 @@ CREATE TRIGGER bonus_ledger_guard BEFORE INSERT ON bonus_ledger BEGIN
             AND r.course_id=NEW.course_id AND r.term_id=NEW.term_id AND r.teacher_id=NEW.teacher_id
             AND r.student_id=NEW.student_id AND r.points=NEW.delta_points))));
 END;
+--> statement-breakpoint
+-- Deliver direct interactions once even when the parent and replied-to author are the same person.
+CREATE TRIGGER content_notifications AFTER INSERT ON contents
+WHEN NEW.kind IN ('answer','comment') BEGIN
+  INSERT INTO notifications(account_id,actor_id,kind,source_id,content_id,created_at)
+  SELECT recipient.id,NEW.author_id,CASE WHEN NEW.kind='answer' THEN 'answer'
+      WHEN recipient.id=(SELECT author_id FROM contents WHERE id=NEW.reply_to_id) THEN 'reply' ELSE 'comment' END,
+      NEW.id,NEW.id,NEW.created_at
+  FROM accounts recipient WHERE recipient.id<>NEW.author_id AND recipient.status<>'deleted'
+    AND recipient.id IN (SELECT author_id FROM contents WHERE id=NEW.target_id OR id=NEW.reply_to_id)
+    AND NEW.id IN (SELECT id FROM public_contents)
+  ON CONFLICT DO NOTHING;
+END;
+--> statement-breakpoint
+CREATE TRIGGER acceptance_notification_created AFTER INSERT ON acceptances BEGIN
+  INSERT INTO notifications(account_id,actor_id,kind,source_id,content_id)
+  SELECT c.author_id,NEW.operator_id,'accepted',lower(hex(randomblob(16))),c.id
+  FROM contents c JOIN accounts a ON a.id=c.author_id
+  WHERE c.id=NEW.answer_id AND c.author_id<>NEW.operator_id AND a.status<>'deleted';
+END;
+--> statement-breakpoint
+CREATE TRIGGER acceptance_notification_changed AFTER UPDATE OF answer_id ON acceptances
+WHEN NEW.answer_id<>OLD.answer_id BEGIN
+  INSERT INTO notifications(account_id,actor_id,kind,source_id,content_id)
+  SELECT c.author_id,NEW.operator_id,CASE WHEN c.id=NEW.answer_id THEN 'accepted' ELSE 'unaccepted' END,
+      lower(hex(randomblob(16))),c.id
+  FROM contents c JOIN accounts a ON a.id=c.author_id
+  WHERE c.id IN (OLD.answer_id,NEW.answer_id) AND c.author_id<>NEW.operator_id AND a.status<>'deleted';
+END;
+--> statement-breakpoint
+-- Deleting a content branch already delivers moderation notices; it is not an explicit cancellation.
+CREATE TRIGGER acceptance_notification_removed AFTER DELETE ON acceptances BEGIN
+  INSERT INTO notifications(account_id,actor_id,kind,source_id,content_id)
+  SELECT c.author_id,OLD.operator_id,'unaccepted',lower(hex(randomblob(16))),c.id
+  FROM public_contents c JOIN accounts a ON a.id=c.author_id
+  WHERE c.id=OLD.answer_id AND c.author_id<>OLD.operator_id AND a.status<>'deleted'
+    AND EXISTS(SELECT 1 FROM public_contents WHERE id=OLD.question_id);
+END;
+--> statement-breakpoint
+CREATE TRIGGER moderation_notification_created AFTER INSERT ON moderation_actions BEGIN
+  INSERT INTO notifications(account_id,actor_id,kind,source_id,content_id,created_at)
+  SELECT c.author_id,NEW.actor_id,'moderation',CAST(NEW.id AS TEXT),c.id,NEW.created_at
+  FROM contents c JOIN accounts a ON a.id=c.author_id
+  WHERE c.id=NEW.content_id AND c.author_id<>NEW.actor_id AND a.status<>'deleted'
+  ON CONFLICT DO NOTHING;
+END;
+--> statement-breakpoint
+-- Own-operation rewards remain toast-only; all external adjustments have a durable inbox entry.
+CREATE TRIGGER bonus_notification_created AFTER INSERT ON bonus_ledger
+WHEN NEW.operator_id<>NEW.student_id BEGIN
+  INSERT INTO notifications(account_id,actor_id,kind,source_id,content_id,created_at)
+  SELECT NEW.student_id,NEW.operator_id,'bonus',CAST(NEW.id AS TEXT),
+      CASE WHEN NEW.source_kind='manual' THEN NULL WHEN NEW.source_kind='material'
+        THEN substr(NEW.source_id,1,instr(NEW.source_id,'@')-1) ELSE NEW.source_id END,NEW.created_at
+  FROM accounts a WHERE a.id=NEW.student_id AND a.status<>'deleted'
+  ON CONFLICT DO NOTHING;
+END;

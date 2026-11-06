@@ -302,3 +302,21 @@ export const moderationNotificationReads = sqliteTable('moderation_notification_
     accountId: text('account_id').notNull().references(() => accounts.id),
     readAt: integer('read_at').notNull().default(sql`(unixepoch())`),
 }, t => [primaryKey({ columns: [t.actionId, t.accountId] })]);
+
+// One inbox entry per recipient and source event. Content text stays in contents.
+export const notifications = sqliteTable('notifications', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: text('account_id').notNull().references(() => accounts.id),
+    actorId: text('actor_id').notNull().references(() => accounts.id),
+    kind: text('kind', { enum: ['answer', 'comment', 'reply', 'accepted', 'unaccepted', 'moderation', 'bonus'] }).notNull(),
+    sourceId: text('source_id').notNull(),
+    contentId: text('content_id').references(() => contents.id),
+    createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
+    readAt: integer('read_at'),
+}, t => [
+    check('notifications_kind', sql`${t.kind} IN ('answer', 'comment', 'reply', 'accepted', 'unaccepted', 'moderation', 'bonus')`),
+    uniqueIndex('notifications_recipient_source').on(t.accountId, t.kind, t.sourceId),
+    index('notifications_recipient_order').on(t.accountId, t.id),
+    index('notifications_unread').on(t.accountId, t.id).where(sql`${t.readAt} IS NULL`),
+    index('notifications_read').on(t.accountId, t.id).where(sql`${t.readAt} IS NOT NULL`),
+]);

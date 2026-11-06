@@ -358,6 +358,9 @@ test('comment ownership migration preserves replies, hidden branches, audit rece
     ]);
     assert.deepEqual(await rows(db, 'SELECT * FROM bonus_ledger ORDER BY id'), ledger);
     assert.equal(await db.prepare('SELECT COUNT(*) n FROM moderation_notification_reads').first('n'), 1);
+    const receipt = await db.prepare('SELECT read_at FROM moderation_notification_reads WHERE action_id=1').first();
+    assert.deepEqual(await rows(db, 'SELECT id,kind,source_id,read_at FROM notifications'),
+        [{ id: 1, kind: 'moderation', source_id: '1', read_at: receipt.read_at }]);
     assert.equal(await db.prepare('SELECT version FROM moderation_actions WHERE id=1').first('version'), null);
     assert.deepEqual(await rows(db, 'PRAGMA foreign_key_check'), []);
 });
