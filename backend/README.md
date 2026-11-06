@@ -56,6 +56,7 @@ curl.exe --fail http://127.0.0.1:8787/api/health
 | `db:check` | 仅检查仓库中的迁移文件、快照与源定义，不连接数据库 |
 | `db:diagram` | 启动结构可视化，读取 schema，不连接业务数据库 |
 | `db:migrate` | 对指定目标应用尚未执行的迁移 |
+| `search:backfill` | 对指定目标分页回填正文检索文字；`--check` 只读检查一致性 |
 | `admin:init` | 初始化唯一管理员及密码，拒绝覆盖已有密码 |
 | `admin:reset` | 重置管理员密码并撤销其会话 |
 | `admin:status` | 只读查询管理员状态 |
@@ -94,6 +95,8 @@ pnpm demo --remote .local/remote.json
 | `src/materials/` | 统一内容列表、上传会话、文件版本、受控预览下载及清理 |
 | `src/moderation/` | 举报队列、下架恢复、审查记录 |
 | `src/integration/` | 本人动态、内部可见文档及内容详情 |
+| `src/favorites/` | 统一收藏、批量状态与首页课程动态 |
+| `src/notifications/` | 通用通知、游标分页、状态同步与已读 |
 | `src/openapi.ts`、`src/materials/openapi.ts` | 课程、讨论与资料 API 的 OpenAPI 规范 |
 | `src/permissions.ts` | 管理员、当前授课教师权限与公开资料查询 |
 | `src/db/schema.ts` | 共享 Drizzle 表定义 |
@@ -132,6 +135,10 @@ pnpm check
 `0002_material_table_names.sql` 重命名两张资料表；`0003_material_version_contract.sql` 将上传 payload 改为 creation_draft，移除更新说明、独立版本状态及版本审查记录。版本只允许删除，资料整体下架沿用 contents。该迁移若检测到隐藏版本会以 `material_versions_require_no_hidden_rows` 中止并回滚，需先明确恢复或删除这些版本，避免它们被自动公开。
 
 `0004_teaching_classes.sql` 将课程号作为课程主键，拆分课程学期、教学班和学生归属，按教学班保存积分规则及流水归属。已有内容、上传会话、文件版本、版本计数、积分金额与撤回链保留；迁移不会重新奖励旧内容。课程旧 ID 与新编号交叉重合也按完整映射处理。迁移前置校验的 `academic_valid_member_roles`、`academic_unique_legacy_teacher`、`academic_legacy_rules_required` 分别表示成员身份错误、教师归属无法唯一确定和旧积分规则缺失，应核实数据后处理，不能跳过校验。
+
+`0005_content_term.sql` 为 contents 添加可空 term_id 及课程学期查询索引，保留全部旧记录且不猜测其学期。新内容在首次发布（资料为确认发布）时记录当前学期，后续编辑或版本不改变归属。先应用迁移再启动新后端；本次仅在隔离测试库验证，未应用到日常开发或远程数据库。
+
+`0011_global_search.sql` 增加正文派生列 body_text 和删除清理触发器。已有库需先迁移、启用新后端同步写入，再运行 `pnpm search:backfill --local` 和 `pnpm search:backfill --local --check`；远程显式使用 `--remote <配置文件>`。检查通过后开放搜索入口，避免历史正文漏搜。回填保留并发编辑、更新时间与积分；完整顺序见[全站搜索](../docs/全站搜索.md#升级与历史数据回填)。
 
 课程与教学班采用目标契约，迁移、后端和前端必须一同集成发布；旧的教师建课、code 字段和课程级积分接口不兼容。演示脚本也使用新模型：账号、开课安排、教学班及学生归属在同一批次写入；空库会创建无登录密码的管理员占位，仍需 admin:init 初始化登录。
 
@@ -173,6 +180,30 @@ pnpm openapi:export
 pnpm openapi:check
 ```
 
-前者将规范导出到仓库根目录的 `openapi/openapi.json`（前后端共用的接口契约），后者检查业务方法与实际路由及静态规范一致。修改 `src/openapi.ts` 或 `src/materials/openapi.ts` 后依次执行。`GET /api/openapi.json` 返回标准 OpenAPI 3.1 文档，不加 data 包装；它描述课程、讨论和资料模块，账号接口见[账号与权限](../docs/账号与权限.md)。仅本地开放的资料 PUT 传输接口见[资料与文件](../docs/资料与文件.md#本地与云端)。
+前者将规范导出到仓库根目录的 `openapi/openapi.json`（前后端共用的接口契约），后者检查业务方法与实际路由及静态规范一致。修改 `src/openapi.ts`、`src/materials/openapi.ts` 或 `src/notifications/openapi.ts` 后依次执行。`GET /api/openapi.json` 返回标准 OpenAPI 3.1 文档，不加 data 包装；它描述课程、讨论、资料和通知模块，账号接口见[账号与权限](../docs/账号与权限.md)。仅本地开放的资料 PUT 传输接口见[资料与文件](../docs/资料与文件.md#本地与云端)。
 
 参考：[Drizzle D1](https://orm.drizzle.team/docs/get-started/d1-new)、[D1 外键](https://developers.cloudflare.com/d1/sql-api/foreign-keys/)、[Wrangler 配置](https://developers.cloudflare.com/workers/wrangler/configuration/)、[Workers CPU 限制](https://developers.cloudflare.com/workers/platform/limits/#cpu-time)。
+
+## 内容审查迁移与联调
+
+`0006_content_moderation.sql` 新增上下架通知已读回执表并替换积分触发器/视图，不删除既有内容、文件、修读关系或流水。部署新接口前必须将迁移应用到同一目标数据库；仅运行 `db:check` 不会应用迁移。
+
+只有所有者能编辑、上传版本；所有者删除受讨论、采纳及最后版本约束，管理者通过审查接口完整删除所属分支。组员1同步 reply_to_id、管理事件 version 和举报 deleted 状态；组员3维护所属级联、权限与积分事务；组员4维护版本至少保留一项、文件清理和管理通知；组员2同步 canDelete、回复引用与举报三种结果。接口与字段见 OpenAPI，规则见[课程与讨论](../docs/课程与讨论.md)。
+
+`0007_content_deletion.sql` 追加评论 reply_to_id 与管理事件 version，扩展举报删除结果，替换所属级联、积分和最后版本约束。旧评论的回复引用保留，target_id 归一到问题、回答或资料；原先因父评论隐藏的回复保持 hidden，避免升级时意外公开。内容与审查记录采用 ADD COLUMN，保留其外键引用和通知回执。已有正文、流水及原学期不重写。部署前应先应用迁移，随后一同更新前后端；仓库检查不能代替目标迁移。
+
+## CSV 账号导入迁移与联调
+
+`0009_account_creation_requests.sql` 新增账号创建请求表，不重写账号或教学班关系。发布前先对目标数据库应用迁移，再更新前后端；`db:check` 和隔离测试不会更新日常开发库或远程库。本地已有环境可执行 `pnpm db:migrate --local` 应用尚未执行的迁移。
+
+管理员预检接口为 `POST /api/admin/accounts/import/preview`，单账号创建增加可选 `Idempotency-Key` 和 `mustChangePassword`。批量任务由前端限制并发，不在一个 Worker 请求内派生500个密码。字段、逐行状态及重试行为见[CSV 批量创建账号](../docs/账号与权限.md#csv-批量创建账号)。定向回归使用隔离数据库：`node --experimental-strip-types --test tests/account-csv.test.mjs tests/account-import.test.mjs tests/accounts.test.mjs tests/password-reset.test.mjs tests/session-account.test.mjs tests/migrations.test.mjs`。
+
+## 站内通知迁移与联调
+
+`0008_notifications.sql` 新增统一通知表、索引及内容、采纳、管理、积分触发器。旧管理通知保留原 ID，已读回执迁入 read_at；旧表保留以兼容迁移，不补发历史互动和积分。业务变更及通知在同一事务内提交，不需要额外后台任务。
+
+新通知接口改为 unread/read/all 筛选和 ID 游标，每批最多20条；新增总数、指定条目状态及固定 ID 上限的全部已读接口，替换旧页码契约。前后端应在应用迁移后一起更新，具体字段与分工见[站内通知](../docs/课程与讨论.md#站内通知)。`db:check` 仅检查迁移文件，不会更新日常开发库或远程库。定向回归可运行 `node --experimental-strip-types --test tests/notifications.test.mjs tests/moderation.test.mjs tests/deletion.test.mjs tests/migrations.test.mjs`，使用隔离临时数据库。
+
+## 收藏与动态迁移与联调
+
+`0008_notifications.sql` 建立通用通知表并迁入旧审查回执；`0010_favorites.sql` 在此基础上新增收藏、不可变内容事件和通知事件关联。升级保留既有通知 ID、来源与已读时间，只回填能够确认的问题发布、资料发布和现存后续版本事件，回填期间不投递历史通知。收藏、触发条件与模块影响见[收藏与动态](../docs/收藏与动态.md)。先按序迁移同一目标数据库，再更新前后端；`db:check` 只验证仓库，不能代替迁移。
