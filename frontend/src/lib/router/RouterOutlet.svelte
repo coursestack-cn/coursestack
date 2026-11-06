@@ -75,7 +75,7 @@
             {#snippet actions()}<Button onclick={() => window.location.reload()}>重新加载</Button>{/snippet}
         </StateBlock>
     {:else if Page}
-        {#key router.pathname}<Page params={router.params} />{/key}
+        {#key `${router.pathname}|${session.accountSwitches}`}<Page params={router.params} />{/key}
     {/if}
 {/snippet}
 

@@ -23,6 +23,7 @@ export function isAborted(error: unknown): boolean {
 export function userMessage(error: unknown, overrides: MessageOverrides = {}): string {
     if (isAborted(error)) return "";
     if (!(error instanceof ApiError)) return overrides.default ?? fallback;
+    if (error.code === "ACCOUNT_CHANGED") return "其他标签页更换了登录账号，操作未执行。";
     const override = (Object.hasOwn(overrides, error.code) ? overrides[error.code] : undefined)
         ?? (Object.hasOwn(overrides, error.status) ? overrides[error.status] : undefined);
     if (typeof override === "string") return override;

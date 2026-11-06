@@ -12,10 +12,19 @@ export type RequestOptions = {
 };
 
 const unauthorizedListeners = new Set<() => void>();
+let expectedAccount: () => string | undefined = () => undefined;
+let accountChanged: () => void = () => {};
 
 export function onUnauthorized(listener: () => void): () => void {
     unauthorizedListeners.add(listener);
     return () => { unauthorizedListeners.delete(listener); };
+}
+
+// Tabs share one session cookie. Writes state the account this tab shows, and the
+// server refuses them when the cookie has since been replaced by another account.
+export function guardWrites(current: () => string | undefined, changed: () => void): void {
+    expectedAccount = current;
+    accountChanged = changed;
 }
 
 export function toApiError(error: unknown): ApiError {
@@ -38,6 +47,8 @@ async function send<T>(method: string, path: string, body: unknown, options: Req
     const headers = new Headers(options.headers);
     headers.set("Accept", "application/json");
     if (body !== undefined) headers.set("Content-Type", "application/json");
+    const account = method === "GET" ? undefined : expectedAccount();
+    if (account) headers.set("X-Expected-Account", account);
 
     let response: Response;
     try {
@@ -76,6 +87,7 @@ async function send<T>(method: string, path: string, body: unknown, options: Req
         const detail = payload && typeof payload === "object" && "error" in payload ? payload.error : null;
         if (detail && typeof detail === "object" && "code" in detail && "message" in detail
             && typeof detail.code === "string" && typeof detail.message === "string") {
+            if (detail.code === "ACCOUNT_CHANGED") accountChanged();
             throw new ApiError(response.status, detail.code, detail.message);
         }
         throw new ApiError(response.status, "HTTP_ERROR", "请求未能完成，请稍后重试。");

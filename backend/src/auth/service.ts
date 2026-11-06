@@ -24,6 +24,12 @@ export async function readSession(binding: D1Database, request: Request) {
         WHERE s.token_hash = ? AND s.expires_at > unixepoch() AND a.status = 'active' AND a.password IS NOT NULL`)
         .bind(tokenHash).first<{ id: string; nickname: string | null; role: 'student' | 'teacher' | 'admin';
             version: number; mustChangePassword: number }>();
+    // Tabs share one cookie, so another tab may have replaced it after this page loaded.
+    // A write stating a different account must not run as whoever holds the cookie now.
+    const expected = request.headers.get('X-Expected-Account');
+    if (row && expected && expected !== row.id && !['GET', 'HEAD', 'OPTIONS'].includes(request.method)) {
+        throw new HttpError(409, 'ACCOUNT_CHANGED', '当前浏览器登录的账号已变化，操作未执行');
+    }
     return row ? { ...row, mustChangePassword: Boolean(row.mustChangePassword), tokenHash } : null;
 }
 export async function requireSession(binding: D1Database, request: Request, options: { allowPasswordChange?: boolean } = {}) {

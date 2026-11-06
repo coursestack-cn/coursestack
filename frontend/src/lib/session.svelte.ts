@@ -1,4 +1,5 @@
-import { api, onUnauthorized, toApiError, type ApiError } from "$lib/api/client";
+import { untrack } from "svelte";
+import { api, guardWrites, onUnauthorized, toApiError, type ApiError } from "$lib/api/client";
 import { toast } from "$lib/components/ui/toast.svelte.js";
 import { updateAvatar } from "$lib/avatar/state.svelte.js";
 
@@ -9,8 +10,16 @@ export type SessionStatus = "loading" | "authenticated" | "anonymous";
 let status = $state<SessionStatus>("loading");
 let user = $state.raw<User | null>(null);
 let error = $state<ApiError | null>(null);
+let accountSwitches = $state(0);
 let revision = 0;
 let started = false;
+// Tells other tabs the shared cookie changed; each one then asks the server who it belongs to.
+const channel = new BroadcastChannel("coursestack:session");
+
+channel.onmessage = () => { void synchronize(); };
+// A page restored from the back-forward cache missed messages sent while it was stored.
+window.addEventListener("pageshow", (event) => { if (event.persisted) void synchronize(); });
+guardWrites(() => untrack(() => user?.id), () => { void synchronize(); });
 
 onUnauthorized(() => {
     const expired = status === "authenticated";
@@ -42,9 +51,29 @@ async function initialize(force = false): Promise<void> {
     }
 }
 
+// Unlike initialize, keeps the page mounted, so a tab whose account did not change loses nothing.
+async function synchronize(): Promise<void> {
+    if (status === "loading") return initialize(true);
+    const requestRevision = ++revision;
+    const previous = user?.id;
+    try {
+        const result = await api.get<User>("/api/auth/me");
+        if (requestRevision !== revision) return;
+        user = result;
+        status = "authenticated";
+        if (result.id === previous) return;
+        if (previous) accountSwitches++;
+        toast.info(`其他标签页更换了登录账号，当前为“${result.nickname ?? "未设置昵称"}”`);
+    } catch {
+        // onUnauthorized already handled a 401. After any other failure the
+        // displayed account may be stale, but the server still refuses its writes.
+    }
+}
+
 async function authenticate(path: string, body: unknown, signal?: AbortSignal): Promise<void> {
     const requestRevision = ++revision;
     const result = await api.post<User>(path, body, { signal });
+    channel.postMessage(null);
     if (signal?.aborted || requestRevision !== revision) return;
     user = result;
     error = null;
@@ -55,6 +84,8 @@ export const session = {
     get status() { return status; },
     get user() { return user; },
     get error() { return error; },
+    // Counts direct changes from one account to another in this tab; pages remount on each.
+    get accountSwitches() { return accountSwitches; },
     initialize,
     retry: () => initialize(true),
     login: (schoolNumber: string, password: string, signal?: AbortSignal) =>
@@ -73,6 +104,7 @@ export const session = {
     async changePassword(oldPassword: string, newPassword: string): Promise<void> {
         const requestRevision = ++revision;
         await api.post("/api/auth/password", { oldPassword, newPassword });
+        channel.postMessage(null);
         if (requestRevision !== revision) return;
         user = null;
         error = null;
@@ -93,6 +125,7 @@ export const session = {
     async logout(): Promise<void> {
         const requestRevision = ++revision;
         await api.post("/api/auth/logout");
+        channel.postMessage(null);
         if (requestRevision !== revision) return;
         user = null;
         error = null;
