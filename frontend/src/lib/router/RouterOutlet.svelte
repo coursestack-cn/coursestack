@@ -18,6 +18,7 @@
     const route = $derived(router.route);
     const pending = $derived(loading || loadedRoute !== route);
     const courseCode = $derived(route.layout === "course" ? router.params.courseCode : undefined);
+    const termId = $derived(route.layout === "course" ? router.params.termId : undefined);
     const loginRoute = $derived(route.path === "/login" || route.path === "/admin/login");
     const checksSession = $derived(route.path === "/" || route.requiresAuth || loginRoute);
     const waitingSession = $derived(checksSession && session.status === "loading");
@@ -81,7 +82,7 @@
 {/snippet}
 
 {#if courseCode}
-    {#key courseCode}<CourseLayout {courseCode}>{@render content()}</CourseLayout>{/key}
+    {#key JSON.stringify([courseCode, termId])}<CourseLayout {courseCode} {termId}>{@render content()}</CourseLayout>{/key}
 {:else if waitingSession || redirecting || pending || loadError}
     {@const placeholder = Boolean(route.dynamicHeading && !loadError)}
     <!-- The breadcrumb entry only reserves the row; PageLayout renders placeholders while loading. -->

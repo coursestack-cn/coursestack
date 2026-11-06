@@ -1,5 +1,6 @@
 <script module lang="ts">
-    export type Props = { courseCode: string; courseName: string; showManage?: boolean; loading?: boolean };
+    import type { Snippet } from "svelte";
+    export type Props = { courseCode: string; courseName: string; showManage?: boolean; loading?: boolean; showBack?: boolean; actions?: Snippet };
 </script>
 
 <script lang="ts">
@@ -7,15 +8,16 @@
     import Skeleton from "$lib/components/ui/Skeleton.svelte";
     import { router } from "$lib/router/router.svelte";
 
-    let { courseCode, courseName, showManage = false, loading = false }: Props = $props();
+    let { courseCode, courseName, showManage = false, loading = false, showBack = true, actions }: Props = $props();
     const base = $derived(`/courses/${encodeURIComponent(courseCode)}`);
 </script>
 
 <header class="course-heading">
     <h1 tabindex="-1">{#if loading}<Skeleton variant="block" width="8em" height="1.4em" />{:else}{courseName}{/if}</h1>
     <div class="actions">
-        {#if router.pathname !== base}<Button href={base} variant="ghost">返回课程</Button>{/if}
-        {#if showManage}<Button href={`${base}/manage`} variant="ghost">管理课程</Button>{/if}
+        {@render actions?.()}
+        {#if showBack && router.pathname !== base}<Button href={base}>返回课程</Button>{/if}
+        {#if showManage}<Button href={`${base}/manage/reports`}>内容审查</Button><Button href={`/manage/courses/${encodeURIComponent(courseCode)}/classes`}>管理课程</Button>{/if}
     </div>
 </header>
 
@@ -23,5 +25,6 @@
     .course-heading { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); min-width: 0; }
     h1 { min-width: 0; overflow-wrap: anywhere; scroll-margin-top: var(--space-6); }
     h1:focus:not(:focus-visible) { outline: none; }
-    .actions { display: flex; flex-wrap: wrap; gap: var(--space-2); }
+    .actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-2); min-width: 0; max-width: 100%; margin-inline-start: auto; }
+    @media (max-width: 639px) { .actions { width: 100%; } }
 </style>

@@ -77,7 +77,7 @@
                         {#each data.items as item (item.course.id)}
                             {@const course = item.course}
                             <li>
-                                <Card href={`/courses/${encodeURIComponent(course.id)}`} padding="lg" class="my-course-card" aria-label={`查看课程：${course.name}`}>
+                                <Card href={`/courses/${encodeURIComponent(course.id)}${item.terms.length === 1 ? `/terms/${encodeURIComponent(item.terms[0]!.id)}` : ""}`} padding="lg" class="my-course-card" aria-label={`查看课程：${course.name}`}>
                                     <div class="course-content">
                                         <div class="course-code"><BookOpen size="1.25em" aria-hidden="true" /><span>{course.id}</span></div>
                                         <h2>{course.name}</h2>
