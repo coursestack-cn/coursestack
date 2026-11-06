@@ -3,10 +3,10 @@ import { createDatabase } from '../db/index.ts';
 import { sessions } from '../db/schema.ts';
 import type { Env } from '../env.ts';
 import { HttpError, json, readJson, requireSameOrigin, stringField } from '../http.ts';
-import { hashPassword, newPasswordField, passwordField } from './crypto.ts';
+import { existingPasswordField, newPasswordField } from './crypto.ts';
 import { changePassword, limitAttempts, login, ownProfile, readSession, requireSession, sessionCookie } from './service.ts';
-import { allowFields, conflict } from '../accounts/validation.ts';
-import { accountDetail, profileValues } from '../accounts/service.ts';
+import { allowFields } from '../accounts/validation.ts';
+import { createMember } from '../accounts/creation.ts';
 
 const methods: Record<string, string> = {
     '/api/auth/login': 'POST', '/api/auth/admin/login': 'POST', '/api/auth/logout': 'POST',
@@ -30,31 +30,18 @@ export async function authRoutes(request: Request, env: Env): Promise<Response |
         const session = await requireSession(env.DB, request);
         if (session.role !== 'admin') throw new HttpError(403, 'FORBIDDEN', '需要管理员权限');
         const body = await readJson(request);
-        allowFields(body, ['role', 'schoolNumber', 'nickname', 'name', 'password', 'department', 'major', 'grade']);
-        if (body.role !== 'student' && body.role !== 'teacher') throw new HttpError(400, 'INVALID_ROLE', '只能创建学生或教师账号');
-        const schoolNumber = stringField(body, 'schoolNumber', 64);
-        const profile = profileValues(body);
-        const passwordHash = await hashPassword(passwordField(body.password)), id = crypto.randomUUID();
-        try {
-            const result = await env.DB.prepare(`INSERT INTO accounts (id, nickname, role, school_number, password, name, department, major, grade)
-                SELECT ?, ?, ?, ?, ?, ?, ?, ?, ? WHERE EXISTS (
-                    SELECT 1 FROM accounts WHERE id = ? AND status <> 'deleted')`)
-                .bind(id, profile.nickname ?? null, body.role, schoolNumber, passwordHash, profile.name ?? null, profile.department ?? null,
-                    profile.major ?? null, profile.grade ?? null, session.id).run();
-            if (result.meta.changes !== 1) throw new HttpError(409, 'ACCOUNT_DELETED', '操作者身份已变更');
-        } catch (error) { conflict(error); }
-        return json({ data: await accountDetail(env.DB, id) }, 201);
+        return json({ data: await createMember(env.DB, session, body, request.headers.get('Idempotency-Key') ?? undefined) }, 201);
     }
     if (path === '/api/auth/password') {
         const session = await requireSession(env.DB, request, { allowPasswordChange: true });
         const body = await readJson(request);
         allowFields(body, ['oldPassword', 'newPassword']);
-        await changePassword(env.DB, request, passwordField(body.oldPassword), newPasswordField(body.newPassword), session);
+        await changePassword(env.DB, request, existingPasswordField(body.oldPassword), newPasswordField(body.newPassword), session);
         return json({ data: { passwordChanged: true } }, 200, { 'Set-Cookie': sessionCookie(request, '', 0) });
     }
     const body = await readJson(request);
     const schoolNumber = path === '/api/auth/admin/login' ? null : stringField(body, 'schoolNumber', 64);
-    const password = passwordField(body.password);
+    const password = existingPasswordField(body.password);
     const ip = env.APP_ENV === 'local' ? 'local' : request.headers.get('CF-Connecting-IP') ?? 'unknown';
     await limitAttempts(env.DB, `ip:${ip}`, 50);
     await limitAttempts(env.DB, schoolNumber === null ? 'admin-login' : `member:${schoolNumber}`, 10);

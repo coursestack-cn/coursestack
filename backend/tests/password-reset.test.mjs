@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { passwordField, newPasswordField } from '../src/auth/crypto.ts';
+import { existingPasswordField, passwordField, newPasswordField } from '../src/auth/crypto.ts';
 import { start, doc } from './discussions-helpers.mjs';
 
 const cookieOf = (response) => response.headers.get('set-cookie')?.split(';')[0];
@@ -80,17 +80,75 @@ test('omitted or empty reset passwords are generated once, optional flag is vali
     } finally { await app.dispose(); }
 });
 
-test('admin provisioning accepts short passwords while self-selected passwords require eight Unicode characters', async () => {
+test('admin provisioning accepts short passwords while self-selected passwords require 8-64 Unicode characters', async () => {
     assert.equal(passwordField('a'), 'a');
     assert.equal(passwordField('    '), '    ');
-    for (const value of ['', null, 123, '密'.repeat(25)]) assert.throws(() => passwordField(value));
-    for (const value of ['1234567', '😀'.repeat(7), '密'.repeat(25)]) assert.throws(() => newPasswordField(value));
-    assert.equal(newPasswordField('😀'.repeat(8)), '😀'.repeat(8));
-    assert.equal(newPasswordField('密'.repeat(24)), '密'.repeat(24));
+    for (const value of ['', null, 123]) assert.throws(() => passwordField(value), { code: 'INVALID_PASSWORD' });
+    for (const character of ['a', '密', '😀']) {
+        assert.throws(() => passwordField(character.repeat(65)), { code: 'INVALID_PASSWORD' });
+        for (const length of [7, 65]) assert.throws(() => newPasswordField(character.repeat(length)), { code: 'INVALID_PASSWORD' });
+        for (const length of [8, 64]) assert.equal(newPasswordField(character.repeat(length)), character.repeat(length));
+    }
+    assert.equal(newPasswordField('        '), '        ');
     const app = await start();
     try {
         const created = await app.api('POST', '/admin/accounts', 'admin', { role: 'student', schoolNumber: 'S0099', nickname: '演示同学', name: '虚构同学', password: 'S0099' });
         assert.equal(created.status, 201);
         assert.equal((await login(app, 'S0099', 'S0099')).status, 200);
+    } finally { await app.dispose(); }
+});
+
+test('creation, reset, password change and login support 64 Unicode characters without truncation', async () => {
+    const app = await start();
+    const initial = '密'.repeat(64), changedPassword = '😀'.repeat(64);
+    try {
+        for (const password of ['a'.repeat(65), '😀'.repeat(65)]) {
+            const created = await app.api('POST', '/admin/accounts', 'admin', { role: 'student', schoolNumber: 'unicode-limit', password });
+            assert.equal(created.status, 400);
+            assert.equal(created.data.error.code, 'INVALID_PASSWORD');
+            const reset = await app.api('POST', '/admin/accounts/student-a/password', 'admin', { newPassword: password });
+            assert.equal(reset.status, 400);
+            assert.equal(reset.data.error.code, 'INVALID_PASSWORD');
+        }
+        assert.equal((await app.api('POST', '/admin/accounts', 'admin', { role: 'student', schoolNumber: 'unicode-limit', password: initial })).status, 201);
+        assert.equal((await login(app, initial, 'unicode-limit')).status, 200);
+        assert.equal((await app.api('POST', '/admin/accounts/student-a/password', 'admin', { newPassword: initial })).status, 200);
+        const loggedIn = await login(app, initial);
+        assert.equal(loggedIn.status, 200);
+        const auth = cookieOf(loggedIn);
+        const tooLong = await request(app, '/auth/password', auth, { oldPassword: initial, newPassword: '😀'.repeat(65) });
+        assert.equal(tooLong.status, 400);
+        assert.equal((await tooLong.json()).error.code, 'INVALID_PASSWORD');
+        assert.equal((await request(app, '/auth/me', auth)).status, 200);
+        assert.equal((await request(app, '/auth/password', auth, { oldPassword: initial, newPassword: changedPassword })).status, 200);
+        assert.equal((await request(app, '/auth/me', auth)).status, 401);
+        assert.equal((await login(app, initial)).status, 401);
+        assert.equal((await login(app, '😀'.repeat(63) + '😁')).status, 401);
+        assert.equal((await login(app, changedPassword)).status, 200);
+    } finally { await app.dispose(); }
+});
+
+test('legacy passwords above 64 characters remain usable only for login and old-password verification', async () => {
+    const legacyPassword = 'L'.repeat(72);
+    // Fixture generated before tightening the password creation limit.
+    const legacyHash = 'pbkdf2-sha256$30000$lrM9jfM7NfbZYBSZ5yUJtA==$ju7ggv6X6U8hD5yeXKqtb/62oVMkcpRjYOEF0SP2Tdw=';
+    assert.equal(existingPasswordField(legacyPassword), legacyPassword);
+    assert.throws(() => existingPasswordField('L'.repeat(73)), { code: 'INVALID_PASSWORD' });
+    assert.throws(() => existingPasswordField('密'.repeat(65)), { code: 'INVALID_PASSWORD' });
+    assert.throws(() => passwordField(legacyPassword), { code: 'INVALID_PASSWORD' });
+    const app = await start();
+    try {
+        await app.database.prepare("UPDATE accounts SET password=? WHERE id IN ('student-a','admin')").bind(legacyHash).run();
+        assert.equal((await request(app, '/auth/admin/login', undefined, { password: legacyPassword })).status, 200);
+        const loggedIn = await login(app, legacyPassword);
+        assert.equal(loggedIn.status, 200);
+        const auth = cookieOf(loggedIn);
+        const rejected = await request(app, '/auth/password', auth, { oldPassword: legacyPassword, newPassword: legacyPassword });
+        assert.equal(rejected.status, 400);
+        assert.equal((await rejected.json()).error.code, 'INVALID_PASSWORD');
+        const password = 'N'.repeat(64);
+        assert.equal((await request(app, '/auth/password', auth, { oldPassword: legacyPassword, newPassword: password })).status, 200);
+        assert.equal((await login(app, legacyPassword)).status, 401);
+        assert.equal((await login(app, password)).status, 200);
     } finally { await app.dispose(); }
 });
