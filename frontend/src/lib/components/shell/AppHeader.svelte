@@ -1,4 +1,7 @@
 <script lang="ts">
+    import { api } from "$lib/api/client";
+    import { resource } from "$lib/api/resource.svelte";
+    import { beginNotificationCount, notificationUpdates, publishNotificationCount } from "$lib/notifications.svelte";
     import { onMount } from "svelte";
     import { Bell, Search, SunMoon, ChevronDown } from "@lucide/svelte";
     import logoSource from "../../../assets/coursestack-logo.svg?raw";
@@ -24,7 +27,17 @@
     let narrow = $state(window.matchMedia(`(max-width: ${sm - 1}px)`).matches);
     let search = $state("");
     let loggingOut = $state(false);
-    const inCourses = $derived(router.pathname === "/courses" || router.pathname.startsWith("/courses/"));
+    const notifications = resource(async signal => {
+        const viewer = session.user?.id;
+        notificationUpdates.revision;
+        const onNotifications = router.pathname === "/notifications";
+        if (!viewer || onNotifications) return;
+        const request = beginNotificationCount();
+        const data = await api.get<{ viewer: string; unreadCount: number }>("/api/notifications/count", { signal });
+        if (!signal.aborted && data.viewer === viewer && session.user?.id === viewer) publishNotificationCount(viewer, data.unreadCount, request);
+    });
+    const unreadCount = $derived(notificationUpdates.viewer === session.user?.id ? notificationUpdates.unreadCount : 0);
+    const inCourses = $derived(router.pathname === "/courses");
     const themeOptions: { value: ThemePreference; label: string }[] = [
         { value: "system", label: "跟随系统" }, { value: "light", label: "浅色" }, { value: "dark", label: "深色" }
     ];
@@ -70,9 +83,18 @@
         const storage = () => { theme = getThemePreference(); setThemePreference(theme); };
         media.addEventListener("change", resize);
         window.addEventListener("storage", storage);
+        const refresh = () => { if (session.user && router.pathname !== "/notifications" && document.visibilityState === "visible") notifications.reload(); };
+        const interval = window.setInterval(refresh, 60000);
+        window.addEventListener("focus", refresh);
+        window.addEventListener("online", refresh);
+        document.addEventListener("visibilitychange", refresh);
         return () => {
             media.removeEventListener("change", resize);
             window.removeEventListener("storage", storage);
+            window.clearInterval(interval);
+            window.removeEventListener("focus", refresh);
+            window.removeEventListener("online", refresh);
+            document.removeEventListener("visibilitychange", refresh);
         };
     });
 </script>
@@ -105,8 +127,7 @@
                     <Button size="sm" onclick={() => { void session.retry(); }}>重试会话</Button>
                 {:else}<span class="session-loading" role="status" aria-label="正在读取登录状态"><Skeleton variant="circle" width="var(--space-8)" height="var(--space-8)" /></span>{/if}
             {:else if session.user}
-                <!-- Add an unread indicator here when the notifications API is available. -->
-                <Button href="/notifications" variant="ghost" iconOnly aria-label="查看通知"><Bell size="1em" /></Button>
+                <Button href="/notifications" variant="ghost" iconOnly aria-label={unreadCount > 0 ? `查看通知，${unreadCount} 条未读` : "查看通知"}><Bell size="1em" />{#if unreadCount > 0}<span class="unread-count" aria-hidden="true">{unreadCount > 99 ? "99+" : unreadCount}</span>{/if}</Button>
                 <Menu items={userItems}>
                     {#snippet trigger(props)}
                         <Button {...props} variant="ghost" class="shell-user-trigger" aria-label={`${session.user?.nickname ?? "未设置昵称"}的用户菜单`}>
@@ -136,6 +157,7 @@
     :global(.shell-nav-link[aria-current="page"]), :global(.shell-nav-link:active) { color: var(--color-accent-soft-text); background: var(--color-accent-soft); }
     .desktop-search { flex: 1; min-width: 0; max-width: calc(var(--width-prose) / 2); margin-inline: auto; }
     .header-actions { display: flex; align-items: center; gap: var(--space-2); margin-inline-start: auto; flex-shrink: 0; }
+    .unread-count { position: absolute; top: 0; right: 0; transform: translate(25%, -25%); min-width: var(--space-4); padding-inline: var(--space-1); border-radius: var(--radius-full); background: var(--color-accent); color: var(--color-on-accent); font-size: var(--font-size-xs); font-weight: var(--font-weight-bold); line-height: var(--line-height-tight); }
     .session-loading { display: flex; align-items: center; justify-content: center; width: var(--space-10); }
     .user-name { max-width: calc(var(--space-12) * 2); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .user-chevron { display: flex; }

@@ -5,6 +5,9 @@
     import NavigationPrompt from "$lib/router/NavigationPrompt.svelte";
     import { startRouter } from "$lib/router/router.svelte.js";
     import { session } from "$lib/session.svelte.js";
+    import { watchBonusNotifications } from "$lib/bonus-notifications.svelte.js";
+
+    watchBonusNotifications();
 
     onMount(() => {
         const stopRouter = startRouter();
