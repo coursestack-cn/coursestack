@@ -269,44 +269,6 @@ CREATE TRIGGER bonus_ledger_guard BEFORE INSERT ON bonus_ledger BEGIN
             AND r.student_id=NEW.student_id AND r.points=NEW.delta_points))));
 END;
 --> statement-breakpoint
--- Deliver direct interactions once even when the parent and replied-to author are the same person.
-CREATE TRIGGER content_notifications AFTER INSERT ON contents
-WHEN NEW.kind IN ('answer','comment') BEGIN
-  INSERT INTO notifications(account_id,actor_id,kind,source_id,content_id,created_at)
-  SELECT recipient.id,NEW.author_id,CASE WHEN NEW.kind='answer' THEN 'answer'
-      WHEN recipient.id=(SELECT author_id FROM contents WHERE id=NEW.reply_to_id) THEN 'reply' ELSE 'comment' END,
-      NEW.id,NEW.id,NEW.created_at
-  FROM accounts recipient WHERE recipient.id<>NEW.author_id AND recipient.status<>'deleted'
-    AND recipient.id IN (SELECT author_id FROM contents WHERE id=NEW.target_id OR id=NEW.reply_to_id)
-    AND NEW.id IN (SELECT id FROM public_contents)
-  ON CONFLICT DO NOTHING;
-END;
---> statement-breakpoint
-CREATE TRIGGER acceptance_notification_created AFTER INSERT ON acceptances BEGIN
-  INSERT INTO notifications(account_id,actor_id,kind,source_id,content_id)
-  SELECT c.author_id,NEW.operator_id,'accepted',lower(hex(randomblob(16))),c.id
-  FROM contents c JOIN accounts a ON a.id=c.author_id
-  WHERE c.id=NEW.answer_id AND c.author_id<>NEW.operator_id AND a.status<>'deleted';
-END;
---> statement-breakpoint
-CREATE TRIGGER acceptance_notification_changed AFTER UPDATE OF answer_id ON acceptances
-WHEN NEW.answer_id<>OLD.answer_id BEGIN
-  INSERT INTO notifications(account_id,actor_id,kind,source_id,content_id)
-  SELECT c.author_id,NEW.operator_id,CASE WHEN c.id=NEW.answer_id THEN 'accepted' ELSE 'unaccepted' END,
-      lower(hex(randomblob(16))),c.id
-  FROM contents c JOIN accounts a ON a.id=c.author_id
-  WHERE c.id IN (OLD.answer_id,NEW.answer_id) AND c.author_id<>NEW.operator_id AND a.status<>'deleted';
-END;
---> statement-breakpoint
--- Deleting a content branch already delivers moderation notices; it is not an explicit cancellation.
-CREATE TRIGGER acceptance_notification_removed AFTER DELETE ON acceptances BEGIN
-  INSERT INTO notifications(account_id,actor_id,kind,source_id,content_id)
-  SELECT c.author_id,OLD.operator_id,'unaccepted',lower(hex(randomblob(16))),c.id
-  FROM public_contents c JOIN accounts a ON a.id=c.author_id
-  WHERE c.id=OLD.answer_id AND c.author_id<>OLD.operator_id AND a.status<>'deleted'
-    AND EXISTS(SELECT 1 FROM public_contents WHERE id=OLD.question_id);
-END;
---> statement-breakpoint
 CREATE TRIGGER moderation_notification_created AFTER INSERT ON moderation_actions BEGIN
   INSERT INTO notifications(account_id,actor_id,kind,source_id,content_id,created_at)
   SELECT c.author_id,NEW.actor_id,'moderation',CAST(NEW.id AS TEXT),c.id,NEW.created_at
@@ -324,4 +286,92 @@ WHEN NEW.operator_id<>NEW.student_id BEGIN
         THEN substr(NEW.source_id,1,instr(NEW.source_id,'@')-1) ELSE NEW.source_id END,NEW.created_at
   FROM accounts a WHERE a.id=NEW.student_id AND a.status<>'deleted'
   ON CONFLICT DO NOTHING;
+END;
+--> statement-breakpoint
+CREATE TRIGGER favorite_content_guard BEFORE INSERT ON favorites
+WHEN NEW.content_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM public_contents WHERE id=NEW.content_id AND kind IN ('material','question'))
+BEGIN SELECT RAISE(ABORT,'invalid_favorite_target'); END;
+--> statement-breakpoint
+CREATE TRIGGER favorite_identity_immutable BEFORE UPDATE ON favorites
+BEGIN SELECT RAISE(ABORT,'favorite_identity_immutable'); END;
+--> statement-breakpoint
+CREATE TRIGGER content_events_no_update BEFORE UPDATE ON content_events
+BEGIN SELECT RAISE(ABORT,'immutable_content_event'); END;
+--> statement-breakpoint
+CREATE TRIGGER content_events_no_delete BEFORE DELETE ON content_events
+BEGIN SELECT RAISE(ABORT,'immutable_content_event'); END;
+--> statement-breakpoint
+CREATE VIEW content_roots AS
+WITH RECURSIVE roots(id,root_id) AS (
+  SELECT id,id FROM contents WHERE target_id IS NULL
+  UNION ALL SELECT child.id,roots.root_id FROM contents child JOIN roots ON child.target_id=roots.id
+)
+SELECT id,root_id FROM roots;
+--> statement-breakpoint
+CREATE TRIGGER content_event_created AFTER INSERT ON contents
+WHEN NEW.kind IN ('question','answer','comment') BEGIN
+  INSERT INTO content_events(source_key,kind,course_id,root_id,content_id,actor_id,created_at)
+  SELECT 'created:'||NEW.id,NEW.kind||'_created',NEW.course_id,r.root_id,NEW.id,NEW.author_id,NEW.created_at
+  FROM content_roots r JOIN public_contents p ON p.id=r.id WHERE r.id=NEW.id;
+END;
+--> statement-breakpoint
+CREATE TRIGGER material_event_created AFTER INSERT ON file_versions BEGIN
+  INSERT INTO content_events(source_key,kind,course_id,root_id,content_id,actor_id,version,created_at)
+  SELECT 'version:'||NEW.material_id||'@'||NEW.version,CASE WHEN NEW.version=1 THEN 'material_created' ELSE 'material_version' END,
+      m.course_id,m.id,m.id,NEW.uploaded_by,NEW.version,NEW.created_at
+  FROM public_contents m WHERE m.id=NEW.material_id;
+END;
+--> statement-breakpoint
+CREATE TRIGGER content_event_edited AFTER UPDATE OF title,body,tags ON contents
+WHEN NEW.status<>'deleted' AND (NEW.title IS NOT OLD.title OR NEW.body IS NOT OLD.body OR NEW.tags IS NOT OLD.tags) BEGIN
+  INSERT INTO content_events(source_key,kind,course_id,root_id,content_id,actor_id,created_at)
+  SELECT 'edit:'||lower(hex(randomblob(16))),'content_edited',NEW.course_id,r.root_id,NEW.id,NEW.updated_by,NEW.updated_at
+  FROM content_roots r JOIN public_contents p ON p.id=r.id WHERE r.id=NEW.id;
+END;
+--> statement-breakpoint
+CREATE TRIGGER acceptance_event_created AFTER INSERT ON acceptances BEGIN
+  INSERT INTO content_events(source_key,kind,course_id,root_id,content_id,actor_id,new_answer_id)
+  SELECT 'acceptance:'||lower(hex(randomblob(16))),'acceptance_changed',q.course_id,q.id,q.id,NEW.operator_id,NEW.answer_id
+  FROM public_contents q WHERE q.id=NEW.question_id;
+END;
+--> statement-breakpoint
+CREATE TRIGGER acceptance_event_changed AFTER UPDATE OF answer_id ON acceptances WHEN NEW.answer_id<>OLD.answer_id BEGIN
+  INSERT INTO content_events(source_key,kind,course_id,root_id,content_id,actor_id,old_answer_id,new_answer_id)
+  SELECT 'acceptance:'||lower(hex(randomblob(16))),'acceptance_changed',q.course_id,q.id,q.id,NEW.operator_id,OLD.answer_id,NEW.answer_id
+  FROM public_contents q WHERE q.id=NEW.question_id;
+END;
+--> statement-breakpoint
+CREATE TRIGGER acceptance_event_removed AFTER DELETE ON acceptances BEGIN
+  INSERT INTO content_events(source_key,kind,course_id,root_id,content_id,actor_id,old_answer_id)
+  SELECT 'acceptance:'||lower(hex(randomblob(16))),'acceptance_changed',q.course_id,q.id,q.id,OLD.operator_id,OLD.answer_id
+  FROM public_contents q WHERE q.id=OLD.question_id AND EXISTS(SELECT 1 FROM public_contents WHERE id=OLD.answer_id);
+END;
+--> statement-breakpoint
+-- Recipients are captured in the event transaction. One event has at most one entry per account.
+CREATE TRIGGER favorite_event_notifications AFTER INSERT ON content_events
+WHEN NEW.kind NOT IN ('question_created','material_created') BEGIN
+  INSERT INTO notifications(account_id,actor_id,kind,source_id,event_id,content_id,created_at)
+  SELECT recipient.id,NEW.actor_id,
+    CASE
+      WHEN NEW.kind='answer_created' AND recipient.id=parent.author_id THEN 'answer'
+      WHEN NEW.kind='comment_created' AND recipient.id=reply.author_id THEN 'reply'
+      WHEN NEW.kind='comment_created' AND recipient.id=parent.author_id THEN 'comment'
+      WHEN NEW.kind='acceptance_changed' AND recipient.id=new_answer.author_id THEN 'accepted'
+      WHEN NEW.kind='acceptance_changed' AND recipient.id=old_answer.author_id THEN 'unaccepted'
+      ELSE 'favorite' END,
+    'event:'||NEW.id,NEW.id,
+    CASE WHEN NEW.kind='acceptance_changed' THEN
+      CASE WHEN recipient.id=new_answer.author_id THEN NEW.new_answer_id
+           WHEN recipient.id=old_answer.author_id THEN NEW.old_answer_id ELSE NEW.root_id END
+      ELSE NEW.content_id END,NEW.created_at
+  FROM accounts recipient JOIN contents subject ON subject.id=NEW.content_id JOIN contents root ON root.id=NEW.root_id
+    LEFT JOIN contents parent ON parent.id=subject.target_id LEFT JOIN contents reply ON reply.id=subject.reply_to_id
+    LEFT JOIN contents new_answer ON new_answer.id=NEW.new_answer_id LEFT JOIN contents old_answer ON old_answer.id=NEW.old_answer_id
+  WHERE recipient.id<>NEW.actor_id AND recipient.status<>'deleted' AND (
+    (NEW.kind IN ('answer_created','comment_created') AND recipient.id IN (parent.author_id,reply.author_id))
+    OR (NEW.kind='acceptance_changed' AND recipient.id IN (new_answer.author_id,old_answer.author_id))
+    OR (EXISTS(SELECT 1 FROM favorites f WHERE f.account_id=recipient.id AND f.content_id=NEW.root_id)
+        AND ((root.kind='question' AND NEW.kind IN ('answer_created','acceptance_changed'))
+             OR (root.kind='material' AND NEW.kind='material_version')))
+  ) ON CONFLICT DO NOTHING;
 END;

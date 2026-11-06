@@ -319,15 +319,52 @@ export const notifications = sqliteTable('notifications', {
     id: integer('id').primaryKey({ autoIncrement: true }),
     accountId: text('account_id').notNull().references(() => accounts.id),
     actorId: text('actor_id').notNull().references(() => accounts.id),
-    kind: text('kind', { enum: ['answer', 'comment', 'reply', 'accepted', 'unaccepted', 'moderation', 'bonus'] }).notNull(),
+    kind: text('kind', { enum: ['answer', 'comment', 'reply', 'accepted', 'unaccepted', 'moderation', 'bonus', 'favorite'] }).notNull(),
     sourceId: text('source_id').notNull(),
+    eventId: integer('event_id').references(() => contentEvents.id),
     contentId: text('content_id').references(() => contents.id),
     createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
     readAt: integer('read_at'),
 }, t => [
-    check('notifications_kind', sql`${t.kind} IN ('answer', 'comment', 'reply', 'accepted', 'unaccepted', 'moderation', 'bonus')`),
+    check('notifications_kind', sql`${t.kind} IN ('answer', 'comment', 'reply', 'accepted', 'unaccepted', 'moderation', 'bonus', 'favorite')`),
+    uniqueIndex('notifications_recipient_event').on(t.accountId, t.eventId),
     uniqueIndex('notifications_recipient_source').on(t.accountId, t.kind, t.sourceId),
     index('notifications_recipient_order').on(t.accountId, t.id),
     index('notifications_unread').on(t.accountId, t.id).where(sql`${t.readAt} IS NULL`),
     index('notifications_read').on(t.accountId, t.id).where(sql`${t.readAt} IS NOT NULL`),
+]);
+
+
+export const favorites = sqliteTable('favorites', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: text('account_id').notNull().references(() => accounts.id),
+    courseId: text('course_id').references(() => courses.id),
+    contentId: text('content_id').references(() => contents.id),
+    createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
+}, t => [
+    check('favorites_target', sql`(${t.courseId} IS NULL) <> (${t.contentId} IS NULL)`),
+    uniqueIndex('favorites_account_course').on(t.accountId, t.courseId),
+    uniqueIndex('favorites_account_content').on(t.accountId, t.contentId),
+    index('favorites_account_order').on(t.accountId, t.createdAt, t.id),
+    index('favorites_subscribers').on(t.contentId, t.accountId),
+]);
+
+// Immutable events carry references only; reads always recheck current public visibility.
+export const contentEvents = sqliteTable('content_events', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    sourceKey: text('source_key').notNull(),
+    kind: text('kind', { enum: ['question_created', 'material_created', 'material_version', 'answer_created', 'comment_created', 'content_edited', 'acceptance_changed'] }).notNull(),
+    courseId: text('course_id').notNull().references(() => courses.id),
+    rootId: text('root_id').notNull().references(() => contents.id),
+    contentId: text('content_id').notNull().references(() => contents.id),
+    actorId: text('actor_id').notNull().references(() => accounts.id),
+    version: integer('version'),
+    oldAnswerId: text('old_answer_id').references(() => contents.id),
+    newAnswerId: text('new_answer_id').references(() => contents.id),
+    createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
+}, t => [
+    uniqueIndex('content_events_source').on(t.sourceKey),
+    index('content_events_feed').on(t.courseId, t.createdAt, t.id),
+    check('content_events_kind', sql`${t.kind} IN ('question_created','material_created','material_version','answer_created','comment_created','content_edited','acceptance_changed')`),
+    check('content_events_version', sql`${t.version} IS NULL OR ${t.version}>0`),
 ]);

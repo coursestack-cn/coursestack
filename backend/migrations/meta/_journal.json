@@ -71,6 +71,13 @@
       "when": 1793997633101,
       "tag": "0009_account_creation_requests",
       "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1793998692796,
+      "tag": "0010_favorites",
+      "breakpoints": true
     }
   ]
 }
