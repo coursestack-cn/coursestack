@@ -1,4 +1,5 @@
 <script lang="ts">
+    import FavoriteButton from "$lib/components/content/FavoriteButton.svelte";
     import { onDestroy, tick, untrack } from "svelte";
     import { api, ApiError } from "$lib/api/client";
     import { isAborted, userMessage } from "$lib/api/errors";
@@ -112,6 +113,7 @@
 <PageLayout title={question.title ?? "问题详情"} width="prose" breadcrumbs={[
     { label: entry.course.name, href: courseQuestionsHref(entry.course) }, { label: "问题详情" }
 ]}>
+    {#snippet actions()}{#if !unavailable}<FavoriteButton type="question" id={question.id} available={question.isPublic} />{/if}{/snippet}
     {#if unavailable}<StateBlock kind="unavailable" title="内容不可用" />
     {:else}
         {#if question.tags?.length}<div class="tags" aria-label="问题标签">{#each question.tags as tag}<Link href={`${courseQuestionsHref(entry.course)}?${new URLSearchParams({ tag })}`}>{tag}</Link>{/each}</div>{/if}

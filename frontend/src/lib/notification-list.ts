@@ -1,5 +1,6 @@
 export type Notice = {
-    id: number; type: "answer" | "comment" | "reply" | "accepted" | "unaccepted" | "moderation" | "bonus";
+    id: number; type: "answer" | "comment" | "reply" | "accepted" | "unaccepted" | "moderation" | "bonus" | "favorite";
+    eventType: string | null; newAnswerId: string | null; oldAnswerId: string | null;
     contentId: string | null; kind: "question" | "answer" | "comment" | "material" | null;
     title: string | null; courseId: string; courseName: string; createdAt: number; readAt: number | null;
     available: boolean; isPublic: boolean; status: string | null; contentStatus: string | null;
@@ -20,6 +21,13 @@ export function mergeNotices(old: Notice[], fresh: NoticeBatch, states: Notice[]
 }
 
 export function noticeHeading(item: Notice): string {
+    if (item.type === "favorite") {
+        if (item.eventType === "material_version") return `收藏的资料发布了版本 ${item.version}`;
+        if (item.eventType === "answer_created") return "收藏的问题收到了新回答";
+        if (item.eventType === "comment_created") return "收藏的讨论有新评论";
+        if (item.eventType === "acceptance_changed") return item.newAnswerId ? item.oldAnswerId ? "收藏的问题更换了采纳答案" : "收藏的问题已有采纳答案" : "收藏的问题取消了采纳";
+        return item.kind === "material" ? "收藏的资料信息已更新" : "收藏的讨论内容已更新";
+    }
     const labels = { answer: "你的问题收到了新回答", comment: "你的内容收到了新评论", reply: "你的评论收到了回复",
         accepted: "你的回答已被采纳", unaccepted: "你的回答已取消采纳" };
     if (item.type === "bonus") return `你的课程积分已调整：${(item.deltaPoints ?? 0) > 0 ? "+" : ""}${item.deltaPoints} 分`;

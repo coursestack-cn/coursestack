@@ -1,4 +1,5 @@
 <script lang="ts">
+    import FavoriteButton from "$lib/components/content/FavoriteButton.svelte";
     import { onDestroy, tick } from "svelte";
     import { api, ApiError } from "$lib/api/client";
     import { userMessage } from "$lib/api/errors";
@@ -156,6 +157,7 @@
 {/snippet}
 
 <PageLayout title={material.title} class={material.isPublic ? "material-detail-split" : ""} style="max-width: 1280px;" breadcrumbs={[{ label: entry.course.name, href: courseQuestionsHref(entry.course) }, { label: "资料详情" }]}>
+    {#snippet actions()}<FavoriteButton type="material" id={material.id} available={material.isPublic} />{/snippet}
     {#if material.tags?.length}<div class="tags">{#each material.tags as tag}<Link href={`${courseQuestionsHref(entry.course)}?${new URLSearchParams({ tag })}`}>{tag}</Link>{/each}</div>{/if}
     {#if !material.isPublic}<OwnedContentPanel id={material.id} showFiles={false} />{/if}
     {#if focus.status === "error"}<ContentState status="error" error={focus.error} reload={focus.reload} />{/if}

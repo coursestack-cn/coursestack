@@ -13,6 +13,9 @@
     import StateBlock from "$lib/components/ui/StateBlock.svelte";
     import Tabs from "$lib/components/ui/Tabs.svelte";
 
+    import FavoriteList from "../me/FavoriteList.svelte";
+    import CourseFeed from "./CourseFeed.svelte";
+
     type Term = { id: string; name: string; current: boolean };
     type MyCourse = {
         course: import("../manage/course").Course;
@@ -27,8 +30,8 @@
         currentTerm: { id: string; name: string } | null;
     };
 
-    const tabs = [{ value: "current", label: "本学期" }, { value: "history", label: "历年" }];
-    const scope = $derived(router.query.get("tab") === "history" ? "history" : "current");
+    const tabs = [{ value: "current", label: "本学期" }, { value: "history", label: "历年" }, { value: "favorites", label: "收藏" }];
+    const scope = $derived(router.query.get("tab") === "favorites" ? "favorites" : router.query.get("tab") === "history" ? "history" : "current");
     const page = $derived.by(() => {
         const value = Number(router.query.get("page") ?? 1);
         return Number.isInteger(value) && value >= 1 && value <= 10000 ? value : 1;
@@ -36,6 +39,7 @@
     const canCreate = $derived(session.hasRole("teacher") || session.hasRole("admin"));
     const relation = $derived(session.hasRole("teacher") ? "授课" : session.hasRole("student") ? "修读" : "参与");
     const courses = resource((signal) => {
+        if (scope === "favorites") return Promise.resolve(null);
         const query = new URLSearchParams({ scope, page: String(page), pageSize: "12" });
         return api.get<MyCourseList>(`/api/me/courses?${query}`, { signal });
     });
@@ -61,6 +65,7 @@
     {/snippet}
 
     <Tabs items={tabs} value={scope} label="我的课程" onchange={(next) => { void updateQuery({ tab: next === "current" ? null : next, page: null }); }}>
+        {#if scope === "favorites"}<FavoriteList coursesOnly />{:else}
         <ResourceState {status} error={courses.error} refreshing={courses.refreshing} reload={courses.reload}>
             {#if courses.data && courses.data.scope === scope}
                 {@const data = courses.data}
@@ -126,7 +131,9 @@
                 {/if}
             {/if}
         </ResourceState>
+        {/if}
     </Tabs>
+    <CourseFeed />
 </PageLayout>
 
 <style>

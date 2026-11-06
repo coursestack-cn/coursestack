@@ -1,4 +1,5 @@
 <script lang="ts">
+    import FavoriteButton from "$lib/components/content/FavoriteButton.svelte";
     import { displayName } from "$lib/content/display-name";
     import { router, setTitle, updateQuery } from "$lib/router/router.svelte.js";
     import type { PageProps } from "$lib/router/types";
@@ -55,6 +56,7 @@
             <div class="introduction-heading">
                 <h2 id="course-introduction">课程简介</h2>
                 <div class="bonus-actions">
+                    <FavoriteButton type="course" id={course.id} />
                     {#if !term || term.current}<Button size="sm" onclick={() => { policyOpen = true; }}>加分规则</Button>{/if}
                     {#if student}<Button size="sm" onclick={() => { void updateQuery({ bonus: "history", bonusTerm: term?.id ?? null, bonusPage: null }); }}>加分历史</Button>{/if}
                 </div>
