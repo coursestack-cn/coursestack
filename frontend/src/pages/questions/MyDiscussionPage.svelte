@@ -12,7 +12,7 @@
     import Button from "$lib/components/ui/Button.svelte";
     import Pagination from "$lib/components/ui/Pagination.svelte";
     import StateBlock from "$lib/components/ui/StateBlock.svelte";
-    import { encode, pageCount, pageNumber, questionView, urlId, type Page, type Content } from "./data";
+    import { encode, pageCount, pageNumber, questionView, ownedContentHref, urlId, type Page, type Content } from "./data";
 
     let { kind }: { kind: "question" | "answer" } = $props();
     const title = $derived(kind === "question" ? "我的提问" : "我的回答");
@@ -23,7 +23,7 @@
         const list = await api.get<Page<Content>>(`/api/me/activity?${new URLSearchParams({ kind: filter, page: String(page), pageSize: "20" })}`, { signal });
         const titles = new Map<string, string>();
         if (filter === "answer") {
-            await Promise.all([...new Set(list.items.map(item => item.targetId).filter((id): id is string => Boolean(id)))].map(async id => {
+            await Promise.all([...new Set(list.items.filter(item => item.isPublic).map(item => item.targetId).filter((id): id is string => Boolean(id)))].map(async id => {
                 const parent = await api.get<Content>(`/api/questions/${encode(id)}`, { signal });
                 titles.set(id, parent.title ?? "问题");
             }));
@@ -44,7 +44,12 @@
                 <p class="summary">共 {data.list.total} 条</p>
                 <div class="items">
                     {#each data.list.items as item (item.id)}
-                        {#if kind === "question"}<QuestionListItem question={questionView(item)} />
+                        {#if !item.isPublic}
+                            <article class="answer-item"><Link class="answer-item-link" href={ownedContentHref(item.id)}>
+                                <h2>{item.title ?? "我的回答"}</h2><p>{item.status === "hidden" ? "已下架" : "所属内容不可用，暂不公开"}</p>
+                                <RelativeTime timestamp={item.createdAt} />
+                            </Link></article>
+                        {:else if kind === "question"}<QuestionListItem question={questionView(item)} />
                         {:else}
                             {@const body = validateDoc(item.body)}
                             <article class="answer-item">

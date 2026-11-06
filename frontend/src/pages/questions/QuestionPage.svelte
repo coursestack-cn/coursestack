@@ -4,20 +4,25 @@
     import { session } from "$lib/session.svelte.js";
     import PageLayout from "$lib/components/shell/PageLayout.svelte";
     import ContentState from "./ContentState.svelte";
+    import OwnedContentPanel from "../me/OwnedContentPanel.svelte";
     import QuestionDetail from "./QuestionDetail.svelte";
     import { courseEntry, encode, type Content } from "./data";
     import type { PageProps } from "$lib/router/types";
 
     let { params }: PageProps = $props();
+    const questionId = $derived(params.questionId!);
     const result = resource(async signal => {
-        const id = params.questionId!, viewer = session.user?.id;
+        const id = questionId, viewer = session.user?.id;
         const question = await api.get<Content>(`/api/questions/${encode(id)}`, { signal });
         return { question, entry: await courseEntry(question.courseId, signal), viewer };
     });
 </script>
 
 {#if result.data && result.status === "ready"}
-    {#key result.data.viewer}<QuestionDetail initial={result.data.question} entry={result.data.entry} />{/key}
+    {#key result.data.viewer}
+        {#if result.data.question.isPublic}<QuestionDetail initial={result.data.question} entry={result.data.entry} />
+        {:else}<PageLayout title="我的问题" width="prose"><OwnedContentPanel id={result.data.question.id} /></PageLayout>{/if}
+    {/key}
 {:else}
     <PageLayout title="问题详情" width="prose"><ContentState status={result.status} error={result.error} reload={result.reload} /></PageLayout>
 {/if}

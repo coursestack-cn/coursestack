@@ -6,7 +6,7 @@
 
     export type ContentBlockView = {
         id: string;
-        kind: "question" | "answer";
+        kind: "question" | "answer" | "material";
         author: AuthorView;
         body: RichTextDoc;
         createdAt: number;
@@ -23,6 +23,9 @@
         voteState?: VoteState;
         otherAccepted?: boolean;
         commentsExpanded?: boolean;
+        showCommentsButton?: boolean;
+        /** Link to a comment area rendered elsewhere on the page instead of toggling inline comments. */
+        commentsHref?: string;
         comments?: Snippet;
         oncomments?: () => void;
         onvote: (value: -1 | 0 | 1) => Promise<void>;
@@ -41,6 +44,7 @@
     import { MessageCircle } from "@lucide/svelte";
     import Button from "../ui/Button.svelte";
     import RichText from "../../rich-text/RichText.svelte";
+    import { isEmptyDoc } from "../../rich-text/index";
     import AuthorSignature from "./AuthorSignature.svelte";
     import ContentBadge from "./ContentBadge.svelte";
     import VoteControl from "./VoteControl.svelte";
@@ -48,28 +52,36 @@
     import ContentActions from "./ContentActions.svelte";
 
     let { content, capabilities = {}, voteState = "readonly", otherAccepted = false,
-        commentsExpanded = $bindable(false), comments, oncomments, onvote, onrequirelogin,
+        commentsExpanded = $bindable(false), showCommentsButton = true, commentsHref, comments, oncomments, onvote, onrequirelogin,
         onaccept, onunaccept, onedit, editHref, ondelete, onreport, onmoderate,
         class: className = "", ...rest }: Props = $props();
 </script>
 
 <article {...rest} id={`${content.kind}-${content.id}`} class={`content-block ${className}`} class:accepted={content.kind === "answer" && content.accepted}>
     <header>
-        <AuthorSignature author={content.author} createdAt={content.createdAt} editedAt={content.editedAt} />
+        <AuthorSignature author={content.author} createdAt={content.createdAt} editedAt={content.editedAt} linkTeacher />
         {#if content.kind === "answer" && content.accepted}<ContentBadge kind="accepted" />
         {:else if content.kind === "question"}<ContentBadge kind={content.solved ? "solved" : "unsolved"} />{/if}
     </header>
-    <RichText doc={content.body} />
+    {#if content.kind === "material" && isEmptyDoc(content.body)}<p class="empty-body">暂无资料介绍</p>
+    {:else}<RichText doc={content.body} />{/if}
     <footer>
         <VoteControl score={content.score} myVote={content.myVote} state={voteState} {onvote} {onrequirelogin} />
         {#if content.kind === "answer" && capabilities.canAccept && onaccept && onunaccept}
             <AcceptControl accepted={content.accepted ?? false} {otherAccepted} {onaccept} {onunaccept} />
         {/if}
-        <Button size="sm" variant="ghost" aria-expanded={commentsExpanded} aria-controls={comments ? `${content.kind}-${content.id}-comments` : undefined}
-            onclick={() => { commentsExpanded = !commentsExpanded; oncomments?.(); }}>
-            {#snippet icon()}<MessageCircle size="1em" />{/snippet}
-            评论{content.commentCount === undefined ? "" : `（${content.commentCount}）`}
-        </Button>
+        {#if showCommentsButton && commentsHref}
+            <Button size="sm" variant="ghost" href={commentsHref}>
+                {#snippet icon()}<MessageCircle size="1em" />{/snippet}
+                评论{content.commentCount === undefined ? "" : `（${content.commentCount}）`}
+            </Button>
+        {:else if showCommentsButton}
+            <Button size="sm" variant="ghost" aria-expanded={commentsExpanded} aria-controls={comments ? `${content.kind}-${content.id}-comments` : undefined}
+                onclick={() => { commentsExpanded = !commentsExpanded; oncomments?.(); }}>
+                {#snippet icon()}<MessageCircle size="1em" />{/snippet}
+                评论{content.commentCount === undefined ? "" : `（${content.commentCount}）`}
+            </Button>
+        {/if}
         <div class="more"><ContentActions kind={content.kind} canEdit={capabilities.canEdit} canDelete={capabilities.canDelete}
             canReport={capabilities.canReport} canModerate={capabilities.canModerate}
             {onedit} {editHref} {ondelete} {onreport} {onmoderate} /></div>
@@ -82,6 +94,7 @@
     .accepted { border-color: var(--color-success); border-inline-start-width: var(--space-1); }
     header, footer { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-3); }
     header { justify-content: space-between; }
+    .empty-body { color: var(--color-text-secondary); font-size: var(--font-size-sm); }
     footer { border-top: 1px solid var(--color-border); padding-top: var(--space-3); }
     .more { margin-inline-start: auto; }
     .comments { min-width: 0; border-top: 1px solid var(--color-border); padding-top: var(--space-3); }

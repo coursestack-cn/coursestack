@@ -16,21 +16,20 @@
     import Textarea from "../ui/Textarea.svelte";
     import { toast } from "../ui/toast.svelte.js";
     import { isAborted, userMessage } from "../../api/errors";
-    import { REPORT_CATEGORIES, moderationReason, reasonLength, reportReason } from "./reason";
+    import { REPORT_CATEGORIES, moderationReason, reasonLength, reportReason, reportText } from "./reason";
 
     const formId = $props.id();
     let { open = $bindable(false), mode, onsubmit, ...rest }: Props = $props();
     let category = $state("");
     let detail = $state("");
-    let categoryError = $state("");
     let detailError = $state("");
     let requestError = $state("");
     let pending = $state(false);
     let generation = 0;
     let alive = true;
-    const options = [{ value: "", label: "选择举报类别", disabled: true }, ...REPORT_CATEGORIES.map((label) => ({ value: label, label }))];
+    const options = [{ value: "", label: "不选择" }, ...REPORT_CATEGORIES.map((label) => ({ value: label, label }))];
     const reporting = $derived(mode === "report");
-    const length = $derived(reasonLength(reporting ? (detail.trim() ? `${category}：${detail.trim()}` : category) : detail.trim()));
+    const length = $derived(reasonLength(reporting ? reportText(category, detail) : detail.trim()));
 
     $effect(() => {
         const isOpen = open;
@@ -40,7 +39,6 @@
         if (isOpen) {
             category = "";
             detail = "";
-            categoryError = "";
             detailError = "";
             requestError = "";
         }
@@ -50,14 +48,12 @@
     async function submit(event: SubmitEvent) {
         event.preventDefault();
         if (pending || !open) return;
-        categoryError = "";
         detailError = "";
         requestError = "";
         const result = reporting ? reportReason(category, detail) : moderationReason(detail);
         if (!result.ok) {
-            if (result.field === "category") categoryError = result.message;
-            else detailError = result.message;
-            document.getElementById(`${formId}-${result.field}`)?.focus();
+            detailError = result.message;
+            document.getElementById(`${formId}-detail`)?.focus();
             return;
         }
         const current = generation;
@@ -80,19 +76,19 @@
 </script>
 
 <Dialog {...rest} bind:open title={reporting ? "举报内容" : "下架内容"}
-    description={reporting ? "选择举报类别，并补充有助于核实的说明。" : "下架后，该内容将不再公开显示。前往“管理”页面可管理下架内容。"}
+    description={reporting ? "类别和说明都可以不填，填写后有助于核实。" : "下架后，该内容将不再公开显示。前往“管理”页面可管理下架内容。"}
     dismissible={!pending} aria-busy={pending || undefined}>
     <form id={formId} class="reason-form" onsubmit={submit} novalidate>
         {#if reporting}
-            <Field id={`${formId}-category`} label="举报类别" required error={categoryError}>
+            <Field id={`${formId}-category`} label="举报类别">
                 {#snippet children(control)}
                     <Select id={control.id} aria-describedby={control.describedBy} invalid={control.invalid} {options}
-                        bind:value={category} disabled={pending} required onchange={() => { categoryError = ""; detailError = ""; requestError = ""; }} />
+                        bind:value={category} disabled={pending} onchange={() => { detailError = ""; requestError = ""; }} />
                 {/snippet}
             </Field>
         {/if}
-        <Field id={`${formId}-detail`} label={reporting ? "补充说明" : "下架原因"} required={!reporting || category === "其他"}
-            help={reporting ? "举报理由共 3–1000 字，包含类别；选择“其他”时须补充说明。" : "填写 3–1000 字，说明下架依据。"} error={detailError}>
+        <Field id={`${formId}-detail`} label={reporting ? "补充说明" : "下架原因"}
+            help={reporting ? "选填，连同类别最多 1000 字。" : "选填，最多 1000 字，填写后作者可以看到。"} error={detailError}>
             {#snippet children(control)}
                 <Textarea id={control.id} aria-describedby={control.describedBy} invalid={control.invalid}
                     bind:value={detail} disabled={pending} rows={5} required={control.required}

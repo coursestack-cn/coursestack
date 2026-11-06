@@ -11,8 +11,8 @@
     import ConfirmDialog from "$lib/components/ui/ConfirmDialog.svelte";
     import { emptyDoc, publisher } from "./data";
 
-    let { label, path, initial, context = {}, compact = false, guardSamePage = false, oncomplete, oncancel, onstatechange }: {
-        label: string; path: string; initial?: RichTextDoc | null; context?: Record<string, string>;
+    let { label, submitLabel, path, initial, context = {}, compact = false, guardSamePage = false, oncomplete, oncancel, onstatechange }: {
+        label: string; submitLabel?: string; path: string; initial?: RichTextDoc | null; context?: Record<string, string>;
         compact?: boolean; guardSamePage?: boolean; oncomplete: (id?: string) => void; oncancel?: () => void;
         onstatechange?: (state: { dirty: boolean; pending: boolean }) => void;
     } = $props();
@@ -69,7 +69,7 @@
         {/snippet}
     </Field>
     <div class="composer-actions">
-        <Button type="submit" variant="primary" loading={pending} disabled={!valid || !body || isEmptyDoc(body)}>{editing ? "保存修改" : label}</Button>
+        <Button type="submit" variant="primary" loading={pending} disabled={!valid || !body || isEmptyDoc(body)}>{editing ? "保存修改" : submitLabel ?? label}</Button>
         {#if oncancel}<Button disabled={pending} onclick={cancel}>取消</Button>{/if}
     </div>
 </form>

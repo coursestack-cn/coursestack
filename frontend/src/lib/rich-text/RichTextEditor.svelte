@@ -263,6 +263,7 @@
         const common = [
             { label: "加粗", shortcut: "Ctrl/⌘+B", icon: Bold, active: current?.isActive("bold"), run: () => current?.chain().focus().toggleBold().run() },
             { label: "斜体", shortcut: "Ctrl/⌘+I", icon: Italic, active: current?.isActive("italic"), run: () => current?.chain().focus().toggleItalic().run() },
+            { label: "删除线", shortcut: "Ctrl/⌘+Shift+S", icon: Strikethrough, active: current?.isActive("strike"), run: () => current?.chain().focus().toggleStrike().run() },
             { label: "行内代码", shortcut: "Ctrl/⌘+E", icon: Code, active: current?.isActive("code"), run: () => current?.chain().focus().toggleCode().run() },
             { label: "链接", shortcut: "Ctrl/⌘+K", icon: LinkIcon, active: current?.isActive("link"), run: openLink },
             { label: "代码块", shortcut: "Ctrl/⌘+Alt+C", icon: Braces, active: current?.isActive("codeBlock"), run: () => current?.chain().focus().toggleCodeBlock().run() },
@@ -270,7 +271,6 @@
         ];
         if (toolbar === "compact") return common;
         return [...common,
-            { label: "删除线", shortcut: "Ctrl/⌘+Shift+S", icon: Strikethrough, active: current?.isActive("strike"), run: () => current?.chain().focus().toggleStrike().run() },
             { label: "二级标题", shortcut: "Ctrl/⌘+Alt+2", icon: Heading2, active: current?.isActive("heading", { level: 2 }), run: () => current?.chain().focus().toggleHeading({ level: 2 }).run() },
             { label: "三级标题", shortcut: "Ctrl/⌘+Alt+3", icon: Heading3, active: current?.isActive("heading", { level: 3 }), run: () => current?.chain().focus().toggleHeading({ level: 3 }).run() },
             { label: "四级标题", shortcut: "Ctrl/⌘+Alt+4", icon: Heading4, active: current?.isActive("heading", { level: 4 }), run: () => current?.chain().focus().toggleHeading({ level: 4 }).run() },

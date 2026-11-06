@@ -37,9 +37,9 @@
     const labels = { question: "问题", answer: "回答", comment: "评论", material: "资料" };
     const descriptions = {
         comment: "删除后评论内容将被清空，回复仍会保留。",
-        answer: "删除后回答及其评论都不再显示，且无法恢复。",
-        question: "删除后问题及其回答、评论都不再显示，且无法恢复。",
-        material: "删除后资料及其版本、评论都不再显示，且无法恢复。"
+        answer: "删除后正文将被清空并撤回该回答的自动奖励，且无法恢复。已有评论或被采纳的回答不能自行删除。",
+        question: "删除后正文将被清空并撤回该问题的自动奖励，且无法恢复。已有回答或评论的问题不能自行删除。",
+        material: "删除后资料及其所有文件版本将被移除并撤回自动奖励，且无法恢复。已有评论的资料不能自行删除。"
     };
     const items = $derived.by(() => {
         const available: MenuItem[] = [];

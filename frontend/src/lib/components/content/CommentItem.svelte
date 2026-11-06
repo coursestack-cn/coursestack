@@ -10,6 +10,7 @@
         highlighted?: boolean;
         replyOpen?: boolean;
         onreply?: () => void;
+        onfollowreply?: (event: MouseEvent) => void;
         onclose?: () => void;
         onvote?: (value: -1 | 0 | 1) => Promise<void>;
         onrequirelogin?: () => void;
@@ -34,7 +35,7 @@
     import ContentActions from "./ContentActions.svelte";
 
     let { item, capabilities = {}, voteState = "readonly", highlighted = false, replyOpen = false,
-        onreply, onclose, onvote, onrequirelogin, onedit, editHref, ondelete, onreport, onmoderate,
+        onreply, onfollowreply, onclose, onvote, onrequirelogin, onedit, editHref, ondelete, onreport, onmoderate,
         composer, class: className = "", ...rest }: Props = $props();
     const anchor = $derived(`comment-${item.id}`);
     const replyLabel = $derived.by(() => {
@@ -55,8 +56,8 @@
 </script>
 
 <article {...rest} id={anchor} class={`comment-item ${className}`} class:highlighted>
-    <header><AuthorSignature author={item.author} size="sm" createdAt={item.createdAt} editedAt={item.editedAt} /></header>
-    {#if replyLabel}<p class="reply-target">{#if replyHref}<Link href={replyHref}>{replyLabel}</Link>{:else}{replyLabel}{/if}</p>{/if}
+    <header><AuthorSignature author={item.author} size="sm" createdAt={item.createdAt} editedAt={item.editedAt} linkTeacher /></header>
+    {#if replyLabel}<p class="reply-target">{#if replyHref}<Link href={replyHref} onclick={onfollowreply}>{replyLabel}</Link>{:else}{replyLabel}{/if}</p>{/if}
     <RichText doc={item.body} />
     <footer>
         <VoteControl score={item.score} myVote={item.myVote} state={voteState} {onvote} {onrequirelogin} />

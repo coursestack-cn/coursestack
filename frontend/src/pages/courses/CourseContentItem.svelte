@@ -6,7 +6,7 @@
     import Tag from "$lib/components/ui/Tag.svelte";
     import AuthorSignature from "$lib/components/content/AuthorSignature.svelte";
     import ContentBadge from "$lib/components/content/ContentBadge.svelte";
-    import { questionHref } from "../questions/data";
+    import { ownedContentHref, questionHref } from "../questions/data";
     import { materialHref, type CourseContent } from "../materials/data";
 
     let { item }: { item: CourseContent } = $props();
@@ -15,8 +15,9 @@
 </script>
 
 <article>
-    <Link class="course-content-link" href={material ? materialHref(item.id) : questionHref(item.id)}>
-        <div class="heading"><span class="kind">{#if material}<FileText size="1em" />资料{:else}<MessageSquare size="1em" />问答{/if}</span><h3>{item.title}</h3>
+    <Link class="course-content-link" href={!item.isPublic ? ownedContentHref(item.id) : material ? materialHref(item.id) : questionHref(item.id)}>
+        <div class="heading"><span class="kind">{#if material}<FileText size="1em" />资料{:else}<MessageSquare size="1em" />问题{/if}</span><h3>{item.title}</h3>
+            {#if !item.isPublic}<span class="kind">{item.status === "hidden" ? "已下架" : "暂不公开"}</span>{/if}
             {#if !material}<ContentBadge kind={item.solved ? "solved" : "unsolved"} />{/if}
         </div>
         {#if excerpt}<p class="excerpt">{excerpt}</p>{/if}

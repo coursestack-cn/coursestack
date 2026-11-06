@@ -10,7 +10,7 @@ export type CourseEntry = { course: Course; permissions: { canManageContent: boo
 type Parent = { id: string; author: { nickname: string | null; isDeleted: boolean }; isDeleted: boolean };
 export type Content = {
     id: string; kind: "question" | "answer" | "comment" | "material"; courseId: string;
-    status?: "visible"; author: AuthorView; title: string | null; body: RichTextDoc | null;
+    termId: string | null; status: "visible" | "hidden"; isPublic: boolean; canDelete: boolean; author: AuthorView; title: string | null; body: RichTextDoc | null;
     tags: string[] | null; targetKind: Content["kind"] | null; targetId: string | null;
     createdAt: number; editedAt: number | null; updatedAt: number; replyTo: Parent | null;
     score: number; myVote: -1 | 0 | 1; commentCount: number;
@@ -21,6 +21,7 @@ export type Tombstone = Pick<Content, "id" | "courseId" | "targetId" | "targetKi
 };
 export type Comment = Content | Tombstone;
 export const encode = encodeURIComponent;
+export const ownedContentHref = (id: string) => `/me/contents/${encode(urlId(id))}`;
 export const questionHref = (id: string) => `/questions/${encode(urlId(id))}`;
 export const courseQuestionsHref = (course: Course) => `/courses/${encode(course.id)}`;
 export const pageNumber = (value: string | null) => {
@@ -36,24 +37,24 @@ export async function courseByCode(code: string, signal: AbortSignal): Promise<C
 export const courseEntry = (id: string, signal: AbortSignal) => api.get<CourseEntry>(`/api/courses/${encode(id)}/entry`, { signal });
 export const getContent = (id: string, signal?: AbortSignal) => api.get<Comment>(`/api/contents/${encode(id)}`, { signal });
 export function commentView(item: Comment): CommentView {
-    const replyTo = item.replyTo ? { id: item.replyTo.id, nickname: item.replyTo.author.nickname,
+    const replyTo = item.replyTo && item.replyTo.id !== item.targetId ? { id: item.replyTo.id, nickname: item.replyTo.author.nickname,
         authorDeleted: item.replyTo.author.isDeleted, contentDeleted: item.replyTo.isDeleted,
-        href: `/${item.targetKind === "comment" ? "comments" : item.targetKind === "answer" ? "answers" : item.targetKind === "material" ? "materials" : "questions"}/${encode(urlId(item.replyTo.id))}` } : null;
+        href: `#comment-${encode(urlId(item.replyTo.id))}` } : null;
     return item.status === "deleted" ? { kind: "deleted", id: urlId(item.id), replyTo }
         : { kind: "visible", id: urlId(item.id), author: item.author, body: item.body ?? emptyDoc(), createdAt: item.createdAt,
             editedAt: item.editedAt, score: item.score, myVote: item.myVote, replyTo };
 }
 export function blockView(item: Content) {
-    return { ...item, id: urlId(item.id), kind: item.kind as "question" | "answer", body: item.body ?? emptyDoc(), accepted: item.isAccepted };
+    return { ...item, id: urlId(item.id), kind: item.kind as "question" | "answer" | "material", body: item.body ?? emptyDoc(), accepted: item.isAccepted };
 }
 export function questionView(item: Content) {
     const doc = validateDoc(item.body);
     return { ...item, title: item.title ?? "问题", href: questionHref(item.id), tags: item.tags ?? [], solved: Boolean(item.solved),
         excerpt: doc.ok ? toPlainText(doc.doc, { maxChars: 180 }) : "" };
 }
-export function capabilities(authorId: string, viewerId: string | undefined, canManage: boolean): ContentCapabilities {
+export function capabilities(authorId: string, viewerId: string | undefined, canManage: boolean, canDelete = true): ContentCapabilities {
     const signedIn = Boolean(viewerId);
-    return { canEdit: signedIn && (authorId === viewerId || canManage), canDelete: signedIn && (authorId === viewerId || canManage),
+    return { canEdit: signedIn && authorId === viewerId, canDelete: signedIn && authorId === viewerId && canDelete,
         canReport: signedIn, canModerate: signedIn && canManage, canAccept: signedIn && canManage, canReply: signedIn };
 }
 export function voteState(authorId: string, viewerId: string | undefined, sessionStatus: string): VoteState {
