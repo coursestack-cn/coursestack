@@ -10,6 +10,11 @@ SELECT c.* FROM contents c JOIN reachable r ON r.id=c.id;
 --> statement-breakpoint
 CREATE VIEW public_contents AS SELECT * FROM accessible_contents WHERE status='visible';
 --> statement-breakpoint
+CREATE TRIGGER content_search_deleted AFTER UPDATE OF status ON contents
+WHEN NEW.status='deleted' AND NEW.body_text<>'' BEGIN
+    UPDATE contents SET body_text='' WHERE id=NEW.id;
+END;
+--> statement-breakpoint
 -- Automatic rewards require a publicly available source; deletion and hiding both retract the affected branch.
 CREATE VIEW rewardable_contents AS SELECT * FROM public_contents;
 --> statement-breakpoint

@@ -194,6 +194,7 @@ export const contents = sqliteTable('contents', {
     authorId: text('author_id').notNull().references(() => accounts.id),
     title: text('title'),
     body: text('body'),
+    bodyText: text('body_text').notNull().default(''),
     tags: text('tags'),
     targetId: text('target_id'),
     // Comments belong to a question, answer or material; replies never own other comments.
