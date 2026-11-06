@@ -6,6 +6,7 @@
         options: SelectOption[];
         value?: string;
         invalid?: boolean;
+        fitOptions?: boolean;
     };
 </script>
 
@@ -13,7 +14,7 @@
     import { onMount } from "svelte";
     import { ChevronDown } from "@lucide/svelte";
 
-    let { options, value = $bindable(""), invalid = false, class: className = "", ...rest }: Props = $props();
+    let { options, value = $bindable(""), invalid = false, fitOptions = false, class: className = "", ...rest }: Props = $props();
 
     let customizable = $state(false);
 
@@ -22,7 +23,7 @@
     });
 </script>
 
-<div class={`select ${className}`}>
+<div class={`select ${className}`} class:fit-options={fitOptions}>
     <select {...rest} bind:value aria-invalid={invalid || rest["aria-invalid"]}>
         {#if customizable}
             <button type="button"><selectedcontent></selectedcontent></button>
@@ -31,13 +32,22 @@
             <option value={option.value} disabled={option.disabled}>{option.label}</option>
         {/each}
     </select>
-    <span aria-hidden="true"><ChevronDown size="1em" /></span>
+    {#if fitOptions}
+        <span class="option-widths" aria-hidden="true">
+            {#each options as option (option.value)}<span>{option.label}</span>{/each}
+        </span>
+    {/if}
+    <span class="indicator" aria-hidden="true"><ChevronDown size="1em" /></span>
 </div>
 
 <style>
     /* Select and icon share one grid cell, so the icon stays centred on the control even when a parent stretches the wrapper. */
     .select { display: grid; align-content: start; width: 100%; min-width: 0; font-size: var(--font-size-md); }
-    select, span { grid-area: 1 / 1; }
+    .select.fit-options { width: max-content; max-width: 100%; }
+    select, .indicator, .option-widths { grid-area: 1 / 1; }
+    /* Include every label in intrinsic sizing, even when base-select sizes itself from the selected option. */
+    .option-widths { display: grid; visibility: hidden; overflow: hidden; height: 0; min-width: 0; padding-inline: var(--space-3) var(--space-10); border-inline: 1px solid transparent; }
+    .option-widths > span { grid-area: 1 / 1; white-space: nowrap; }
     select { appearance: none; width: 100%; min-width: 0; min-height: var(--space-10); padding: var(--space-2) var(--space-10) var(--space-2) var(--space-3); border: 1px solid var(--color-border-strong); border-radius: var(--radius-md); background: var(--color-surface); color: var(--color-text); text-overflow: ellipsis; transition: border-color var(--duration-fast) var(--ease-out); }
     select:hover:not(:disabled) { border-color: var(--color-text-secondary); }
     select:active:not(:disabled) { border-color: var(--color-accent); }
@@ -59,5 +69,5 @@
         option::checkmark { content: ""; flex-shrink: 0; width: 1em; height: 1em; background-color: currentColor; mask: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 24 24' fill='none' stroke='black' stroke-width='2' stroke-linecap='round' stroke-linejoin='round'%3E%3Cpath d='M20 6 9 17l-5-5'/%3E%3C/svg%3E") center / contain no-repeat; }
         option:disabled { opacity: 0.5; cursor: not-allowed; }
     }
-    span { display: flex; justify-self: end; align-self: center; margin-inline-end: var(--space-3); pointer-events: none; color: var(--color-text-secondary); }
+    .indicator { display: flex; justify-self: end; align-self: center; margin-inline-end: var(--space-3); pointer-events: none; color: var(--color-text-secondary); }
 </style>
