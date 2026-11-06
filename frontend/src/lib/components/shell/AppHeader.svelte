@@ -112,7 +112,7 @@
             {/if}
         </div>
         <div class="desktop-search" role="search" aria-label="站内搜索">
-            <SearchInput bind:value={search} aria-label="搜索课程、资料和问题" placeholder="搜索课程、资料和问题"
+            <SearchInput bind:value={search} aria-label="搜索课程、资料、问题和回答" placeholder="搜索课程、资料、问题和回答"
                 onsubmit={(value) => { void navigate(`/search?${new URLSearchParams({ q: value.trim() })}`); }} />
         </div>
         <div class="header-actions">
