@@ -11,10 +11,13 @@ import { editPermission, management, requireManagement } from '../permissions.ts
 import { courseIdentity, materialContent, materialDetail, selectedVersion, versionDto, versionPage, withMaterialVersions } from './service.ts';
 import { materialId, materialMimes, maxBytes, now, versionNumber } from './validation.ts';
 import { serveMaterialFile } from './files.ts';
+import { contentAuthorId, courseAuthors } from './authors.ts';
 
 export const materialRoutes = new Hono<AppEnv>();
+materialRoutes.get('/courses/:id/content-authors', courseAuthors);
 materialRoutes.get('/courses/:id/contents', async c => {
     const courseId = await courseIdentity(c, c.req.param('id')), p = page(c);
+    const authorId = contentAuthorId(c);
     const kind = parsedEnum(c.req.query('kind'), ['all', 'question', 'material'] as const, 'all');
     const state = parsedEnum(c.req.query('state'), ['all', 'unresolved', 'solved'] as const, 'all');
     const sort = parsedEnum(c.req.query('sort'), ['newest', 'active', 'score'] as const, 'active');
@@ -30,6 +33,7 @@ materialRoutes.get('/courses/:id/contents', async c => {
         ) SELECT MAX(updated_at) FROM activity) DESC,c.id ASC`;
     const { rows, total } = await queryPage<PublicRow>(c, p, sql`${publicSelect(c)} WHERE c.course_id=${courseId}
         ${termId === undefined ? sql`` : sql`AND c.term_id=${termId}`}
+        ${authorId === undefined ? sql`` : sql`AND c.author_id=${authorId}`}
         AND c.kind IN ('question','material') ${kind === 'all' ? sql`` : sql`AND c.kind=${kind}`}
         ${title ? sql`AND instr(lower(c.title),lower(${title}))>0` : sql``}
         ${state === 'solved' ? sql`AND accepted.answer_id IS NOT NULL` : state === 'unresolved' ? sql`AND accepted.answer_id IS NULL` : sql``}

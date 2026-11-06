@@ -22,6 +22,9 @@ const result = object({ materialId: id, version: positive });
 const state = object({ uploadId: id, status: enumeration('pending', 'confirming', 'published', 'cancelled', 'expired'), expiresAt: integer, result: nullable(result) });
 const versionPage = paged(ref('FileVersion'));
 export const materialSchemas = {
+    CourseAuthor: object({ id, nickname: nullable({ type: 'string', maxLength: 80 }), avatarUrl: nullable(str(300)), isDeleted: bool, isTeacher: bool, isCourseTeacher: bool,
+        shortId: { ...nullable(str()), description: '重名、未设置昵称或已删除账号的公开区分标识；短前缀冲突时使用完整账号ID' } }),
+    CourseAuthorPage: paged(ref('CourseAuthor')),
     FileVersion: version,
     MaterialUploadResult: result,
     MaterialUploadStatus: state,
@@ -36,8 +39,11 @@ export const materialSchemas = {
         if: { properties: { kind: { const: 'material' } } }, then: { required: ['latestVersion'] } }] }),
 };
 export const materialDefinitions: Definition[] = [
-    { method: 'get', path: '/courses/{id}/contents', summary: '资料与问题统一分页、标题与标签关键词及发布学期筛选；state 和 score 排序仅限 kind=question', response: ref('CourseContentPage'),
-        parameters: [...pagination, query('termId', { ...id, pattern: '^[a-zA-Z0-9_-]+$' }), query('kind', enumeration('all', 'question', 'material')), query('title', { type: 'string', maxLength: 200, description: '去首尾空白后匹配标题中的连续子串，ASCII 英文字母忽略大小写，% 和 _ 按普通字符匹配；空值不筛选，与标签等条件取交集' }), query('tag', { type: 'string', maxLength: 30, description: '去首尾空白后匹配任意一个标签中的连续子串，ASCII 英文字母忽略大小写，% 和 _ 按普通字符匹配；空值不筛选，与标题等条件取交集' }), query('state', enumeration('all', 'unresolved', 'solved')), query('sort', enumeration('active', 'newest', 'score'))] },
+    { method: 'get', path: '/courses/{id}/content-authors', summary: '该课程全部学期公开问题和资料的发布人，按最近发布及账号ID排序；不包含仅回答或评论的参与者',
+        response: ref('CourseAuthorPage'), parameters: [...pagination, query('authorId', { ...id, pattern: '^[a-zA-Z0-9_-]+$', description: '精确回显所选发布人；无公开内容时返回空列表' }),
+            query('q', { type: 'string', maxLength: 80, description: '去首尾空白后匹配公开昵称连续子串，ASCII忽略大小写，%和_按普通字符；已删除账号不匹配原昵称' })] },
+    { method: 'get', path: '/courses/{id}/contents', summary: '资料与问题统一分页、标题与标签关键词、发布学期及发布人筛选；state 和 score 排序仅限 kind=question', response: ref('CourseContentPage'),
+        parameters: [...pagination, query('authorId', { ...id, pattern: '^[a-zA-Z0-9_-]+$', description: '发布人账号ID，与其他条件取交集；省略为全部' }), query('termId', { ...id, pattern: '^[a-zA-Z0-9_-]+$' }), query('kind', enumeration('all', 'question', 'material')), query('title', { type: 'string', maxLength: 200, description: '去首尾空白后匹配标题中的连续子串，ASCII 英文字母忽略大小写，% 和 _ 按普通字符匹配；空值不筛选，与标签等条件取交集' }), query('tag', { type: 'string', maxLength: 30, description: '去首尾空白后匹配任意一个标签中的连续子串，ASCII 英文字母忽略大小写，% 和 _ 按普通字符匹配；空值不筛选，与标题等条件取交集' }), query('state', enumeration('all', 'unresolved', 'solved')), query('sort', enumeration('active', 'newest', 'score'))] },
     { method: 'get', path: '/materials/policy', summary: '单文件上传限制和登录要求', response: object({ maxBytes: positive, mimeTypes: { type: 'array', items: enumeration(...materialMimes) },
         filesPerVersion: { const: 1 }, fileAccessRequiresLogin: { const: true }, uploadUrlLifetimeSeconds: { const: 600 }, uploadLifetimeSeconds: { const: 86400 } }) },
     { method: 'get', path: '/materials/{id}', summary: '资料介绍、默认或指定版本、前50个现存版本；游客仅能读取元数据', parameters: [query('version', positive)], response: ref('MaterialDetail') },
