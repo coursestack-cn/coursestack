@@ -15,6 +15,9 @@
     import Dialog from "$lib/components/ui/Dialog.svelte";
     import Pagination from "$lib/components/ui/Pagination.svelte";
     import AccountEditDialog, { type Account } from "./AccountEditDialog.svelte";
+    import AccountImportDialog from "./AccountImportDialog.svelte";
+    import { accountTemplate } from "../../../../shared/accounts/import";
+    import { downloadCsv } from "./account-import";
     import ManageNav from "./ManageNav.svelte";
 
     type AccountList = { items: Account[]; page: number; pageSize: number; total: number };
@@ -42,6 +45,7 @@
     let copyError = $state("");
     let editOpen = $state(false);
     let editing = $state.raw<Account | null>(null);
+    let importOpen = $state(false);
     let alive = true;
     onDestroy(() => { alive = false; });
     $effect(() => { query = activeQuery; });
@@ -78,8 +82,8 @@
     async function reset(event: SubmitEvent) {
         event.preventDefault();
         if (pending || !selected) return;
-        if (new TextEncoder().encode(String(password)).length > 72) {
-            resetError = "密码的 UTF-8 编码不能超过 72 字节。";
+        if (Array.from(String(password)).length > 64) {
+            resetError = "密码不能超过 64 个字符。";
             return;
         }
         pending = true;
@@ -100,7 +104,7 @@
             if (!alive) return;
             resetError = userMessage(cause, {
                 ACCOUNT_DELETED: "账号身份已变更，请关闭弹窗并重新选择账号。",
-                INVALID_PASSWORD: "密码的 UTF-8 编码不能超过 72 字节。",
+                INVALID_PASSWORD: "密码不能超过 64 个字符。",
                 default: "未能确认重置结果。请先核对账号状态；如需再次重置，请重新打开弹窗。"
             });
             reload++;
@@ -116,7 +120,13 @@
     }
 </script>
 
-<PageLayout title="账号管理" subtitle="编辑学生和教师的账号信息，重置登录密码。">
+<PageLayout title="账号管理" subtitle="创建和编辑学生、教师账号，重置登录密码。">
+    {#snippet actions()}
+        {#if session.hasRole("admin")}
+            <Button onclick={() => downloadCsv("账号导入模板.csv", accountTemplate())}>下载CSV模板</Button>
+            <Button variant="primary" onclick={() => { importOpen = true; }}>CSV导入</Button>
+        {/if}
+    {/snippet}
     {#if !session.hasRole("admin")}
         <p role="alert">需要管理员权限才能查看账号。</p>
     {:else}
@@ -135,8 +145,7 @@
             <ResourceState status={error ? "error" : "loading"} {error} reload={() => { reload++; }} />
         {:else if result?.items.length}
             <div class="table-scroll">
-                <table>
-                    <caption class="sr-only">账号列表</caption>
+                <table aria-label="账号列表">
                     <thead><tr><th>学工号</th><th>昵称</th><th>身份</th><th>状态</th><th>需改密</th><th>操作</th></tr></thead>
                     <tbody>
                         {#each result.items as account (account.id)}
@@ -177,14 +186,14 @@
         <div><Button variant="primary" onclick={() => { open = false; }}>完成</Button></div>
     {:else}
         <form class="reset-form" onsubmit={reset} aria-busy={pending || undefined}>
-            <Field label="新密码（可选）" help="留空自动生成随机密码；管理员可以设置短密码。">
+            <Field label="新密码（可选）" help="留空自动生成随机密码；最多 64 个字符，管理员可以设置短密码。">
                 {#snippet children({ id, describedBy, invalid })}
                     <TextInput {id} {invalid} aria-describedby={describedBy} name="resetPassword" type="password"
                         autocomplete="new-password" bind:value={password} disabled={pending} />
                 {/snippet}
             </Field>
             <Checkbox label="要求用户重置密码" bind:checked={mustChangePassword} disabled={pending} />
-            <p class="hint">勾选后，用户下次登录需要先设置至少 8 个字符的新密码。</p>
+            <p class="hint">勾选后，用户下次登录需要先设置 8-64 字符的新密码。</p>
             {#if resetError}<p class="error" role="alert">{resetError}</p>{/if}
             <div class="actions">
                 <Button disabled={pending} onclick={() => { open = false; }}>取消</Button>
@@ -197,6 +206,8 @@
 <AccountEditDialog bind:open={editOpen} account={editing} onfailed={() => { reload++; }} onsaved={(saved) => {
     if (result) result = { ...result, items: result.items.map((item) => item.id === saved.id ? saved : item) };
 }} />
+
+{#if session.hasRole("admin")}<AccountImportDialog bind:open={importOpen} onsaved={() => { reload++; }} />{/if}
 
 <style>
     .search { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-4); }
