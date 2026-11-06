@@ -32,6 +32,17 @@ export const accounts = sqliteTable('accounts', {
     uniqueIndex('accounts_single_admin').on(t.role).where(sql`${t.role} = 'admin'`),
 ]);
 
+export const accountCreationRequests = sqliteTable('account_creation_requests', {
+    actorId: text('actor_id').notNull().references(() => accounts.id, { onDelete: 'cascade' }),
+    requestKey: text('request_key').notNull(),
+    accountId: text('account_id').notNull().references(() => accounts.id, { onDelete: 'cascade' }),
+    requestHash: text('request_hash').notNull(),
+    createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
+}, (t) => [
+    primaryKey({ columns: [t.actorId, t.requestKey] }),
+    uniqueIndex('account_creation_requests_account').on(t.accountId),
+]);
+
 // The course number is the primary key; offerings and teachers are independent.
 export const courses = sqliteTable('courses', {
     id: text('id').primaryKey().notNull(),
@@ -296,7 +307,7 @@ export const moderationActions = sqliteTable('moderation_actions', {
     check('moderation_actions_new_status', sql`${t.newStatus} IN ('visible', 'hidden', 'deleted')`),
 ]);
 
-// The action is the notification; only read receipts need separate persistence.
+// Retained for upgrading existing read receipts; new reads live in notifications.
 export const moderationNotificationReads = sqliteTable('moderation_notification_reads', {
     actionId: integer('action_id').notNull().references(() => moderationActions.id),
     accountId: text('account_id').notNull().references(() => accounts.id),
