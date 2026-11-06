@@ -12,7 +12,7 @@ before(async () => {
         modules: true,
         script: 'export default { fetch() { return new Response("test"); } };',
         compatibilityDate: '2026-10-21',
-        d1Databases: ['MIGRATED', 'SCHEMA', 'UPGRADED', 'GUARDED', 'RENAMED', 'VERSION_CONTRACT', 'HIDDEN_VERSION_GUARD'],
+        d1Databases: ['MIGRATED', 'SCHEMA', 'UPGRADED', 'GUARDED', 'RENAMED', 'VERSION_CONTRACT', 'HIDDEN_VERSION_GUARD', 'CONTENT_TERM', 'CONTENT_TREE'],
     }));
     migrations = await readMigrations();
 });
@@ -94,6 +94,10 @@ async function definitions(db) {
         .map(row => ({ ...row, sql: normalizedSql(row.sql) }));
 }
 
+// Column order and inline references differ after ADD COLUMN; PRAGMA checks their semantics.
+const constraintsAndRules = values => values.map(row => row.type === 'table'
+    ? { ...row, sql: row.sql.match(/CONSTRAINT.*$/)?.[0] ?? '' } : row);
+
 test('complete migration history initializes STRICT tables and matches current columns, constraints, views and triggers', async () => {
     const migrated = await runtime.getD1Database('MIGRATED');
     const target = await runtime.getD1Database('SCHEMA');
@@ -105,7 +109,7 @@ test('complete migration history initializes STRICT tables and matches current c
     assert.equal(expected.find(table => table.name === 'contents').columns.some(column => column.name === 'target_kind'), false);
     for (const table of expected) assert.equal(table.columns.some(column => column.name === 'revision'), false, table.name);
     assert.deepEqual(await structure(migrated), expected);
-    assert.deepEqual(await definitions(migrated), await definitions(target));
+    assert.deepEqual(constraintsAndRules(await definitions(migrated)), constraintsAndRules(await definitions(target)));
     const tableModes = new Map((await rows(migrated, 'PRAGMA table_list'))
         .filter(table => table.schema === 'main').map(table => [table.name, table.strict]));
     for (const { name } of expected) assert.equal(tableModes.get(name), 1, `${name} must be STRICT`);
@@ -142,13 +146,17 @@ test('upgrading the baseline preserves accounts, sessions, courses, discussions,
                 return { ...course, id: code };
             }
             const row = Object.hasOwn(record, 'course_id') ? { ...record, course_id: 'DEMO-COURSE' } : record;
+            if (name === 'contents') return { ...row, term_id: null, reply_to_id: null, body_text: '' };
+            if (name === 'moderation_actions') return { ...row, version: null };
             return name === 'bonus_ledger' ? { ...row, teacher_id: 'demo-teacher' } : row;
         });
         assert.deepEqual(sorted(await rows(db, `SELECT * FROM ${identifier(name)}`)), sorted(expected), name);
     }
     assert.deepEqual(await rows(db, 'SELECT * FROM teaching_classes'), [{ course_id: 'DEMO-COURSE', term_id: 'demo-current', teacher_id: 'demo-teacher' }]);
     assert.deepEqual(await rows(db, 'SELECT * FROM class_students'), [{ course_id: 'DEMO-COURSE', term_id: 'demo-current', student_id: 'demo-student', teacher_id: 'demo-teacher' }]);
-    assert.deepEqual(await definitions(db), await definitions(await runtime.getD1Database('SCHEMA')));
+    const target = await runtime.getD1Database('SCHEMA');
+    assert.deepEqual(await structure(db), await structure(target));
+    assert.deepEqual(constraintsAndRules(await definitions(db)), constraintsAndRules(await definitions(target)));
     assert.deepEqual(await rows(db, 'PRAGMA foreign_key_check'), []);
 
     // Newly installed file triggers must work after an upgrade without replaying historical awards.
@@ -313,5 +321,43 @@ test('removing version visibility cannot silently publish legacy hidden files', 
     await assert.rejects(apply(db, migrations.slice(contractIndex)), /material_versions_require_no_hidden_rows/);
     assert.deepEqual(await definitions(db), definition);
     assert.deepEqual(await rows(db, 'SELECT * FROM file_versions'), versions);
+    assert.deepEqual(await rows(db, 'PRAGMA foreign_key_check'), []);
+});
+
+test('content term migration preserves existing content and leaves unknown historical terms unassigned', async () => {
+    const db = await runtime.getD1Database('CONTENT_TERM');
+    const index = migrations.findIndex(migration => migration.name === '0005_content_term.sql');
+    await apply(db, migrations.slice(0, index));
+    await db.batch(currentFixture.split(';').filter(sql => sql.trim()).map(sql => db.prepare(sql)));
+    const original = await rows(db, 'SELECT * FROM contents');
+    await apply(db, migrations.slice(index, index + 1));
+    assert.deepEqual(await rows(db, 'SELECT * FROM contents'), original.map(row => ({ ...row, term_id: null })));
+    assert.deepEqual(await rows(db, 'SELECT * FROM public_contents'), original.map(row => ({ ...row, term_id: null })));
+    assert.deepEqual(await rows(db, 'PRAGMA foreign_key_check'), []);
+    assert.deepEqual(await rows(db, 'PRAGMA quick_check'), [{ quick_check: 'ok' }]);
+});
+
+test('comment ownership migration preserves replies, hidden branches, audit receipts and ledger history', async () => {
+    const db = await runtime.getD1Database('CONTENT_TREE');
+    await apply(db, migrations.slice(0, 7));
+    await db.batch(currentFixture.split(';').filter(s => s.trim()).map(s => db.prepare(s)));
+    await db.prepare("UPDATE class_bonus_rules SET points_comment=2 WHERE course_id='DEMO-COURSE'").run();
+    const add = (id, kind, parent) => db.prepare(`INSERT INTO contents(id,kind,course_id,term_id,author_id,title,body,target_id,updated_by,request_key,request_hash)
+        VALUES(?,?,'DEMO-COURSE','demo-current','demo-student',?,NULL,?,'demo-student',?,'fixture')`).bind(id, kind, kind === 'question' ? '问题' : null, parent, id).run();
+    await add('q', 'question', null);
+    await add('comment', 'comment', 'q'); await add('reply', 'comment', 'comment'); await add('nested', 'comment', 'reply');
+    await db.prepare("UPDATE contents SET status='hidden' WHERE id='comment'").run();
+    await db.prepare("INSERT INTO moderation_actions(content_id,actor_id,old_status,new_status,reason) VALUES('comment','demo-teacher','visible','hidden','原审查理由')").run();
+    await db.prepare("INSERT INTO moderation_notification_reads(action_id,account_id) VALUES(1,'demo-student')").run();
+    const ledger = await rows(db, 'SELECT * FROM bonus_ledger ORDER BY id');
+    await apply(db, migrations.slice(7));
+    assert.deepEqual(await rows(db, "SELECT id,target_id,reply_to_id,status FROM contents WHERE kind='comment' ORDER BY id"), [
+        { id: 'comment', target_id: 'q', reply_to_id: null, status: 'hidden' },
+        { id: 'nested', target_id: 'q', reply_to_id: 'reply', status: 'hidden' },
+        { id: 'reply', target_id: 'q', reply_to_id: 'comment', status: 'hidden' },
+    ]);
+    assert.deepEqual(await rows(db, 'SELECT * FROM bonus_ledger ORDER BY id'), ledger);
+    assert.equal(await db.prepare('SELECT COUNT(*) n FROM moderation_notification_reads').first('n'), 1);
+    assert.equal(await db.prepare('SELECT version FROM moderation_actions WHERE id=1').first('version'), null);
     assert.deepEqual(await rows(db, 'PRAGMA foreign_key_check'), []);
 });

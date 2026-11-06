@@ -179,11 +179,14 @@ export const contents = sqliteTable('contents', {
     id: text('id').primaryKey().notNull(),
     kind: text('kind', { enum: ['material', 'question', 'answer', 'comment'] }).notNull(),
     courseId: text('course_id').notNull().references(() => courses.id),
+    termId: text('term_id').references(() => terms.id, { onDelete: 'restrict' }),
     authorId: text('author_id').notNull().references(() => accounts.id),
     title: text('title'),
     body: text('body'),
     tags: text('tags'),
     targetId: text('target_id'),
+    // Comments belong to a question, answer or material; replies never own other comments.
+    replyToId: text('reply_to_id'),
     status: text('status', { enum: ['visible', 'hidden', 'deleted'] }).notNull().default('visible'),
     createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
     editedAt: integer('edited_at'),
@@ -193,6 +196,7 @@ export const contents = sqliteTable('contents', {
     requestHash: text('request_hash').notNull(),
 }, (t) => [
     foreignKey({ columns: [t.targetId], foreignColumns: [t.id] }),
+    foreignKey({ columns: [t.replyToId], foreignColumns: [t.id] }),
     check('contents_body_json', sql`${t.body} IS NULL OR json_valid(${t.body})`),
     check('contents_deleted_payload', sql`${t.status} <> 'deleted' OR (${t.title} IS NULL AND ${t.body} IS NULL AND ${t.tags} IS NULL)`),
     check('contents_kind', sql`${t.kind} IN ('material', 'question', 'answer', 'comment')`),
@@ -202,7 +206,9 @@ export const contents = sqliteTable('contents', {
         OR (${t.kind} IN ('answer', 'comment') AND ${t.title} IS NULL AND ${t.targetId} IS NOT NULL)`),
     uniqueIndex('contents_request_unique').on(t.authorId, t.requestKey),
     index('contents_course_kind_time').on(t.courseId, t.kind, t.status, t.createdAt, t.id),
+    index('contents_course_term_kind_time').on(t.courseId, t.termId, t.kind, t.status, t.createdAt, t.id),
     index('contents_target').on(t.targetId, t.status),
+    index('contents_reply').on(t.replyToId),
     index('contents_author').on(t.authorId, t.kind, t.createdAt, t.id),
 ]);
 
@@ -261,7 +267,7 @@ export const reports = sqliteTable('reports', {
     contentId: text('content_id').notNull().references(() => contents.id),
     reporterId: text('reporter_id').notNull().references(() => accounts.id),
     reason: text('reason').notNull(),
-    status: text('status', { enum: ['pending', 'resolved', 'dismissed'] }).notNull().default('pending'),
+    status: text('status', { enum: ['pending', 'resolved', 'dismissed', 'deleted'] }).notNull().default('pending'),
     resolution: text('resolution'),
     handledBy: text('handled_by').references(() => accounts.id),
     handledAt: integer('handled_at'),
@@ -269,13 +275,15 @@ export const reports = sqliteTable('reports', {
     requestKey: text('request_key').notNull(),
     requestHash: text('request_hash').notNull(),
 }, (t) => [
-    check('reports_status', sql`${t.status} IN ('pending', 'resolved', 'dismissed')`),
+    check('reports_status', sql`${t.status} IN ('pending', 'resolved', 'dismissed', 'deleted')`),
     uniqueIndex('reports_request_unique').on(t.reporterId, t.requestKey),
     uniqueIndex('one_pending_report').on(t.contentId, t.reporterId).where(sql`${t.status} = 'pending'`),
     index('reports_queue').on(t.status, t.createdAt, t.id),
 ]);
 
 export const moderationActions = sqliteTable('moderation_actions', {
+    // A version deletion keeps its audit entry after the file version is removed.
+    version: integer('version'),
     id: integer('id').primaryKey({ autoIncrement: true }),
     contentId: text('content_id').notNull().references(() => contents.id),
     actorId: text('actor_id').notNull().references(() => accounts.id),
@@ -287,3 +295,10 @@ export const moderationActions = sqliteTable('moderation_actions', {
     check('moderation_actions_old_status', sql`${t.oldStatus} IN ('visible', 'hidden', 'deleted')`),
     check('moderation_actions_new_status', sql`${t.newStatus} IN ('visible', 'hidden', 'deleted')`),
 ]);
+
+// The action is the notification; only read receipts need separate persistence.
+export const moderationNotificationReads = sqliteTable('moderation_notification_reads', {
+    actionId: integer('action_id').notNull().references(() => moderationActions.id),
+    accountId: text('account_id').notNull().references(() => accounts.id),
+    readAt: integer('read_at').notNull().default(sql`(unixepoch())`),
+}, t => [primaryKey({ columns: [t.actionId, t.accountId] })]);
