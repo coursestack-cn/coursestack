@@ -66,7 +66,7 @@ test('question, answer and comment rewards belong to the exact course, term and 
     assert.equal(await h.database.prepare("SELECT count(*) AS n FROM bonus_ledger WHERE course_id='course-b'").first('n'), 0);
 });
 
-test('hidden ancestors revoke descendant rewards; restoration uses original values and respects other hidden ancestors', async () => {
+test('hidden ancestors revoke descendant rewards; restoration recalculates in the original term and respects other hidden ancestors', async () => {
     await h.policy({ pointsQuestion: 10, pointsAnswer: 25, pointsAcceptance: 50, pointsComment: 3 });
     const q = await h.postQuestion(), a = await h.postAnswer(q);
     await h.accept(q, a);
@@ -77,9 +77,9 @@ test('hidden ancestors revoke descendant rewards; restoration uses original valu
     assert.equal((await moderation(a, 'hide')).status, 200);
     await h.policy({ pointsQuestion: 99, pointsAnswer: 99, pointsAcceptance: 99, pointsComment: 99 });
     assert.equal((await moderation(q, 'restore')).status, 200);
-    assert.equal(await points(), 0); assert.equal(await points('student-a'), 10);
+    assert.equal(await points(), 0); assert.equal(await points('student-a'), 99);
     assert.equal((await moderation(a, 'restore')).status, 200);
-    assert.equal(await points(), 78);
+    assert.equal(await points(), 297);
     const before = await h.database.prepare('SELECT count(*) AS n FROM bonus_ledger').first('n');
     await moderation(a, 'restore');
     assert.equal(await h.database.prepare('SELECT count(*) AS n FROM bonus_ledger').first('n'), before);
@@ -103,15 +103,15 @@ test('material rewards use the uploader and composite version identity; physical
     assert.equal(await points(), 0);
     await h.policy({ pointsMaterial: 60, pointsMaterialVersion: 20 });
     await moderation('new-material', 'restore');
-    assert.equal(await points(), 50);
-    assert.equal((await h.api('DELETE', '/materials/new-material/versions/1', 'teacher-a')).status, 200);
-    assert.equal(await points(), 10);
+    assert.equal(await points(), 80);
+    assert.equal((await h.api('DELETE', '/materials/new-material/versions/1', 'student-a')).status, 200);
+    assert.equal(await points(), 20);
     const last = await h.database.prepare('SELECT delta_points,source_kind,operator_id,reason FROM bonus_ledger ORDER BY id DESC LIMIT 1').first();
-    assert.deepEqual(last, { delta_points: -40, source_kind: 'material', operator_id: 'teacher-a', reason: null });
+    assert.deepEqual(last, { delta_points: -60, source_kind: 'material', operator_id: 'student-a', reason: null });
     await version(3); await version(4);
-    assert.equal(await points(), 50);
+    assert.equal(await points(), 60);
     await h.policy({ pointsMaterial: 60, pointsMaterialVersion: 0 }); await version(5);
-    assert.equal(await points(), 50);
+    assert.equal(await points(), 60);
     await assert.rejects(h.database.prepare("UPDATE file_versions SET status='deleted' WHERE material_id='new-material'").run(), /no such column: status/);
     assert.deepEqual((await h.database.prepare('PRAGMA foreign_key_check').all()).results, []);
 });
@@ -170,11 +170,12 @@ test('optional ledger notes round-trip without an operation field; manual deduct
     assert.equal(columns.find(column => column.name === 'reason').notnull, 0);
 });
 
-test('rule changes do not create retroactive rewards for content originally worth zero', async () => {
+test('rule changes alone do not award points; restoring content recalculates formerly zero rewards', async () => {
     const q = await h.postQuestion(); await h.policy({ pointsQuestion: 100 });
-    await moderation(q, 'hide'); await moderation(q, 'restore');
     assert.equal(await points('student-a'), 0);
-    await h.postQuestion(); assert.equal(await points('student-a'), 100);
+    await moderation(q, 'hide'); await moderation(q, 'restore');
+    assert.equal(await points('student-a'), 100);
+    await h.postQuestion(); assert.equal(await points('student-a'), 200);
 });
 
 test('score failures roll back publication, acceptance and manual adjustments', async () => {

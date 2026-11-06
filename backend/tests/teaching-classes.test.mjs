@@ -24,7 +24,7 @@ async function apply(db, history) {
 }
 async function database(legacy = false) {
     const db = await runtime.getD1Database(`DB${nextDatabase++}`);
-    await apply(db, legacy ? migrations.slice(0, -1) : migrations);
+    await apply(db, legacy ? migrations.filter(migration => migration.name < '0004_') : migrations);
     return db;
 }
 async function batch(db, source) {
@@ -112,7 +112,7 @@ test('all six rewards use the student class, including acceptance by another tea
     await assert.rejects(db.prepare("INSERT INTO bonus_ledger(course_id,term_id,teacher_id,student_id,delta_points,source_kind,source_id,operator_id,request_hash) VALUES('COURSE','current','teacher-a','student-b',1,'manual','bad-class','teacher-a','hash')").run(), /invalid_bonus_class/);
 });
 
-test('reversals and restoration keep the original class and amount after rule, roster and term changes', async () => {
+test('reversals preserve original attribution; restoration recalculates in the content term after roster and rule changes', async () => {
     const db = await database(); await seed(db);
     await content(db, 'question', 'question', 'student-a');
     const first = await db.prepare('SELECT * FROM bonus_ledger').first();
@@ -124,7 +124,7 @@ test('reversals and restoration keep the original class and amount after rule, r
         UPDATE contents SET status='visible',updated_by='admin' WHERE id='question';`);
     const ledger = await rows(db, 'SELECT * FROM bonus_ledger ORDER BY id');
     assert.deepEqual(ledger.map(row => [row.teacher_id, row.term_id, row.delta_points, row.reverses_id]), [
-        ['teacher-a', 'current', 3, null], ['teacher-a', 'current', -3, first.id], ['teacher-a', 'current', 3, ledger[1].id],
+        ['teacher-a', 'current', 3, null], ['teacher-a', 'current', -3, first.id], ['teacher-b', 'current', 999, ledger[1].id],
     ]);
     await assert.rejects(db.prepare('DELETE FROM bonus_ledger').run(), /immutable_ledger/);
     await assert.rejects(db.prepare('UPDATE bonus_ledger SET delta_points=9').run(), /immutable_ledger/);
@@ -197,7 +197,7 @@ test('populated upgrade handles swapped course IDs and preserves versions, uploa
         UPDATE accounts SET status='deleted' WHERE id='teacher-a';`);
     const before = {};
     for (const table of ['accounts','courses','contents','file_versions','material_next_versions','material_upload_sessions','bonus_ledger']) before[table] = await rows(db, `SELECT * FROM ${table}`);
-    await apply(db, migrations.slice(-1));
+    await apply(db, migrations.filter(migration => migration.name === '0004_teaching_classes.sql'));
     for (const table of ['accounts','file_versions','material_next_versions']) assert.deepEqual(await rows(db, `SELECT * FROM ${table}`), before[table]);
     const remap = old => old === 'old-a' ? 'COURSE-A' : 'old-a';
     for (const table of ['contents','material_upload_sessions']) assert.deepEqual(await rows(db, `SELECT * FROM ${table}`), before[table].map(row => ({ ...row, course_id: remap(row.course_id) })));
@@ -224,7 +224,7 @@ test('unresolvable historical class attribution aborts before changing any old d
         const definitions = await rows(db, "SELECT type,name,sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name");
         const ledger = await rows(db, 'SELECT * FROM bonus_ledger');
         const memberships = await rows(db, 'SELECT * FROM enrollments');
-        await assert.rejects(apply(db, migrations.slice(-1)), variant === 'missing-rules' ? /academic_legacy_rules_required/ : /academic_unique_legacy_teacher/);
+        await assert.rejects(apply(db, migrations.filter(migration => migration.name === '0004_teaching_classes.sql')), variant === 'missing-rules' ? /academic_legacy_rules_required/ : /academic_unique_legacy_teacher/);
         assert.deepEqual(await rows(db, "SELECT type,name,sql FROM sqlite_schema WHERE name NOT LIKE 'sqlite_%' ORDER BY type,name"), definitions);
         assert.deepEqual(await rows(db, 'SELECT * FROM bonus_ledger'), ledger);
         assert.deepEqual(await rows(db, 'SELECT * FROM enrollments'), memberships);
@@ -241,7 +241,7 @@ test('a failure after data copying rolls back the entire migration, including re
         ledger: await rows(db, 'SELECT * FROM bonus_ledger ORDER BY id'),
     });
     const before = await snapshot();
-    const failing = { statements: [...migrations.at(-1).statements,
+    const failing = { statements: [...migrations.find(migration => migration.name === '0004_teaching_classes.sql').statements,
         "INSERT INTO teaching_classes VALUES('COURSE-A','current','student-a');"] };
     await assert.rejects(apply(db, [failing]), /invalid_class_teacher/);
     assert.deepEqual(await snapshot(), before);
