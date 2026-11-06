@@ -273,15 +273,15 @@ test('CSRF, forged identities, malformed and oversized requests are rejected', a
     assert.equal((await call('/api/auth/admin/login', { password: testPassword }, undefined, 'POST', 'https://evil.example')).status, 403);
     assert.equal((await call('/api/admin/accounts', { actorId: 'admin' })).status, 401);
     assert.equal((await call('/api/auth/admin/login', { password: '' })).status, 400);
-    assert.equal((await call('/api/auth/admin/login', { password: '密'.repeat(25) })).status, 400);
+    assert.equal((await call('/api/auth/admin/login', { password: '密'.repeat(65) })).status, 400);
     assert.equal((await call('/api/auth/admin/login', { password: 'x'.repeat(9000) })).status, 413);
     assert.equal((await call('/api/auth/admin/login', [], undefined)).status, 400);
     const malformed = await worker.fetch(new Request('https://local/api/auth/login', {
         method: 'POST', headers: { Origin: 'https://local', 'Content-Type': 'application/json' }, body: '{',
     }), { DB: binding, APP_ENV: 'local' });
     assert.equal(malformed.status, 400);
-    assert.throws(() => passwordField('密'.repeat(25)));
-    assert.equal(passwordField('密'.repeat(24)), '密'.repeat(24));
+    assert.throws(() => passwordField('密'.repeat(65)));
+    assert.equal(passwordField('密'.repeat(64)), '密'.repeat(64));
 });
 
 test('login attempts are limited atomically, including nonexistent members', async () => {

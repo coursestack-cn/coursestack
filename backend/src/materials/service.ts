@@ -1,6 +1,6 @@
 import { sql } from 'drizzle-orm';
 import { type Ctx } from '../discussions/types.ts';
-import { contentDto, publicDetail, visibleContent } from '../discussions/service.ts';
+import { contentDto, readableDetail, readableContent } from '../discussions/service.ts';
 import { createDatabase } from '../db/index.ts';
 import { editPermission, management } from '../permissions.ts';
 import { HttpError, listResult, queryPage, type page } from '../http.ts';
@@ -9,8 +9,8 @@ import { materialId, previewKind, urlId } from './validation.ts';
 export type VersionRow = {
     material_id: string; version: number; storage_key: string; size: number; mime: string; uploaded_by: string; created_at: number;
 };
-export function versionDto(row: VersionRow) {
-    const base = `/api/materials/${encodeURIComponent(urlId(row.material_id))}/versions/${row.version}`;
+export function versionDto(row: VersionRow, review = false) {
+    const base = `/api/${review ? 'moderation/' : ''}materials/${encodeURIComponent(urlId(row.material_id))}/versions/${row.version}`;
     return { version: row.version, size: row.size, mime: row.mime,
         uploadedBy: row.uploaded_by, createdAt: row.created_at,
         previewKind: previewKind(row.mime), previewUrl: previewKind(row.mime) ? `${base}/preview` : null,
@@ -22,7 +22,7 @@ export async function courseIdentity(c: Ctx, id: string) {
     return row.id;
 }
 export async function materialContent(c: Ctx, id: string) {
-    return visibleContent(c, materialId(id), 'material');
+    return readableContent(c, materialId(id), 'material');
 }
 export async function selectedVersion(c: Ctx, id: string, version?: number) {
     const row = await createDatabase(c.env.DB).get<VersionRow>(sql`SELECT * FROM file_versions
@@ -31,14 +31,14 @@ export async function selectedVersion(c: Ctx, id: string, version?: number) {
     if (!row && version !== undefined) throw new HttpError(404, 'FILE_VERSION_UNAVAILABLE', '文件版本不存在或不可用');
     return row ?? null;
 }
-export async function versionPage(c: Ctx, id: string, p: ReturnType<typeof page>) {
+export async function versionPage(c: Ctx, id: string, p: ReturnType<typeof page>, review = false) {
     const { rows, total } = await queryPage<VersionRow>(c, p, sql`SELECT * FROM file_versions WHERE material_id=${id} ORDER BY version DESC`);
-    return listResult(rows.map(versionDto), p, total);
+    return listResult(rows.map(row => versionDto(row, review)), p, total);
 }
 export async function materialDetail(c: Ctx, id: string, version?: number) {
     const content = await materialContent(c, id);
     const [detail, latest, selected, versions] = await Promise.all([
-        publicDetail(c, content.id), selectedVersion(c, content.id),
+        readableDetail(c, content.id), selectedVersion(c, content.id),
         version === undefined ? Promise.resolve(null) : selectedVersion(c, content.id, version),
         versionPage(c, content.id, { page: 1, pageSize: 50, offset: 0 }),
     ]);
@@ -48,7 +48,7 @@ export async function materialDetail(c: Ctx, id: string, version?: number) {
         ${management(a, sql`${content.course_id}`)} AS manage`) : null;
     return { ...detail, latestVersion: latest ? versionDto(latest) : null,
         selectedVersion: (selected ?? latest) ? versionDto((selected ?? latest)!) : null, versions,
-        permissions: { canEdit: !!permissions?.edit, canUploadVersion: !!permissions?.edit, canDeleteVersion: !!permissions?.edit, canManage: !!permissions?.manage,
+        permissions: { canEdit: !!permissions?.edit, canUploadVersion: !!permissions?.edit, canDeleteVersion: !!permissions?.edit && versions.total > 1, canManage: !!permissions?.manage,
             requiresLoginForFile: !a } };
 }
 export async function withMaterialVersions(c: Ctx, items: ReturnType<typeof contentDto>[]) {

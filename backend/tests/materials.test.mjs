@@ -92,6 +92,62 @@ test('questions and materials share tag filtering and database pagination withou
     assert.equal((await h.api('GET', '/courses/course-a/contents?tag=期末')).data.total, 1);
 });
 
+test('substring filters combine title, tags, kind, term and pagination while respecting visibility', async () => {
+    const title = '期末复习.pdf', material = await publish({ title, tags: ['讲义', '期末复习', '期末试卷'] });
+    const question = await h.postQuestion('student-b', { title: '期末复习.PDF', tags: ['问题', '期末试卷'] });
+    await h.postQuestion('student-b', { title: `${title}（补充）`, tags: ['练习'] });
+    await h.postQuestion('student-b', { title: '其他主题', tags: ['期末'] });
+    await h.postQuestion('student-b', { title, tags: ['期末'] }, 'course-b');
+    const list = params => h.api('GET', `/courses/course-a/contents?${new URLSearchParams(params)}`);
+    assert.equal((await list({ title })).data.total, 3);
+    const filters = { title: '  复习.pDf  ', tag: '  期末  ', termId: 'term-active', sort: 'newest', pageSize: '1' };
+    const first = await list(filters), second = await list({ ...filters, page: '2' });
+    assert.equal(first.status, 200); assert.equal(second.status, 200);
+    assert.equal(first.data.total, 2); assert.equal(second.data.total, 2);
+    assert.equal(first.data.items.length, 1); assert.equal(second.data.items.length, 1);
+    assert.deepEqual(new Set([...first.data.items, ...second.data.items].map(row => row.id)), new Set([material.materialId, question]));
+    const files = await list({ title, tag: '期末', kind: 'material' });
+    assert.equal(files.data.total, 1); assert.equal(files.data.items[0].latestVersion.version, 1);
+    const questions = await list({ title, tag: '期末', kind: 'question', state: 'unresolved', sort: 'score' });
+    assert.equal(questions.data.total, 1); assert.equal(questions.data.items[0].id, question);
+    for (const params of [{ title: '期末' }, { title: '期末复习.PDF' }]) assert.equal((await list(params)).data.total, 3);
+    assert.equal((await list({ title, tag: '期' })).data.total, 2);
+    for (const params of [{ title: '复习 期末' }, { title: '复习.pdfx' }, { title, tag: '期末 复习' }, { title, tag: '讲义期末' }, { title, termId: 'term-old' }]) {
+        assert.equal((await list(params)).data.total, 0, JSON.stringify(params));
+    }
+    assert.equal((await h.api('PUT', `/contents/${material.materialId}/moderation`, 'teacher-a', { action: 'hide', reason: '暂停公开' })).status, 200);
+    assert.equal((await list(filters)).data.total, 1);
+    assert.equal((await h.api('DELETE', `/contents/${question}`, 'student-b')).status, 200);
+    assert.equal((await list(filters)).data.total, 0);
+});
+
+test('content filters trim blanks, validate length and treat wildcard and SQL characters literally', async () => {
+    const title = "讲义 100%_O'Reilly.PDF", material = await publish({ title, tags: ['复习', 'SQL_100%', '其他'] });
+    await h.postQuestion('student-b', { title: '普通 SQL 讲义', tags: ['SQL', '100'] });
+    await h.postQuestion('student-b', { title: '零标签', tags: [] });
+    const list = params => h.api('GET', `/courses/course-a/contents?${new URLSearchParams(params)}`);
+    for (const value of [title, '%', '_', "o'reILLY", 'pdf', '100%_']) {
+        const result = await list({ title: value });
+        assert.equal(result.data.total, 1); assert.equal(result.data.items[0].id, material.materialId);
+    }
+    for (const value of ['%', '_', 'sQl_100', 'SQL_100%']) {
+        const result = await list({ tag: value });
+        assert.equal(result.data.total, 1); assert.equal(result.data.items[0].id, material.materialId);
+    }
+    assert.equal((await list({ tag: 'sQl' })).data.total, 2);
+    for (const value of ["' OR 1=1 --", '100X', '100_', '讲义 PDF']) assert.equal((await list({ title: value })).data.total, 0);
+    for (const value of ["' OR 1=1 --", 'SQL100', 'SQL 100', '%_']) assert.equal((await list({ tag: value })).data.total, 0);
+    const unfiltered = await h.api('GET', '/courses/course-a/contents');
+    for (const value of ['', ' \t　 ']) assert.deepEqual((await list({ title: value, tag: value })).data, unfiltered.data);
+    for (const [field, limit] of [['title', 200], ['tag', 30]]) {
+        for (const character of ['中', '😀']) {
+            assert.equal((await list({ [field]: character.repeat(limit) })).status, 200);
+            const invalid = await list({ [field]: character.repeat(limit + 1) });
+            assert.equal(invalid.status, 400); assert.equal(invalid.data.error.code, 'INVALID_FILTER');
+        }
+    }
+});
+
 test('upload permissions, single-file input and validation are enforced without duplicate detection', async () => {
     const data = { mode: 'create', courseId: 'course-a', title: 'test.pdf', body: doc('介绍'), file: { size: pdf.length, type: 'application/pdf' } };
     assert.equal((await h.api('POST', '/material-uploads', null, data)).status, 401);
@@ -104,10 +160,10 @@ test('upload permissions, single-file input and validation are enforced without 
     const first = await publish({}, 'visitor');
     const second = await publish({}, 'visitor');
     assert.notEqual(first.materialId, second.materialId); assert.equal('duplicate' in second.ticket, false);
-    for (const as of ['student-a', 'teacher-b']) {
+    for (const as of ['student-a', 'teacher-a', 'teacher-b', 'admin']) {
         assert.equal((await h.api('POST', '/material-uploads', as, { mode: 'version', materialId: first.materialId, file: data.file })).status, 403);
     }
-    assert.equal((await prepare({ mode: 'version', materialId: first.materialId }, 'teacher-a')).status, 'pending');
+    assert.equal((await prepare({ mode: 'version', materialId: first.materialId }, 'visitor')).status, 'pending');
     const ticket = await prepare();
     assert.equal((await put(ticket, pdf, 'student-b')).status, 404);
     assert.equal((await h.api('GET', `/material-uploads/${ticket.uploadId}`, 'student-b')).status, 404);
@@ -166,7 +222,10 @@ test('Range, HEAD and conditional responses retain authentication and current vi
     assert.equal((await fileRequest(path, 'student-a', { 'If-None-Match': head.headers.get('ETag') })).status, 304);
     assert.equal((await fileRequest(path, null, { 'If-None-Match': head.headers.get('ETag') }, 'HEAD')).status, 401);
     await h.api('PUT', `/contents/${item.materialId}/moderation`, 'teacher-a', { action: 'hide', reason: '暂停公开资料' });
-    for (const method of ['GET', 'HEAD']) assert.equal((await fileRequest(path, 'student-a', { Range: 'bytes=0-4', 'If-None-Match': head.headers.get('ETag') }, method)).status, 404);
+    for (const method of ['GET', 'HEAD']) {
+        assert.equal((await fileRequest(path, 'student-b', { Range: 'bytes=0-4', 'If-None-Match': head.headers.get('ETag') }, method)).status, 404);
+        assert.equal((await fileRequest(path, 'student-a', { 'If-None-Match': head.headers.get('ETag') }, method)).status, 304);
+    }
 });
 
 test('version deletion preserves the material and comments, falls back and reverses points only once', async () => {
@@ -179,10 +238,11 @@ test('version deletion preserves the material and comments, falls back and rever
     assert.equal((await h.api('GET', `/moderation/materials/${first.materialId}/version-actions`, 'teacher-a')).status, 404);
     assert.equal((await h.api('DELETE', path)).status, 401);
     for (const as of ['student-b', 'teacher-b']) assert.equal((await h.api('DELETE', path, as)).status, 403);
-    const deleted = await h.api('DELETE', path, 'teacher-a');
+    for (const as of ['teacher-a', 'admin']) assert.equal((await h.api('DELETE', path, as, { reason: '长'.repeat(1001) })).status, 400);
+    const deleted = await h.api('DELETE', path, 'student-a');
     assert.equal(deleted.status, 200);
     assert.deepEqual(deleted.data, { materialId: first.materialId, version: 2, deleted: true });
-    assert.equal((await h.api('DELETE', path, 'teacher-a')).status, 404);
+    assert.equal((await h.api('DELETE', path, 'student-a')).status, 404);
     assert.equal((await h.api('GET', path)).status, 404);
     assert.equal((await h.api('GET', `/materials/${first.materialId}?version=2`)).status, 404);
     for (const action of ['preview', 'download']) for (const method of ['GET', 'HEAD']) {
@@ -191,33 +251,34 @@ test('version deletion preserves the material and comments, falls back and rever
     assert.equal(await h.env.FILES.head(objectKeys(second.ticket.uploadId).sealed), null);
     const detail = await h.api('GET', `/materials/${first.materialId}`, 'student-a');
     assert.equal(detail.data.selectedVersion.version, 1); assert.equal(detail.data.versions.total, 1);
-    assert.equal(detail.data.permissions.canDeleteVersion, true); assert.equal(detail.data.commentCount, 1);
+    assert.equal(detail.data.permissions.canDeleteVersion, false); assert.equal(detail.data.commentCount, 1);
     assert.equal(await h.database.prepare("SELECT SUM(delta_points) AS n FROM bonus_ledger WHERE student_id='student-a'").first('n'), 40);
-    assert.equal(await h.database.prepare("SELECT operator_id FROM bonus_ledger ORDER BY id DESC LIMIT 1").first('operator_id'), 'teacher-a');
+    assert.equal(await h.database.prepare("SELECT operator_id FROM bonus_ledger ORDER BY id DESC LIMIT 1").first('operator_id'), 'student-a');
 
     await h.api('PUT', `/contents/${first.materialId}/moderation`, 'teacher-a', { action: 'hide', reason: '整体暂停公开' });
-    assert.equal((await fileRequest(`/materials/${first.materialId}/versions/1/download`)).status, 404);
+    assert.equal((await fileRequest(`/materials/${first.materialId}/versions/1/download`, 'student-b')).status, 404);
     assert.equal((await h.api('GET', `/moderation/materials/${first.materialId}/versions`, 'teacher-a')).data.total, 1);
     assert.equal(await h.database.prepare("SELECT SUM(delta_points) AS n FROM bonus_ledger WHERE student_id='student-a'").first('n'), 0);
     await h.api('PUT', `/contents/${first.materialId}/moderation`, 'teacher-a', { action: 'restore', reason: '整体恢复公开' });
     assert.equal(await h.database.prepare("SELECT SUM(delta_points) AS n FROM bonus_ledger WHERE student_id='student-a'").first('n'), 40);
-    assert.equal((await h.api('DELETE', `/materials/${first.materialId}/versions/1`, 'student-a')).status, 200);
+    assert.equal((await h.api('DELETE', `/materials/${first.materialId}/versions/1`, 'student-a')).status, 409);
     const empty = await h.api('GET', `/materials/${first.materialId}`);
-    assert.equal(empty.data.latestVersion, null); assert.equal(empty.data.selectedVersion, null); assert.equal(empty.data.versions.total, 0);
+    assert.equal(empty.data.latestVersion.version, 1); assert.equal(empty.data.selectedVersion.version, 1); assert.equal(empty.data.versions.total, 1);
     assert.deepEqual(empty.data.body, doc('资料介绍')); assert.equal(empty.data.commentCount, 1);
     assert.equal((await h.api('GET', `/contents/${comment.data.id}`)).status, 200);
-    assert.equal(await h.database.prepare("SELECT SUM(delta_points) AS n FROM bonus_ledger WHERE student_id='student-a'").first('n'), 0);
+    assert.equal(await h.database.prepare("SELECT SUM(delta_points) AS n FROM bonus_ledger WHERE student_id='student-a'").first('n'), 40);
     assert.deepEqual((await h.api('POST', `/material-uploads/${second.ticket.uploadId}/confirm`, 'student-a')).data,
         { materialId: first.materialId, version: 2 });
-    assert.equal((await h.api('GET', `/materials/${first.materialId}/versions`)).data.total, 0);
+    assert.equal((await h.api('GET', `/materials/${first.materialId}/versions`)).data.total, 1);
     assert.equal(await h.env.FILES.head(objectKeys(second.ticket.uploadId).sealed), null);
     const next = await publish({ mode: 'version', materialId: first.materialId });
     assert.equal(next.version, 3);
     await h.api('PUT', `/contents/${first.materialId}/moderation`, 'teacher-a', { action: 'hide', reason: '整体暂停公开' });
-    assert.equal((await h.api('DELETE', `/materials/${first.materialId}/versions/3`, 'admin')).status, 200);
+    assert.equal((await h.api('DELETE', `/materials/${first.materialId}/versions/3`, 'student-a')).status, 200);
     await h.api('PUT', `/contents/${first.materialId}/moderation`, 'teacher-a', { action: 'restore', reason: '整体恢复公开' });
     const final = await publish({ mode: 'version', materialId: first.materialId });
-    await h.api('DELETE', `/contents/${first.materialId}`, 'student-a');
+    assert.equal((await h.api('DELETE', `/contents/${first.materialId}`, 'student-a')).status, 409);
+    assert.equal((await h.api('PUT', `/contents/${first.materialId}/moderation`, 'teacher-a', { action: 'delete', reason: '删除资料和评论' })).status, 200);
     assert.equal((await h.api('DELETE', `/materials/${first.materialId}/versions/${final.version}`, 'student-a')).status, 409);
 });
 
@@ -243,14 +304,15 @@ test('creation drafts are temporary and version uploads accept no change notes',
 test('a failed version deletion rolls back its points and never removes the live file', async () => {
     await h.policy({ pointsMaterial: 40 });
     const item = await publish(), path = `/materials/${item.materialId}/versions/1`;
+    await publish({ mode: 'version', materialId: item.materialId });
     await h.database.prepare("CREATE TRIGGER fail_delete_points BEFORE INSERT ON bonus_ledger BEGIN SELECT RAISE(ABORT,'fixture_failure'); END").run();
-    assert.equal((await h.api('DELETE', path, 'teacher-a')).status, 500);
+    assert.equal((await h.api('DELETE', path, 'student-a')).status, 500);
     assert.equal((await h.api('GET', path)).status, 200);
     assert.ok(await h.env.FILES.head(objectKeys(item.ticket.uploadId).sealed));
     assert.equal(await h.database.prepare('SELECT updated_by FROM file_versions WHERE material_id=?').bind(item.materialId).first('updated_by'), 'student-a');
     assert.equal(await h.database.prepare("SELECT SUM(delta_points) AS n FROM bonus_ledger WHERE student_id='student-a'").first('n'), 40);
     await h.database.prepare('DROP TRIGGER fail_delete_points').run();
-    assert.equal((await h.api('DELETE', path, 'teacher-a')).status, 200);
+    assert.equal((await h.api('DELETE', path, 'student-a')).status, 200);
 });
 
 test('deleted version files are eventually cleaned after an R2 failure or a lost database response', async () => {
@@ -280,6 +342,7 @@ test('deleted version files are eventually cleaned after an R2 failure or a lost
 
 test('version deletion rechecks the actor in the final database transaction', async () => {
     const item = await publish(), database = h.env.DB;
+    await publish({ mode: 'version', materialId: item.materialId });
     h.env.DB = new Proxy(database, { get(target, key) {
         if (key === 'batch') return async (...args) => {
             await target.prepare("UPDATE accounts SET status='deleted' WHERE id='student-a'").run();
@@ -322,22 +385,22 @@ test('a lost database response is recoverable without deleting or republishing t
     assert.equal(await h.database.prepare('SELECT COUNT(*) AS n FROM file_versions WHERE material_id=?').bind(recovered.data.materialId).first('n'), 1);
 });
 
-test('visibility changes during file sealing block publication in the final transaction', async () => {
+test('deletion during file sealing blocks publication in the final transaction', async () => {
     const originalFile = await publish(), ticket = await prepare({ mode: 'version', materialId: originalFile.materialId });
     await put(ticket);
     const bucket = h.env.FILES;
     h.env.FILES = new Proxy(bucket, { get(target, key) {
         if (key === 'put') return async (...args) => {
-            await h.database.prepare("UPDATE contents SET status='hidden',updated_by='teacher-a' WHERE id=?").bind(originalFile.materialId).run();
+            await h.database.prepare("UPDATE contents SET status='deleted',title=NULL,body=NULL,tags=NULL,updated_by='student-a' WHERE id=?").bind(originalFile.materialId).run();
             return target.put(...args);
         };
         const value = Reflect.get(target, key); return typeof value === 'function' ? value.bind(target) : value;
     } });
     assert.equal((await h.api('POST', `/material-uploads/${ticket.uploadId}/confirm`, 'student-a')).status, 409);
     h.env.FILES = bucket;
-    assert.equal(await h.database.prepare('SELECT COUNT(*) AS n FROM file_versions WHERE material_id=?').bind(originalFile.materialId).first('n'), 1);
-    await h.api('PUT', `/contents/${originalFile.materialId}/moderation`, 'teacher-a', { action: 'restore', reason: '恢复资料公开' });
-    assert.equal((await h.api('POST', `/material-uploads/${ticket.uploadId}/confirm`, 'student-a')).status, 200);
+    assert.equal(await h.database.prepare('SELECT COUNT(*) AS n FROM file_versions WHERE material_id=?').bind(originalFile.materialId).first('n'), 0);
+    assert.equal((await h.api('PUT', `/contents/${originalFile.materialId}/moderation`, 'teacher-a', { action: 'restore', reason: '恢复资料公开' })).status, 409);
+    assert.equal((await h.api('POST', `/material-uploads/${ticket.uploadId}/confirm`, 'student-a')).status, 404);
 });
 
 test('cancelled and expired uploads are cleaned while published files remain and late PUT remnants are revisited', async () => {
@@ -440,4 +503,23 @@ test('course URLs preserve Unicode, separators and UUID-like course numbers exac
             assert.equal(list.status, 200); assert.equal(list.data.total, 0);
         }
     }
+});
+
+test('owners can upload versions while hidden, while managers only review and restoration recomputes every live version', async () => {
+    await h.policy({ pointsMaterial: 40, pointsMaterialVersion: 10 });
+    const first = await publish();
+    await h.api('PUT', `/contents/${first.materialId}/moderation`, 'teacher-a', { action: 'hide', reason: '等待作者更新文件' });
+    const second = await publish({ mode: 'version', materialId: first.materialId });
+    assert.equal(second.version, 2);
+    const own = await h.api('GET', `/materials/${first.materialId}`, 'student-a');
+    assert.equal(own.data.status, 'hidden'); assert.equal(own.data.selectedVersion.version, 2);
+    assert.equal((await h.api('GET', `/materials/${first.materialId}`, 'teacher-a')).status, 404);
+    assert.equal(await h.database.prepare("SELECT SUM(delta_points) AS n FROM bonus_ledger WHERE student_id='student-a'").first('n'), 0);
+    const versions = await h.api('GET', `/moderation/materials/${first.materialId}/versions`, 'teacher-a');
+    const reviewPath = versions.data.items[0].previewUrl.replace('/api', '');
+    assert.equal((await fileRequest(reviewPath, 'teacher-a')).status, 200);
+    assert.equal((await fileRequest(reviewPath, 'student-b')).status, 403);
+    await h.policy({ pointsMaterial: 60, pointsMaterialVersion: 20 });
+    assert.equal((await h.api('PUT', `/contents/${first.materialId}/moderation`, 'teacher-a', { action: 'restore', reason: '新版复核通过' })).status, 200);
+    assert.equal(await h.database.prepare("SELECT SUM(delta_points) AS n FROM bonus_ledger WHERE student_id='student-a'").first('n'), 80);
 });

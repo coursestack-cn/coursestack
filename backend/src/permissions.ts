@@ -33,8 +33,8 @@ export function classManagement(a: Actor, course: SQL, term: SQL, teacher: SQL):
         SELECT 1 FROM teaching_classes assignment JOIN terms semester ON semester.id=assignment.term_id AND semester.current=1
         WHERE assignment.course_id=${course} AND assignment.term_id=${term} AND assignment.teacher_id=${a.id}))))`;
 }
-export function editPermission(a: Actor, course: SQL, author: SQL): SQL {
-    return sql`((${author}=${a.id} AND ${activeUser(a)}) OR ${management(a, course)})`;
+export function editPermission(a: Actor, _course: SQL, author: SQL): SQL {
+    return sql`(${author}=${a.id} AND ${activeUser(a)})`;
 }
 export async function requireManagement(c: Ctx, courseId: string) {
     const a = actor(c);

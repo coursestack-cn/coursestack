@@ -26,7 +26,7 @@ const pagination = [q('page', { type: 'integer', minimum: 1, maximum: 10000, def
     q('pageSize', { type: 'integer', minimum: 1, maximum: 50, default: 20 })];
 const paged = (item: Schema): Schema => object({ items: { type: 'array', items: item }, page: positiveInteger, pageSize: positiveInteger, total: { type: 'integer', minimum: 0 } });
 export type Definition = { method: string; path: string; summary: string; auth?: 'optional' | 'session' | 'internal';
-    request?: Schema; create?: boolean; parameters?: unknown[]; response?: Schema; binary?: boolean };
+    request?: Schema; requestRequired?: boolean; create?: boolean; parameters?: unknown[]; response?: Schema; binary?: boolean };
 const defs: Definition[] = [
     ...materialDefinitions,
     { method: 'get', path: '/me/courses', summary: '本人修读或授课的课程，区分当前学期与历史学期，同一课程去重', auth: 'session',

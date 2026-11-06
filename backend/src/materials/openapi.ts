@@ -36,8 +36,8 @@ export const materialSchemas = {
         if: { properties: { kind: { const: 'material' } } }, then: { required: ['latestVersion'] } }] }),
 };
 export const materialDefinitions: Definition[] = [
-    { method: 'get', path: '/courses/{id}/contents', summary: '资料与问题统一分页、标签筛选；state 和 score 排序仅限 kind=question', response: ref('CourseContentPage'),
-        parameters: [...pagination, query('kind', enumeration('all', 'question', 'material')), query('tag', str(30)), query('state', enumeration('all', 'unresolved', 'solved')), query('sort', enumeration('active', 'newest', 'score'))] },
+    { method: 'get', path: '/courses/{id}/contents', summary: '资料与问题统一分页、标题与标签关键词及发布学期筛选；state 和 score 排序仅限 kind=question', response: ref('CourseContentPage'),
+        parameters: [...pagination, query('termId', { ...id, pattern: '^[a-zA-Z0-9_-]+$' }), query('kind', enumeration('all', 'question', 'material')), query('title', { type: 'string', maxLength: 200, description: '去首尾空白后匹配标题中的连续子串，ASCII 英文字母忽略大小写，% 和 _ 按普通字符匹配；空值不筛选，与标签等条件取交集' }), query('tag', { type: 'string', maxLength: 30, description: '去首尾空白后匹配任意一个标签中的连续子串，ASCII 英文字母忽略大小写，% 和 _ 按普通字符匹配；空值不筛选，与标题等条件取交集' }), query('state', enumeration('all', 'unresolved', 'solved')), query('sort', enumeration('active', 'newest', 'score'))] },
     { method: 'get', path: '/materials/policy', summary: '单文件上传限制和登录要求', response: object({ maxBytes: positive, mimeTypes: { type: 'array', items: enumeration(...materialMimes) },
         filesPerVersion: { const: 1 }, fileAccessRequiresLogin: { const: true }, uploadUrlLifetimeSeconds: { const: 600 }, uploadLifetimeSeconds: { const: 86400 } }) },
     { method: 'get', path: '/materials/{id}', summary: '资料介绍、默认或指定版本、前50个现存版本；游客仅能读取元数据', parameters: [query('version', positive)], response: ref('MaterialDetail') },
@@ -55,7 +55,10 @@ export const materialDefinitions: Definition[] = [
     { method: 'get', path: '/material-uploads/{id}', summary: '上传者查询处理状态与发布结果', auth: 'session', response: ref('MaterialUploadStatus') },
     { method: 'delete', path: '/material-uploads/{id}', summary: '取消未发布上传；正在确认时返回409，已发布后不能通过上传接口删除资料', auth: 'session', response: ref('MaterialUploadStatus') },
     { method: 'post', path: '/material-uploads/{id}/confirm', summary: '核验、封存并发布文件；相同上传重复确认返回同一个版本，不重复计分', auth: 'session', response: ref('MaterialUploadResult') },
+    ...['preview', 'download'].flatMap(action => ['get', 'head'].map(method => ({ method, path: `/moderation/materials/{id}/versions/{version}/${action}`,
+        summary: '仅当前课程教师或管理员审查文件，包括下架资料；权限先于 Range 和条件响应检查', auth: 'session' as const, binary: true }))),
     { method: 'get', path: '/moderation/materials/{id}/versions', summary: '当前课程教师或管理员查询资料的现存版本，包括整体下架的资料', auth: 'session', parameters: pagination, response: ref('MaterialVersionPage') },
-    { method: 'delete', path: '/materials/{id}/versions/{version}', summary: '资料作者、当前课程教师或管理员删除版本；撤回该版本积分，版本号不复用', auth: 'session',
+    { method: 'delete', path: '/materials/{id}/versions/{version}', summary: '所有者或管理者删除版本；管理者删除他人版本可选填reason。最后一个版本一律返回409，应改为删除整份资料；撤回对应奖励且版本号不复用', auth: 'session',
+        requestRequired: false, request: object({ reason: { type: 'string', maxLength: 1000 } }, []),
         response: object({ materialId: id, version: positive, deleted: { const: true } }) },
 ];

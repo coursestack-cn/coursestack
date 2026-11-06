@@ -1,8 +1,10 @@
+import { rawContent } from '../discussions/service.ts';
+import { requireManagement } from '../permissions.ts';
 import { actor } from '../auth/middleware.ts';
 import { type Ctx } from '../discussions/types.ts';
 import { HttpError } from '../http.ts';
 import { materialContent, selectedVersion } from './service.ts';
-import { previewKind, versionNumber } from './validation.ts';
+import { materialId, previewKind, versionNumber } from './validation.ts';
 
 function byteRange(value: string, size: number) {
     const match = /^bytes=(\d*)-(\d*)$/.exec(value);
@@ -20,9 +22,11 @@ function disposition(name: string, inline: boolean) {
     const utf8 = encodeURIComponent(safe).replace(/['()*]/g, value => `%${value.charCodeAt(0).toString(16).toUpperCase()}`);
     return `${inline ? 'inline' : 'attachment'}; filename="${ascii}"; filename*=UTF-8''${utf8}`;
 }
-export async function serveMaterialFile(c: Ctx, inline: boolean) {
+export async function serveMaterialFile(c: Ctx, inline: boolean, review = false) {
     actor(c);
-    const material = await materialContent(c, c.req.param('id')!);
+    const material = review ? await rawContent(c, materialId(c.req.param('id')!), 'material') : await materialContent(c, c.req.param('id')!);
+    if (review) await requireManagement(c, material.course_id);
+    if (material.status === 'deleted') throw new HttpError(404, 'CONTENT_UNAVAILABLE', '内容已删除');
     const version = await selectedVersion(c, material.id, versionNumber(c.req.param('version')));
     if (!version) throw new HttpError(404, 'FILE_VERSION_UNAVAILABLE', '文件版本不可用');
     if (inline && !previewKind(version.mime)) throw new HttpError(415, 'FILE_PREVIEW_UNSUPPORTED', '此文件不支持在线预览，请下载查看');

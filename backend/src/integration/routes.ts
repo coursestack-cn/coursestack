@@ -1,11 +1,12 @@
 import { Hono } from 'hono';
 import { sql } from 'drizzle-orm';
+import { activeUser } from '../permissions.ts';
 import { internalAuth } from '../auth/middleware.ts';
 import { HttpError, respond, listResult, page, parsedEnum, queryPage } from '../http.ts';
 import { actor } from '../auth/middleware.ts';
 import type { AppEnv, PublicRow } from '../discussions/types.ts';
 import { parseBody } from '../discussions/body.ts';
-import { contentDto, publicDetail, publicSelect } from '../discussions/service.ts';
+import { contentDto, ownedSelect, publicDetail, publicSelect, rawContent, requireEditor } from '../discussions/service.ts';
 import { createDatabase } from '../db/index.ts';
 import { withMaterialVersions } from '../materials/service.ts';
 
@@ -14,10 +15,20 @@ personalRoutes.get('/me/activity', async c => {
     const a = actor(c), p = page(c);
     const kind = parsedEnum(c.req.query('kind'), ['material', 'question', 'answer', 'comment'] as const);
     const courseId = c.req.query('courseId');
-    const { rows, total } = await queryPage<PublicRow>(c, p, sql`${publicSelect(c)} WHERE c.author_id=${a.id}
+    const { rows, total } = await queryPage<PublicRow>(c, p, sql`${ownedSelect(c)} WHERE c.author_id=${a.id}
         ${kind ? sql`AND c.kind=${kind}` : sql``} ${courseId ? sql`AND c.course_id=${courseId}` : sql``}
         ORDER BY c.created_at DESC,c.id ASC`);
     return respond(c, listResult(await withMaterialVersions(c, rows.map(contentDto)), p, total));
+});
+
+personalRoutes.get('/me/contents/:id', async c => {
+    const content = await rawContent(c, c.req.param('id'));
+    await requireEditor(c, content);
+    const row = await createDatabase(c.env.DB).get<PublicRow>(sql`${publicSelect(c, false, sql`contents`)} WHERE c.id=${content.id} AND c.author_id=${actor(c).id} AND ${activeUser(actor(c))}`);
+    if (!row) throw new HttpError(404, 'CONTENT_UNAVAILABLE', '内容不存在或不可用');
+    const actions = await createDatabase(c.env.DB).all(sql`SELECT id,version,old_status AS oldStatus,new_status AS newStatus,reason,created_at AS createdAt
+        FROM moderation_actions WHERE content_id=${row.id} ORDER BY id DESC`);
+    return respond(c, { ...contentDto(row), actions });
 });
 
 export const internalRoutes = new Hono<AppEnv>();

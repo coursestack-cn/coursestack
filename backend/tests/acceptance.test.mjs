@@ -39,7 +39,8 @@ test('教师和未正式修读者的回答可以采纳，但不加分', async ()
 });
 test('删除被采纳答案自动取消采纳并冲销加分，回答不再公开', async () => {
     await h.policy(); const q = await h.postQuestion(), a = await h.postAnswer(q); await h.accept(q, a);
-    const deleted = await h.api('DELETE', `/contents/${a}`, 'student-b', { });
+    assert.equal((await h.api('DELETE', `/contents/${a}`, 'student-b', { })).status, 409);
+    const deleted = await h.api('PUT', `/contents/${a}/moderation`, 'teacher-a', { action: 'delete' });
     assert.equal(deleted.status, 200); assert.equal((await h.api('GET', `/questions/${q}`)).data.solved, false);
     assert.equal((await balance()).total, 0);
     assert.equal((await h.api('GET', `/contents/${a}`)).status, 404);

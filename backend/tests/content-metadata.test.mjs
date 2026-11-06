@@ -33,7 +33,7 @@ async function restore(id) {
     assert.equal(response.status, 200, JSON.stringify(response.data));
 }
 async function remove(id) {
-    const response = await h.api('DELETE', `/contents/${id}`, 'admin', { });
+    const response = await h.api('PUT', `/contents/${id}/moderation`, 'teacher-a', { action: 'delete', reason: '验证管理删除元数据' });
     assert.equal(response.status, 200, JSON.stringify(response.data));
 }
 
@@ -113,13 +113,13 @@ test('all public content readers expose unedited timestamps, reply summaries and
     assert.equal(column.type, 'INTEGER'); assert.equal(column.notnull, 0); assert.equal(column.dflt_value, null);
 });
 
-test('authors and managers set Unix-second editedAt only for real title, body or tag changes on every content kind', async () => {
+test('owners set Unix-second editedAt only for real title, body or tag changes on every content kind', async () => {
     const q = await h.postQuestion(), a = await h.postAnswer(q), c = await comment(a);
     for (const [id, author] of [[q, 'student-a'], ['material-a', 'student-a'], [a, 'student-b'], [c, 'student-b']]) {
         const titled = ['question', 'material'].includes((await detail(id)).kind);
         const changes = titled ? [{ title: '修改标题' }, { body: doc('修改正文') }, { tags: ['修改标签'] }]
-            : ['作者修改', '教师修改', '管理员修改'].map(text => ({ body: doc(text) }));
-        for (const [index, as] of [author, 'teacher-a', 'admin'].entries()) {
+            : ['首次修改', '第二次修改', '第三次修改'].map(text => ({ body: doc(text) }));
+        for (const [index, as] of [author, author, author].entries()) {
             await h.database.prepare('UPDATE contents SET edited_at=1 WHERE id=?').bind(id).run();
             const before = Math.floor(Date.now() / 1000), row = await edit(id, as, changes[index]);
             assert.equal(Number.isInteger(row.editedAt), true);
@@ -149,9 +149,9 @@ test('equal normalized values and reordered JSON object keys preserve both null 
     assert.equal(unchanged.editedAt, null);
     assert.equal(await h.database.prepare('SELECT body FROM contents WHERE id=?').bind(q).first('body'), storedBody);
     await h.database.prepare('UPDATE contents SET edited_at=1 WHERE id=?').bind(q).run();
-    assert.equal((await edit(q, 'teacher-a', { body: reordered })).editedAt, 1);
+    assert.equal((await edit(q, 'student-a', { body: reordered })).editedAt, 1);
     assert.equal((await edit(q, 'student-a', {})).editedAt, 1);
-    assert.equal((await edit(q, 'admin', { tags: ['标签'] })).editedAt, 1);
+    assert.equal((await edit(q, 'student-a', { tags: ['标签'] })).editedAt, 1);
     const emptyTags = await h.postQuestion();
     assert.equal((await edit(emptyTags, 'student-a', { tags: [] })).editedAt, null);
     assert.equal((await edit(emptyTags, 'student-a', { tags: null })).editedAt, null);
@@ -239,9 +239,9 @@ test('replyTo distinguishes deleted content from deleted authors and reads curre
     const owned = await h.postQuestion('visitor'), reply = await comment(owned);
     await h.database.prepare("UPDATE accounts SET status='deleted' WHERE id='visitor'").run();
     assert.deepEqual((await detail(reply)).replyTo, { id: owned, author: { nickname: '已删除', isDeleted: true }, isDeleted: false });
-    // Remove the answer before its question; a deleted question already closes the answer's branch.
+    // A deleted owner's content remains manageable, but managers may only hide it.
     for (const parent of [a, 'material-a', q]) {
-        await remove(parent);
+        await hide(parent);
         assert.equal((await h.api('GET', `/contents/${pairs.find(([id]) => id === parent)[1]}`)).status, 404);
     }
 });
@@ -260,17 +260,18 @@ test('counts follow visible comments while list totals add placeholders that sti
         assert.equal(list.status, 200); assert.equal(row.commentCount, count, id); assert.equal(list.data.total, total, id);
         assert.equal(list.data.items.length, Math.min(total, 1));
     };
-    await checkComments(q, 4, 5); await checkComments(visible, 1); await checkComments(child, 0);
-    await checkComments(deleted, 2); await checkComments(survivor, 1); await checkComments(grandchild, 0);
+    await checkComments(q, 5, 6); await checkComments(visible, 1); await checkComments(child, 0);
+    await checkComments(deleted, 1); await checkComments(survivor, 1); await checkComments(grandchild, 0);
     await checkComments(a, 2); await checkComments(answerComment, 1); await checkComments(answerReply, 0);
     await checkComments('material-a', 2); await checkComments(materialComment, 1); await checkComments(materialReply, 0);
     const answers = await h.api('GET', `/questions/${q}/answers?pageSize=1`);
     assert.equal((await detail(q)).answerCount, 1); assert.equal(answers.data.total, 1);
     const listedQuestion = (await h.api('GET', '/courses/course-a/questions')).data.items.find(row => row.id === q);
-    assert.equal(listedQuestion.answerCount, 1); assert.equal(listedQuestion.commentCount, 4);
-    for (const id of [hiddenAnswer, hiddenAnswerComment, hidden, hiddenChild, deletedAnswer, deletedAnswerComment]) {
+    assert.equal(listedQuestion.answerCount, 1); assert.equal(listedQuestion.commentCount, 5);
+    for (const id of [hiddenAnswer, hiddenAnswerComment, hidden, deletedAnswer, deletedAnswerComment]) {
         assert.equal((await h.api('GET', `/contents/${id}`)).status, 404);
     }
+    assert.equal((await h.api('GET', `/contents/${hiddenChild}`)).status, 200);
     await restore(hidden); await checkComments(q, 6, 7);
     await remove(hidden); await checkComments(q, 5, 7);
     await remove(child); await checkComments(visible, 0); await checkComments(q, 4, 6);

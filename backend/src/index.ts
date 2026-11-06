@@ -77,7 +77,9 @@ app.onError((error, c) => {
         causes.push(cause.message);
     }
     const detail = causes.join(' ');
-    if (/invalid_(content_target|acceptance|enrollment_identity)/.test(detail)) {
+    if (/material_last_version/.test(detail)) return failure(409, 'MATERIAL_LAST_VERSION', '资料至少保留一个版本；如需移除最后一个版本，请删除整份资料');
+    if (/deleted_content/.test(detail)) return failure(409, 'DELETED_CONTENT', '已删除内容不能恢复');
+    if (/invalid_(content_target|comment_reply|acceptance|enrollment_identity)/.test(detail)) {
         return failure(409, 'INVALID_TARGET', '关联对象不可用、跨课程或状态已改变');
     }
     if (/invalid_(class_teacher|class_student|bonus_class)|course_admin_required|current_term_required|course_identity_immutable|course_term_identity_immutable|teaching_class_identity_immutable|class_student_identity_immutable/.test(detail)) return failure(409, 'COURSE_MEMBERSHIP_CONFLICT', '课程、学期或教学班关系已变化');
