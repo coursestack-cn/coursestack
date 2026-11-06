@@ -75,6 +75,7 @@
             {#snippet actions()}<Button onclick={() => window.location.reload()}>重新加载</Button>{/snippet}
         </StateBlock>
     {:else if Page}
+        <!-- A draft written as one account must not be submitted as the next one. -->
         {#key `${router.pathname}|${session.accountSwitches}`}<Page params={router.params} />{/key}
     {/if}
 {/snippet}
@@ -82,7 +83,9 @@
 {#if courseCode}
     {#key courseCode}<CourseLayout {courseCode}>{@render content()}</CourseLayout>{/key}
 {:else if waitingSession || redirecting || pending || loadError}
-    <PageLayout title={route.title}>{@render content()}</PageLayout>
+    {@const placeholder = Boolean(route.dynamicHeading && !loadError)}
+    <!-- The breadcrumb entry only reserves the row; PageLayout renders placeholders while loading. -->
+    <PageLayout title={route.title} loading={placeholder} breadcrumbs={placeholder ? [{ label: route.title }] : []}>{@render content()}</PageLayout>
 {:else}
     {@render content()}
 {/if}

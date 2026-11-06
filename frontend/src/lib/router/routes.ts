@@ -3,6 +3,7 @@ import type { Route } from "$lib/router/types";
 export const routes: readonly Route[] = [
     { path: "/", title: "首页", requiresAuth: false, load: () => import("../../pages/courses/HomePage.svelte") },
     { path: "/courses", title: "全部课程", requiresAuth: false, load: () => import("../../pages/courses/CourseListPage.svelte") },
+    { path: "/teachers/:teacherId", title: "教师主页", dynamicHeading: true, requiresAuth: false, load: () => import("../../pages/teachers/TeacherPage.svelte") },
     { path: "/courses/:courseCode", title: "课程主页", layout: "course", requiresAuth: false, load: () => import("../../pages/courses/CoursePage.svelte") },
     { path: "/courses/:courseCode/materials", title: "课程资料", layout: "course", requiresAuth: false, load: () => import("../../pages/materials/MaterialListPage.svelte") },
     { path: "/courses/:courseCode/questions", title: "课程问答", layout: "course", requiresAuth: false, load: () => import("../../pages/questions/QuestionListPage.svelte") },
