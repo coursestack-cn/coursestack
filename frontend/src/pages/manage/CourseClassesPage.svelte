@@ -4,7 +4,7 @@
     import ConfirmDialog from "$lib/components/ui/ConfirmDialog.svelte";
     import { toast } from "$lib/components/ui/toast.svelte.js";
     import { resource } from "$lib/api/resource.svelte.js";
-    import { router, setTitle, updateQuery } from "$lib/router/router.svelte.js";
+    import { redirect, router, setTitle, updateQuery } from "$lib/router/router.svelte.js";
     import type { PageProps } from "$lib/router/types";
     import { session } from "$lib/session.svelte.js";
     import PageLayout from "$lib/components/shell/PageLayout.svelte";
@@ -15,12 +15,12 @@
     import Pagination from "$lib/components/ui/Pagination.svelte";
     import StateBlock from "$lib/components/ui/StateBlock.svelte";
     import ManageNav from "./ManageNav.svelte";
-    import { classUrl, classStudentsHref, pageCount, pageNumber, teacherLabel, type Course, type Page, type TeachingClass, type Term } from "./course";
+    import { classUrl, classStudentsHref, courseManageHref, pageCount, pageNumber, teacherLabel, type Course, type Page, type TeachingClass, type Term } from "./course";
 
     let { params }: PageProps = $props();
     const isAdmin = $derived(session.hasRole("admin"));
     const canManage = $derived(isAdmin || session.hasRole("teacher"));
-    const termId = $derived(isAdmin ? router.query.get("termId") ?? "" : "");
+    const termId = $derived(router.query.get("termId") ?? "");
     const page = $derived(pageNumber(router.query.get("page")));
     const entry = resource(async signal => {
         const viewer = session.user?.id, code = encodeURIComponent(params.courseCode);
@@ -33,6 +33,8 @@
     });
     const course = $derived(entry.data?.viewer === session.user?.id ? entry.data?.course : undefined);
     const terms = $derived(entry.data?.viewer === session.user?.id ? entry.data?.terms ?? [] : []);
+    // Course, term and teacher identify a class, so a teacher has at most one here and opens it directly; the list is for administrators.
+    const teaching = $derived(!isAdmin && course?.currentTerm != null && course.currentTeachers.some(teacher => teacher.id === session.user?.id));
     const options = $derived([
         { value: "", label: "全部学期" },
         ...terms.map(term => ({ value: term.id, label: `${term.name}${term.current ? "（当前学期）" : ""}` })),
@@ -40,7 +42,7 @@
     ]);
     const classes = resource(async signal => {
         const viewer = session.user?.id, selectedTerm = termId, currentPage = page, courseId = params.courseCode;
-        if (!canManage || !course) return null;
+        if (!isAdmin || !course) return null;
         const query = new URLSearchParams({ courseId, page: String(currentPage), pageSize: "20" });
         if (selectedTerm) query.set("termId", selectedTerm);
         const data = await api.get<Page<TeachingClass>>(`/api/teaching-classes?${query}`, { signal });
@@ -62,9 +64,7 @@
     }
 
     $effect(() => { if (course) setTitle(`${course.name} · 教学班列表`); });
-    $effect(() => {
-        if (canManage && !isAdmin && router.query.has("termId")) void updateQuery({ termId: null, page: null }, { replace: true });
-    });
+    $effect(() => { if (teaching && course) redirect(courseManageHref(course, session.user)); });
     $effect(() => {
         const data = classes.data;
         if (!data || classes.refreshing || data.viewer !== session.user?.id || data.termId !== termId || data.page !== page) return;
@@ -78,19 +78,21 @@
     {#snippet actions()}<Button href={`/courses/${encodeURIComponent(params.courseCode)}`}>课程主页</Button>{/snippet}
     {#if !canManage}
         <StateBlock kind="forbidden" description="需要教师或管理员身份才能管理教学班。" />
+    {:else if !isAdmin}
+        <ResourceState status={entry.status} error={entry.error} refreshing={entry.refreshing} reload={entry.reload}>
+            {#if course && !teaching}<StateBlock kind="empty" title={course.currentTerm ? "你本学期没有任教这门课程" : "尚未设置当前学期"} />{/if}
+        </ResourceState>
     {:else}
         <ManageNav />
         <ResourceState status={entry.status} error={entry.error} refreshing={entry.refreshing} reload={entry.reload}>
             {#if course}
-                {#if isAdmin}
-                    <div class="filter">
-                        <Field label="学期">
-                            {#snippet children({ id })}
-                                <Select {id} {options} value={termId} onchange={event => { void updateQuery({ termId: event.currentTarget.value || null, page: null }); }} />
-                            {/snippet}
-                        </Field>
-                    </div>
-                {:else}<p class="hint">这里只显示你在当前学期任教的教学班。</p>{/if}
+                <div class="filter">
+                    <Field label="学期">
+                        {#snippet children({ id })}
+                            <Select {id} {options} value={termId} onchange={event => { void updateQuery({ termId: event.currentTarget.value || null, page: null }); }} />
+                        {/snippet}
+                    </Field>
+                </div>
                 <ResourceState status={classes.status} error={classes.error} refreshing={classes.refreshing} reload={classes.reload}>
                     {#if classes.data?.viewer === session.user?.id && classes.data}
                         {#if classes.data.items.length}
@@ -106,7 +108,7 @@
                                                 <td>{value.studentCount}</td>
                                                 <td><div class="row-actions">
                                                     <Button size="sm" href={classStudentsHref(value)}>学生名单</Button>
-                                                    {#if isAdmin}<Button size="sm" disabled={classes.refreshing} onclick={() => confirmRemoval(value)}>删除教学班</Button>{/if}
+                                                    <Button size="sm" disabled={classes.refreshing} onclick={() => confirmRemoval(value)}>删除教学班</Button>
                                                 </div></td>
                                             </tr>
                                         {/each}
@@ -116,7 +118,7 @@
                             <Pagination {page} pageCount={pageCount(classes.data)} disabled={classes.refreshing} aria-label="教学班列表分页"
                                 onchange={(next: number) => { void updateQuery({ page: next === 1 ? null : next }, { scroll: "top" }); }} />
                         {:else}
-                            <StateBlock kind="empty" title={!isAdmin && !course.currentTerm ? "尚未设置当前学期" : termId ? "该学期暂无教学班" : "暂无可管理的教学班"}>
+                            <StateBlock kind="empty" title={termId ? "该学期暂无教学班" : "暂无可管理的教学班"}>
                                 {#snippet actions()}
                                     {#if termId}<Button onclick={() => { void updateQuery({ termId: null, page: null }); }}>查看全部学期</Button>{/if}
                                 {/snippet}

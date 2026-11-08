@@ -9,7 +9,7 @@
     import ResourceState from "$lib/components/shell/ResourceState.svelte";
     import Button from "$lib/components/ui/Button.svelte";
 
-    let { courseId }: { courseId: string } = $props();
+    let { courseId, manageHref }: { courseId: string; manageHref?: string } = $props();
     const result = resource(async signal => {
         const viewer = session.user?.id, id = courseId;
         if (session.user?.role !== "student") return null;
@@ -23,7 +23,7 @@
     <Button href={loginHref(router.href)}>登录查看</Button>
 {:else if session.user?.role === "teacher" || session.user?.role === "admin"}
     <p class="hint">每个教学班独立设置加分规则，学生按自己本学期所属教学班的规则获得积分。</p>
-    <Button href={`/manage/courses/${encodeURIComponent(courseId)}/classes`}>查看教学班</Button>
+    {#if manageHref}<Button href={manageHref}>查看教学班</Button>{/if}
 {:else}
     <ResourceState status={result.status} error={result.error} reload={result.reload}>
         {#if result.data?.viewer === session.user?.id && result.data}

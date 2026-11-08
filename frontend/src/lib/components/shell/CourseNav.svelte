@@ -1,6 +1,6 @@
 <script module lang="ts">
     import type { Snippet } from "svelte";
-    export type Props = { courseCode: string; courseName: string; showManage?: boolean; loading?: boolean; showBack?: boolean; actions?: Snippet };
+    export type Props = { courseCode: string; courseName: string; manageHref?: string; loading?: boolean; showBack?: boolean; actions?: Snippet };
 </script>
 
 <script lang="ts">
@@ -8,7 +8,7 @@
     import Skeleton from "$lib/components/ui/Skeleton.svelte";
     import { router } from "$lib/router/router.svelte";
 
-    let { courseCode, courseName, showManage = false, loading = false, showBack = true, actions }: Props = $props();
+    let { courseCode, courseName, manageHref, loading = false, showBack = true, actions }: Props = $props();
     const base = $derived(`/courses/${encodeURIComponent(courseCode)}`);
 </script>
 
@@ -17,7 +17,7 @@
     <div class="actions">
         {@render actions?.()}
         {#if showBack && router.pathname !== base}<Button href={base}>返回课程</Button>{/if}
-        {#if showManage}<Button href={`${base}/manage/reports`}>内容审查</Button><Button href={`/manage/courses/${encodeURIComponent(courseCode)}/classes`}>管理课程</Button>{/if}
+        {#if manageHref}<Button href={`${base}/manage/reports`}>内容审查</Button><Button href={manageHref}>管理课程</Button>{/if}
     </div>
 </header>
 

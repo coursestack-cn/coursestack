@@ -11,6 +11,9 @@ export type Page<T> = { items: T[]; page: number; pageSize: number; total: numbe
 export const classUrl = (value: TeachingClassKey) => `/api/courses/${encodeURIComponent(value.courseId)}/terms/${encodeURIComponent(value.termId)}/teachers/${encodeURIComponent(value.teacherId)}`;
 export const courseClassesHref = (courseCode: string) => `/manage/courses/${encodeURIComponent(courseCode)}/classes`;
 export const classStudentsHref = (value: TeachingClassKey) => `${courseClassesHref(value.courseId)}/${encodeURIComponent(value.termId)}/${encodeURIComponent(value.teacherId)}/students`;
+/** A teacher manages only their own current-term class, which course, term and teacher identify, so their entry skips the class list. */
+export const courseManageHref = (course: Pick<Course, "id" | "currentTerm">, viewer: { id: string; role: string } | null | undefined) =>
+    viewer?.role === "teacher" && course.currentTerm ? classStudentsHref({ courseId: course.id, termId: course.currentTerm.id, teacherId: viewer.id }) : courseClassesHref(course.id);
 export const teacherLabel = (teacher: Teacher) => teacher.isDeleted ? "已删除" : teacher.nickname ?? "未设置昵称";
 export const pageNumber = (value: string | null) => {
     const number = Number(value ?? 1);

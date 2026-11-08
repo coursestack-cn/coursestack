@@ -12,6 +12,7 @@
     import { session } from "$lib/session.svelte.js";
     import CourseBonusPolicy from "./CourseBonusPolicy.svelte";
     import CourseBonusHistory from "./CourseBonusHistory.svelte";
+    import { courseManageHref } from "../manage/course";
 
     let {}: PageProps = $props();
     const result = getCourse()!;
@@ -38,6 +39,7 @@
     {@const course = result.data.course}
     {@const term = result.data.term}
     {@const teachers = result.data.teachers}
+    {@const manageHref = result.data.viewer === session.user?.id && result.data.permissions.canManageContent ? courseManageHref(course, session.user) : undefined}
     <Card padding="lg">
         <dl class="course-info">
             <div>
@@ -66,7 +68,7 @@
     </Card>
     <CourseContents {course} terms={result.data.terms} defaultTermId={term?.id ?? ""} />
     <Dialog bind:open={policyOpen} title="加分规则" description={course.name}>
-        {#if policyOpen}{#key session.user?.id}<CourseBonusPolicy courseId={course.id} />{/key}{/if}
+        {#if policyOpen}{#key session.user?.id}<CourseBonusPolicy courseId={course.id} {manageHref} />{/key}{/if}
     </Dialog>
     <Dialog bind:open={historyOpen} title="我的加分历史" description={course.name} onclose={closeHistory}>
         {#if historyOpen && student}{#key `${session.user?.id}:${course.id}`}<CourseBonusHistory courseId={course.id} />{/key}{/if}

@@ -25,6 +25,7 @@
     import CourseNav from "$lib/components/shell/CourseNav.svelte";
     import PageLayout from "$lib/components/shell/PageLayout.svelte";
     import ResourceState from "$lib/components/shell/ResourceState.svelte";
+    import { courseManageHref } from "../../../pages/manage/course";
 
     let { courseCode, termId, children }: { courseCode: string; termId?: string; children: Snippet } = $props();
     const result = resource(async (signal) => {
@@ -52,7 +53,7 @@
     {#snippet heading()}
         <CourseNav courseCode={result.data?.course.id ?? courseCode} courseName={result.data?.course.name ?? "课程"}
             showBack={!courseOverview} loading={result.status === "loading"}
-            showManage={result.data?.viewer === session.user?.id && result.data?.permissions.canManageContent}>
+            manageHref={result.data && result.data.viewer === session.user?.id && result.data.permissions.canManageContent ? courseManageHref(result.data.course, session.user) : undefined}>
             {#snippet actions()}
                 {#if courseOverview && result.data && (session.user?.role === "student" || session.user?.role === "teacher" || result.data.term)}
                     <div class="term-navigation">
