@@ -55,7 +55,7 @@ courseRoutes.get('/courses', async c => {
     const { rows, total } = await queryPage<Course>(c, p, sql`${courseSelect}
         WHERE ${id === undefined ? sql`1` : sql`c.id=${id}`} AND (instr(c.name,${q})>0 OR instr(c.id,${q})>0)
         ${term === undefined ? sql`` : sql`AND EXISTS(SELECT 1 FROM course_terms ct WHERE ct.course_id=c.id AND ct.term_id=${term})`}
-        ORDER BY c.created_at DESC,c.id ASC`);
+        ORDER BY c.id ASC`);
     return respond(c, listResult(rows.map(courseDto), p, total));
 });
 courseRoutes.post('/courses', async c => {

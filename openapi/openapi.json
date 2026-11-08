@@ -6844,7 +6844,7 @@
     },
     "/api/courses": {
       "get": {
-        "summary": "课程列表，id 精确匹配课程号，termId 筛选管理员已安排开设的课程",
+        "summary": "按课程号升序列出课程，id 精确匹配课程号，termId 筛选管理员已安排开设的课程",
         "operationId": "get__api_courses",
         "security": [
           {},

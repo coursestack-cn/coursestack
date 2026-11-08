@@ -49,7 +49,7 @@ const defs: Definition[] = [
         response: object({ items: { type: 'array', items: object({ line: positiveInteger, status: enumeration('ready', 'existing', 'invalid', 'duplicate'), message: { type: 'string' } }) } }) },
     { method: 'get', path: '/me/courses', summary: '本人修读或授课的课程，区分当前学期与历史学期，同一课程去重', auth: 'session',
         parameters: [...pagination, q('scope', { ...enumeration('current', 'history'), default: 'current' }), q('q', { type: 'string', maxLength: 100 })], response: ref('MyCoursePage') },
-    { method: 'get', path: '/courses', summary: '课程列表，id 精确匹配课程号，termId 筛选管理员已安排开设的课程', parameters: [...pagination, q('q'), q('id', courseId), q('termId', id)], response: ref('CoursePage') },
+    { method: 'get', path: '/courses', summary: '按课程号升序列出课程，id 精确匹配课程号，termId 筛选管理员已安排开设的课程', parameters: [...pagination, q('q'), q('id', courseId), q('termId', id)], response: ref('CoursePage') },
     { method: 'post', path: '/courses', summary: '管理员建立长期课程，无需学期或任课教师', auth: 'session', create: true, request: object({ id: courseId, ...courseFields }, ['id', 'name']), response: object({ id: courseId }) },
     { method: 'get', path: '/courses/{id}', summary: '课程详情及本学期全部任课教师', response: ref('Course') },
     { method: 'patch', path: '/courses/{id}', summary: '管理员编辑课程名称及简介；课程号不可修改', auth: 'session', request: object(courseFields, []), response: ref('Course') },

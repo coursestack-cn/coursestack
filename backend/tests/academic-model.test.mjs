@@ -6,6 +6,16 @@ let h;
 beforeEach(async () => { h = await start(); });
 afterEach(async () => { await h?.dispose(); });
 
+test('public course list sorts by course ID before pagination', async () => {
+    await h.database.prepare("UPDATE courses SET created_at=created_at-1 WHERE id='course-a'").run();
+    const catalog = await h.api('GET', '/courses');
+    assert.deepEqual(catalog.data.items.map(course => course.id), ['course-a', 'course-b']);
+
+    const page = await h.api('GET', '/courses?q=course-&page=2&pageSize=1');
+    assert.equal(page.data.total, 2);
+    assert.deepEqual(page.data.items.map(course => course.id), ['course-b']);
+});
+
 test('my course search filters before pagination and keeps current/history membership boundaries', async () => {
     assert.equal((await h.api('GET', '/courses?code=course-a')).status, 400);
     assert.equal((await h.api('GET', '/courses?id=course-a')).data.total, 1);
