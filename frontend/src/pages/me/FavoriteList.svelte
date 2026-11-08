@@ -1,4 +1,5 @@
 <script lang="ts">
+    import type { Snippet } from "svelte";
     import { api } from "$lib/api/client";
     import { resource } from "$lib/api/resource.svelte";
     import { favorites, favoriteHref, type FavoriteList } from "$lib/favorites.svelte";
@@ -15,7 +16,7 @@
     import StateBlock from "$lib/components/ui/StateBlock.svelte";
     import { pageCount, pageNumber } from "../questions/data";
 
-    let { coursesOnly = false }: { coursesOnly?: boolean } = $props();
+    let { coursesOnly = false, summary }: { coursesOnly?: boolean; summary?: Snippet<[number]> } = $props();
     const type = $derived(coursesOnly ? "course" : ["course", "material", "question"].includes(router.query.get("type") ?? "") ? router.query.get("type")! : "all");
     const courseId = $derived(coursesOnly ? "" : router.query.get("courseId") ?? "");
     const page = $derived(pageNumber(router.query.get("page")));
@@ -48,7 +49,11 @@
     {/if}
     <ResourceState status={result.status} error={result.error} refreshing={result.refreshing} reload={result.reload}>
         {#if current}
-            <p class="summary" role="status">共 {current.total} 项收藏</p>
+            {#if summary}
+                {@render summary(current.total)}
+            {:else}
+                <p class="summary" role="status">共 {current.total} 项收藏</p>
+            {/if}
             {#each current.items as item (item.favoriteId)}
                 <article>
                     <div class="details">

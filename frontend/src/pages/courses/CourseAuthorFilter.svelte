@@ -34,7 +34,7 @@
     });
     const selection = $derived(selected.data?.courseId === courseId && selected.data.authorId === value ? selected.data : undefined);
     const author = $derived(selection ? selection.author : picked?.courseId === courseId && picked.author.id === value ? picked.author : undefined);
-    const label = $derived(!value ? "全部" : author ? `${displayName(author)}${author.shortId ? ` · ${author.shortId}` : ""}`
+    const label = $derived(!value ? "全部发布人" : author ? `${displayName(author)}${author.shortId ? ` · ${author.shortId}` : ""}`
         : selection ? "发布人不可用" : selected.status === "error" ? "发布人加载失败" : "正在加载…");
 
     async function load(current: NonNullable<typeof request>, nextPage: number) {
@@ -152,7 +152,7 @@
         aria-haspopup="dialog" aria-expanded={open} aria-controls={`${id}-panel`}
         onclick={() => { if (open) close(); else void show(); }}
         onkeydown={event => { if (event.key === "ArrowDown" || event.key === "ArrowUp") { event.preventDefault(); void show(); } }}>
-        <span id={`${id}-value`} class="value" title={label}>{label}</span><ChevronDown size="1em" aria-hidden="true" />
+        <span id={`${id}-value`} class="value" title={label}>{#if value && author}<span aria-hidden="true">发布人：</span>{/if}{label}</span><ChevronDown size="1em" aria-hidden="true" />
     </button>
     <div id={`${id}-panel`} class="panel" role="dialog" aria-label="选择发布人" popover="auto" tabindex="-1" bind:this={panel}
         style:left={`${left}px`} style:top={`${top}px`} style:max-height={availableHeight ? `${availableHeight}px` : undefined}
@@ -184,7 +184,7 @@
 
 <style>
     .author-filter { min-width: 0; width: 12rem; max-width: 100%; }
-    .trigger { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); width: 100%; min-height: var(--space-10); padding: var(--space-2) var(--space-3); border: 1px solid var(--color-border-strong); border-radius: var(--radius-md); background: var(--color-surface); color: var(--color-text); font: inherit; cursor: pointer; }
+    .trigger { display: flex; align-items: center; justify-content: space-between; gap: var(--space-3); width: 100%; min-height: var(--space-10); padding: var(--space-2) var(--space-3); border: 1px solid var(--color-border-strong); border-radius: var(--radius-md); background: var(--color-surface); color: var(--color-text); font: inherit; font-size: var(--font-size-md); line-height: var(--line-height-tight); cursor: pointer; }
     .trigger:hover { border-color: var(--color-text-secondary); }
     .value { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
     .trigger :global(svg), .option > :global(svg) { flex-shrink: 0; }

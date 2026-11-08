@@ -10,6 +10,7 @@
     import Select from "$lib/components/ui/Select.svelte";
     import TextInput from "$lib/components/ui/TextInput.svelte";
     import Pagination from "$lib/components/ui/Pagination.svelte";
+    import SegmentedControl from "$lib/components/ui/SegmentedControl.svelte";
     import StateBlock from "$lib/components/ui/StateBlock.svelte";
     import CourseContentItem from "./CourseContentItem.svelte";
     import CourseAuthorFilter from "./CourseAuthorFilter.svelte";
@@ -60,27 +61,28 @@
 
 <section class="course-contents">
     <header class="heading">
-        <h2>资料与问答</h2>
+        <div class="title-group">
+            <h2>资料与问答</h2>
+            <SegmentedControl label="内容类型" value={kind} options={[{ value: "all", label: "全部" }, { value: "material", label: "资料" }, { value: "question", label: "问答" }]} onchange={changeKind} />
+        </div>
         <div class="actions"><Button href={creationHref("materials")}>上传资料</Button><Button variant="primary" href={creationHref("questions")}>提出问题</Button></div>
     </header>
     <div class="filters">
-        <Field label="学期">{#snippet children({ id })}<Select {id} value={termId} options={termOptions}
+        <Field label="学期" hideLabel>{#snippet children({ id })}<Select {id} value={termId} options={termOptions}
             onchange={event => { const value = event.currentTarget.value; void updateQuery({ termId: value === defaultTermId ? null : value, page: null }); }} />{/snippet}</Field>
-        <Field label="内容类型">{#snippet children({ id })}<Select {id} value={kind} options={[{ value: "all", label: "全部内容" }, { value: "material", label: "资料" }, { value: "question", label: "问答" }]} onchange={event => changeKind(event.currentTarget.value)} />{/snippet}</Field>
-        <Field label="发布人">{#snippet children({ id, labelId })}<CourseAuthorFilter {id} {labelId} courseId={course.id} value={authorId}
+        <Field label="发布人" hideLabel>{#snippet children({ id, labelId })}<CourseAuthorFilter {id} {labelId} courseId={course.id} value={authorId}
             onchange={value => { void updateQuery({ authorId: value || null, page: null }); }} />{/snippet}</Field>
-        {#if kind === "question"}<Field label="解决状态">{#snippet children({ id })}<Select {id} value={solutionState} options={[{ value: "all", label: "全部状态" }, { value: "unresolved", label: "未解决" }, { value: "solved", label: "已解决" }]} onchange={event => { void updateQuery({ state: event.currentTarget.value === "all" ? null : event.currentTarget.value, page: null }); }} />{/snippet}</Field>{/if}
-        <Field label="排序">{#snippet children({ id })}<Select {id} value={sort} options={[{ value: "active", label: "最近活跃" }, { value: "newest", label: "最新发布" }, ...(kind === "question" ? [{ value: "score", label: "净赞数" }] : [])]} onchange={event => { void updateQuery({ sort: event.currentTarget.value === "active" ? null : event.currentTarget.value, page: null }); }} />{/snippet}</Field>
+        {#if kind === "question"}<Field label="解决状态" hideLabel>{#snippet children({ id })}<Select {id} value={solutionState} options={[{ value: "all", label: "全部状态" }, { value: "unresolved", label: "未解决" }, { value: "solved", label: "已解决" }]} onchange={event => { void updateQuery({ state: event.currentTarget.value === "all" ? null : event.currentTarget.value, page: null }); }} />{/snippet}</Field>{/if}
+        <Field label="排序" hideLabel>{#snippet children({ id })}<Select {id} value={sort} options={[{ value: "active", label: "最近活跃" }, { value: "newest", label: "最新发布" }, ...(kind === "question" ? [{ value: "score", label: "净赞数最高" }] : [])]} onchange={event => { void updateQuery({ sort: event.currentTarget.value === "active" ? null : event.currentTarget.value, page: null }); }} />{/snippet}</Field>
         <form class="text-filter" onsubmit={event => { event.preventDefault(); if (!titleError && !tagError) void updateQuery({ title: String(titleInput).trim() || null, tag: String(tagInput).trim() || null, page: null }); }}>
-            <Field label="标题" error={titleError}>{#snippet children({ id, invalid, describedBy })}<TextInput {id} {invalid} aria-describedby={describedBy} bind:value={titleInput} placeholder="输入标题关键词" />{/snippet}</Field>
-            <Field label="标签" error={tagError}>{#snippet children({ id, invalid, describedBy })}<TextInput {id} {invalid} aria-describedby={describedBy} bind:value={tagInput} placeholder="输入标签关键词" />{/snippet}</Field>
+            <Field label="标题" hideLabel error={titleError}>{#snippet children({ id, invalid, describedBy })}<TextInput {id} {invalid} aria-describedby={describedBy} clearable bind:value={titleInput} placeholder="搜索标题" />{/snippet}</Field>
+            <Field label="标签" hideLabel error={tagError}>{#snippet children({ id, invalid, describedBy })}<TextInput {id} {invalid} aria-describedby={describedBy} clearable bind:value={tagInput} placeholder="搜索标签" />{/snippet}</Field>
             <Button type="submit" disabled={Boolean(titleError || tagError)}>筛选</Button>
-            {#if title || tag}<Button variant="ghost" aria-label="清除标题和标签" onclick={() => { titleInput = ""; tagInput = ""; void updateQuery({ title: null, tag: null, page: null }); }}>清除</Button>{/if}
         </form>
     </div>
     <ResourceState status={result.status} error={result.error} refreshing={result.refreshing} reload={result.reload}>
         {#if result.data}
-            <p class="summary">共 {result.data.total} 项{#if title}，标题：{title}{/if}{#if tag}，标签：{tag}{/if}</p>
+            <p class="summary">共 {result.data.total} 项</p>
             {#if result.data.items.length}
                 <div class="items">{#each result.data.items as item (item.id)}<CourseContentItem {item} />{/each}</div>
                 {#if pageCount(result.data) > 1}<Pagination page={result.data.page} pageCount={pageCount(result.data)} disabled={result.refreshing} onchange={(next: number) => { void updateQuery({ page: next === 1 ? null : next }); }} />{/if}
@@ -93,13 +95,14 @@
 
 <style>
     .course-contents { display: grid; gap: var(--space-5); min-width: 0; }
-    .heading, .actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+    .heading, .title-group, .actions { display: flex; flex-wrap: wrap; align-items: center; gap: var(--space-3); }
+    .title-group { min-width: 0; }
     .heading { justify-content: space-between; }
     h2 { font-size: var(--font-size-xl); }
     .filters { display: flex; flex-wrap: wrap; align-items: start; gap: var(--space-3); }
     .filters > :global(.field) { min-width: 8rem; }
-    .text-filter { display: flex; flex: 1 1 28rem; min-width: 0; gap: var(--space-2); align-items: end; flex-wrap: wrap; }
-    .text-filter > :global(.field) { flex: 1 1 10rem; }
+    .text-filter { display: flex; flex: 1 1 19rem; min-width: 0; gap: var(--space-2); align-items: start; flex-wrap: wrap; }
+    .text-filter > :global(.field) { flex: 1 1 7rem; }
     .summary { color: var(--color-text-secondary); font-size: var(--font-size-sm); overflow-wrap: anywhere; }
     .items { border: 1px solid var(--color-border); border-radius: var(--radius-lg); overflow: hidden; background: var(--color-surface); }
     .items > :global(article:first-child > .course-content-link) { border-top-left-radius: calc(var(--radius-lg) - 1px); border-top-right-radius: calc(var(--radius-lg) - 1px); }
