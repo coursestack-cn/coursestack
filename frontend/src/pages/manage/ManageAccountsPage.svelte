@@ -13,6 +13,9 @@
     import TextInput from "$lib/components/ui/TextInput.svelte";
     import Checkbox from "$lib/components/ui/Checkbox.svelte";
     import Dialog from "$lib/components/ui/Dialog.svelte";
+    import ConfirmDialog from "$lib/components/ui/ConfirmDialog.svelte";
+    import Menu from "$lib/components/ui/Menu.svelte";
+    import { toast } from "$lib/components/ui/toast.svelte.js";
     import Pagination from "$lib/components/ui/Pagination.svelte";
     import AccountEditDialog, { type Account } from "./AccountEditDialog.svelte";
     import AccountImportDialog from "./AccountImportDialog.svelte";
@@ -46,6 +49,9 @@
     let editOpen = $state(false);
     let editing = $state.raw<Account | null>(null);
     let importOpen = $state(false);
+    let identityAction = $state<{ account: Account; role: "teacher" | "student" | null } | null>(null);
+    let identityOpen = $state(false);
+    let identityError = $state("");
     let alive = true;
     onDestroy(() => { alive = false; });
     $effect(() => { query = activeQuery; });
@@ -58,7 +64,10 @@
         loading = true;
         error = null;
         api.get<AccountList>(`/api/admin/accounts?${search}`, { signal: controller.signal }).then((data) => {
-            if (!controller.signal.aborted) result = data;
+            if (controller.signal.aborted) return;
+            const lastPage = Math.max(1, Math.ceil(data.total / data.pageSize));
+            if (page > lastPage) void updateQuery({ page: lastPage === 1 ? null : lastPage }, { replace: true });
+            else result = data;
         }, (cause) => {
             if (!controller.signal.aborted && !isAborted(cause)) error = toApiError(cause);
         }).finally(() => { if (!controller.signal.aborted) loading = false; });
@@ -68,6 +77,24 @@
     function startEdit(account: Account) {
         editing = account;
         editOpen = true;
+    }
+
+    function confirmIdentity(account: Account, role: "teacher" | "student" | null) {
+        identityError = "";
+        identityAction = { account, role };
+        identityOpen = true;
+    }
+
+    async function changeIdentity() {
+        if (!identityAction) return;
+        const { account, role } = identityAction;
+        const path = `/api/admin/accounts/${encodeURIComponent(account.id)}`;
+        if (role) await api.patch(path, { role });
+        else await api.delete(path);
+        if (alive) {
+            toast.success(role ? `已切换为${roleNames[role]}` : "账号已删除");
+            reload++;
+        }
     }
 
     function startReset(account: Account) {
@@ -120,7 +147,7 @@
     }
 </script>
 
-<PageLayout title="账号管理" subtitle="创建和编辑学生、教师账号，重置登录密码。">
+<PageLayout title="账号管理" subtitle="管理师生账号、登录密码和身份。">
     {#snippet actions()}
         {#if session.hasRole("admin")}
             <Button onclick={() => downloadCsv("账号导入模板.csv", accountTemplate())}>下载CSV模板</Button>
@@ -159,6 +186,12 @@
                                     {#if account.schoolNumber}
                                         <Button size="sm" onclick={() => startReset(account)} aria-label={`重置 ${account.schoolNumber} 的密码`}>重置密码</Button>
                                     {/if}
+                                    <Menu items={[
+                                        { label: `切换为${account.role === "student" ? "教师" : "学生"}`, onselect: () => confirmIdentity(account, account.role === "student" ? "teacher" : "student") },
+                                        { label: "删除账号", danger: true, onselect: () => confirmIdentity(account, null) }
+                                    ]}>
+                                        {#snippet trigger(props)}<Button {...props} size="sm" aria-label={`更多账号操作 ${account.schoolNumber ?? ""}`}>更多</Button>{/snippet}
+                                    </Menu>
                                 </div>{:else}—{/if}</td>
                             </tr>
                         {/each}
@@ -202,6 +235,18 @@
         </form>
     {/if}
 </Dialog>
+
+{#if identityAction}
+    {@const { account, role } = identityAction}
+    {@const label = account.schoolNumber ?? account.nickname ?? account.id}
+    <ConfirmDialog bind:open={identityOpen} danger title={role ? `将 ${label} 切换为${roleNames[role]}？` : `删除账号 ${label}？`}
+        description={role ? "将建立新身份并注销原会话。学工号、密码与个人资料沿用，已发表的内容、课程关系及积分保存在原身份下。" : "该成员将无法登录，个人资料会清除。已发表的内容和历史积分会保留，公开署名显示为“已删除”。"}
+        confirmLabel={role ? "切换身份" : "删除账号"} onconfirm={changeIdentity}
+        onerror={cause => { identityError = userMessage(cause, { ACCOUNT_DELETED: "原账号身份已变更，请关闭弹窗并重新选择。" }); reload++; }}
+        onclose={() => { identityAction = null; }}>
+        {#if identityError}<p class="error" role="alert">{identityError}</p>{/if}
+    </ConfirmDialog>
+{/if}
 
 <AccountEditDialog bind:open={editOpen} account={editing} onfailed={() => { reload++; }} onsaved={(saved) => {
     if (result) result = { ...result, items: result.items.map((item) => item.id === saved.id ? saved : item) };
