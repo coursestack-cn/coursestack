@@ -125,7 +125,7 @@ materialUploadRoutes.post('/material-uploads/:id/confirm', async c => {
             sql`INSERT INTO file_versions(material_id,version,storage_key,size,mime,uploaded_by,updated_by,created_at)
                 SELECT u.material_id,COALESCE(counter.next_version,1),${key},u.expected_size,u.mime,${a.id},${a.id},${finishedAt}
                 FROM material_upload_sessions u JOIN contents m ON m.id=u.material_id AND m.kind='material' AND m.status<>'deleted' AND m.course_id=u.course_id
-                LEFT JOIN material_next_versions counter ON counter.material_id=m.id WHERE ${gate} AND ${editPermission(a, sql`m.course_id`, sql`m.author_id`)}
+                LEFT JOIN material_next_versions counter ON counter.material_id=m.id WHERE ${gate} AND ${editPermission(a, sql`m.author_id`)}
                 ON CONFLICT(storage_key) DO NOTHING`,
             sql`UPDATE contents SET updated_at=${finishedAt},updated_by=${a.id} WHERE id=${row.material_id}
                 AND EXISTS(SELECT 1 FROM material_upload_sessions u JOIN file_versions f ON f.storage_key=${key} AND f.material_id=u.material_id WHERE ${gate})`,

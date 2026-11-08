@@ -120,7 +120,7 @@ discussionRoutes.patch('/contents/:id', async c => {
 });
 discussionRoutes.delete('/contents/:id', async c => {
     const row = await rawContent(c, c.req.param('id')), a = await requireEditor(c, row);
-    const allowed = sql`id=${row.id} AND status<>'deleted' AND ${editPermission(a, sql`contents.course_id`, sql`contents.author_id`)}
+    const allowed = sql`id=${row.id} AND status<>'deleted' AND ${editPermission(a, sql`contents.author_id`)}
         AND ${ownerDeletionAllowed(sql`contents.id`)}`;
     const results = await c.env.DB.batch<{ storage_key: string }>([
         sql`SELECT storage_key FROM file_versions WHERE material_id=${row.id} AND EXISTS(SELECT 1 FROM contents WHERE ${allowed})`,

@@ -5,7 +5,7 @@ import { sql } from 'drizzle-orm';
 import { Hono } from 'hono';
 import { readMigrations } from '../scripts/lib/migrations.mjs';
 import { createDatabase } from '../src/db/index.ts';
-import { management, classManagement, editPermission, isCurrentCourseTeacher } from '../src/permissions.ts';
+import { management, classManagement, editPermission } from '../src/permissions.ts';
 import { bonusRoutes } from '../src/discussions/bonus.ts';
 
 let runtime, migrations, nextDatabase = 0;
@@ -194,13 +194,11 @@ test('current teachers share content permission but only manage their own curren
     assert.equal(await allowed(classManagement(teacherA, sql`'COURSE'`, sql`'current'`, sql`'teacher-a'`)), true);
     assert.equal(await allowed(classManagement(teacherA, sql`'COURSE'`, sql`'current'`, sql`'teacher-b'`)), false);
     assert.equal(await allowed(classManagement({ id: 'admin', role: 'admin' }, sql`'COURSE'`, sql`'current'`, sql`'teacher-b'`)), true);
-    assert.equal(await isCurrentCourseTeacher(db, 'teacher-a', 'COURSE'), true);
     await batch(binding, "UPDATE terms SET current=0; UPDATE terms SET current=1 WHERE id='next';");
     assert.equal(await allowed(management(teacherA, sql`'COURSE'`)), false);
     assert.equal(await allowed(classManagement(teacherA, sql`'COURSE'`, sql`'current'`, sql`'teacher-a'`)), false);
-    assert.equal(await allowed(editPermission(teacherA, sql`'COURSE'`, sql`'teacher-a'`)), true);
-    assert.equal(await allowed(editPermission(teacherA, sql`'COURSE'`, sql`'teacher-b'`)), false);
-    assert.equal(await isCurrentCourseTeacher(db, 'teacher-a', 'COURSE'), false);
+    assert.equal(await allowed(editPermission(teacherA, sql`'teacher-a'`)), true);
+    assert.equal(await allowed(editPermission(teacherA, sql`'teacher-b'`)), false);
 });
 
 test('teaching class score endpoints isolate class reads and manual adjustments, including idempotent replay', async () => {

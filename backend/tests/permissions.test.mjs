@@ -4,10 +4,10 @@ import { readFile } from 'node:fs/promises';
 import { readMigrations } from '../scripts/lib/migrations.mjs';
 import { after, before, beforeEach, test } from 'node:test';
 import { Miniflare, convertV4MiniflareOptions } from 'miniflare';
-import { eq } from 'drizzle-orm';
+import { eq, sql } from 'drizzle-orm';
 import { createDatabase } from '../src/db/index.ts';
-import { accounts, terms } from '../src/db/schema.ts';
-import { getPublicProfile, isAdministrator, isCurrentCourseTeacher } from '../src/permissions.ts';
+import { accounts } from '../src/db/schema.ts';
+import { administration, classManagement, editPermission, getPublicProfile, management } from '../src/permissions.ts';
 import worker from '../src/index.ts';
 import { initializeAdministrator } from '../src/auth/service.ts';
 import { digest, passwordField } from '../src/auth/crypto.ts';
@@ -76,42 +76,59 @@ test('public profile is a field allowlist and never includes academic identity',
     assert.equal(await getPublicProfile(db, 'student'), null);
 });
 
-test('only active administrator accounts have administrator permission', async () => {
-    assert.equal(await isAdministrator(db, 'admin'), true);
-    for (const actor of [null, 'missing', 'teacher', 'student']) {
-        assert.equal(await isAdministrator(db, actor), false);
-    }
-    await db.update(accounts).set({ status: 'disabled' }).where(eq(accounts.id, 'admin'));
-    assert.equal(await isAdministrator(db, 'admin'), false);
-});
+const teacher = { id: 'teacher', role: 'teacher' }, otherTeacher = { id: 'other-teacher', role: 'teacher' };
+const admin = { id: 'admin', role: 'admin' }, student = { id: 'student', role: 'student' };
+const allowed = async predicate => Boolean(await db.get(sql`SELECT 1 WHERE ${predicate}`));
+const managesCourse = actor => management(actor, sql`'course'`);
+const managesClass = (actor, teacherId) => classManagement(actor, sql`'course'`, sql`'current'`, sql`${teacherId}`);
 
-test('course teacher permission requires a current teaching assignment', async () => {
-    assert.equal(await isCurrentCourseTeacher(db, 'teacher', 'course'), true);
-    for (const actor of [null, 'missing', 'student', 'history', 'other-teacher', 'admin']) {
-        assert.equal(await isCurrentCourseTeacher(db, actor, 'course'), false);
-    }
-});
-
-test('disabled or deleted teacher identities lose access while other current teachers keep theirs', async () => {
-    await db.update(accounts).set({ status: 'disabled' }).where(eq(accounts.id, 'teacher'));
-    assert.equal(await isCurrentCourseTeacher(db, 'teacher', 'course'), false);
-    await db.update(accounts).set({ status: 'active' }).where(eq(accounts.id, 'teacher'));
+test('administrator, course and class gates use the admitted role and the current assignment', async () => {
+    assert.equal(await allowed(administration(admin)), true);
+    assert.equal(await allowed(administration(teacher)), false);
+    assert.equal(await allowed(administration({ ...admin, id: 'missing' })), false);
+    assert.equal(await allowed(managesCourse(admin)), true);
+    assert.equal(await allowed(managesClass(admin, teacher.id)), true);
+    assert.equal(await allowed(managesCourse(teacher)), true);
+    assert.equal(await allowed(managesCourse(student)), false);
+    assert.equal(await allowed(managesCourse(otherTeacher)), false);
     await binding.prepare("INSERT INTO teaching_classes VALUES ('course','current','other-teacher')").run();
-    await db.update(accounts).set({ status: 'deleted' }).where(eq(accounts.id, 'teacher'));
-    assert.equal(await isCurrentCourseTeacher(db, 'teacher', 'course'), false);
-    assert.equal(await isCurrentCourseTeacher(db, 'other-teacher', 'course'), true);
+    assert.equal(await allowed(managesCourse(otherTeacher)), true);
+    assert.equal(await allowed(managesClass(teacher, teacher.id)), true);
+    assert.equal(await allowed(managesClass(teacher, otherTeacher.id)), false);
+    assert.equal(await allowed(managesClass(otherTeacher, teacher.id)), false);
+});
+
+test('only the admitted author may edit, including when a different actor manages the course', async () => {
+    const author = sql`'student'`;
+    assert.equal(await allowed(editPermission(student, author)), true);
+    assert.equal(await allowed(editPermission(teacher, author)), false);
+    assert.equal(await allowed(editPermission(admin, author)), false);
+    await db.update(accounts).set({ status: 'deleted' }).where(eq(accounts.id, student.id));
+    assert.equal(await allowed(editPermission(student, author)), false);
+});
+
+test('admitted writes survive disabling but a deleted identity loses every gate', async () => {
+    await db.update(accounts).set({ status: 'disabled' }).where(eq(accounts.id, teacher.id));
+    assert.equal(await allowed(managesCourse(teacher)), true);
+    await db.update(accounts).set({ status: 'deleted' }).where(eq(accounts.id, teacher.id));
+    assert.equal(await allowed(managesCourse(teacher)), false);
+    assert.equal(await allowed(managesClass(teacher, teacher.id)), false);
+    await db.update(accounts).set({ status: 'deleted' }).where(eq(accounts.id, admin.id));
+    assert.equal(await allowed(administration(admin)), false);
+    assert.equal(await allowed(managesCourse(admin)), false);
+    assert.equal(await allowed(managesClass(admin, teacher.id)), false);
 });
 
 test('term changes remove old access without deleting history; no term grants nothing', async () => {
     await setCurrentTerm(binding, 'next');
-    assert.equal(await isCurrentCourseTeacher(db, 'teacher', 'course'), false);
+    assert.equal(await allowed(managesCourse(teacher)), false);
     const count = await binding.prepare("SELECT COUNT(*) AS count FROM class_students").first('count');
     assert.equal(count, 3);
     await binding.prepare("INSERT INTO teaching_classes VALUES ('course', 'next', 'teacher')").run();
-    assert.equal(await isCurrentCourseTeacher(db, 'teacher', 'course'), true);
+    assert.equal(await allowed(managesCourse(teacher)), true);
     await binding.prepare("INSERT INTO class_students VALUES ('course', 'next', 'student', 'teacher')").run();
     await setCurrentTerm(binding, null);
-    assert.equal(await isCurrentCourseTeacher(db, 'teacher', 'course'), false);
+    assert.equal(await allowed(managesCourse(teacher)), false);
 });
 
 test('foreign keys and checks reject wrong identities, orphan relations and duplicate enrollment', async () => {

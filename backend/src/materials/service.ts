@@ -44,7 +44,7 @@ export async function materialDetail(c: Ctx, id: string, version?: number) {
     ]);
     const a = c.get('actor');
     const permissions = a ? await createDatabase(c.env.DB).get<{ edit: number; manage: number }>(sql`SELECT
-        ${editPermission(a, sql`${content.course_id}`, sql`${content.author_id}`)} AS edit,
+        ${editPermission(a, sql`${content.author_id}`)} AS edit,
         ${management(a, sql`${content.course_id}`)} AS manage`) : null;
     return { ...detail, latestVersion: latest ? versionDto(latest) : null,
         selectedVersion: (selected ?? latest) ? versionDto((selected ?? latest)!) : null, versions,

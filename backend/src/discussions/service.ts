@@ -48,7 +48,7 @@ export function tombstoneDto(row: PublicRow) {
 }
 export async function requireEditor(c: Ctx, row: ContentRow) {
     const a = actor(c);
-    const allowed = await createDatabase(c.env.DB).get(sql`SELECT 1 WHERE ${editPermission(a, sql`${row.course_id}`, sql`${row.author_id}`)}`);
+    const allowed = await createDatabase(c.env.DB).get(sql`SELECT 1 WHERE ${editPermission(a, sql`${row.author_id}`)}`);
     if (!allowed) throw new HttpError(403, 'CONTENT_PERMISSION_DENIED', '只有内容所有者可以编辑内容');
     return a;
 }
@@ -78,7 +78,7 @@ export function ownedSelect(c: Ctx) {
 export async function readableDetail(c: Ctx, id: string) {
     const a = c.get('actor');
     const row = await createDatabase(c.env.DB).get<PublicRow>(sql`${publicSelect(c, false, sql`contents`)} WHERE c.id=${id} AND c.status<>'deleted'
-        AND (c.id IN (SELECT id FROM public_contents) ${a ? sql`OR ${editPermission(a, sql`c.course_id`, sql`c.author_id`)}` : sql``})`);
+        AND (c.id IN (SELECT id FROM public_contents) ${a ? sql`OR ${editPermission(a, sql`c.author_id`)}` : sql``})`);
     if (!row) throw new HttpError(404, 'CONTENT_UNAVAILABLE', '内容不存在或不可用');
     return contentDto(row);
 }
@@ -131,7 +131,7 @@ export async function editContent(c: Ctx, id: string, kind?: ContentRow['kind'])
         tags=${tags === undefined ? sql`tags` : sql`CASE WHEN ${tagsChanged} THEN ${tags} ELSE tags END`},
         edited_at=CASE WHEN ${titleChanged} OR ${bodyChanged} OR ${tagsChanged} THEN ${at} ELSE edited_at END,
         updated_at=${at},updated_by=${a.id} WHERE id=${row.id} AND status<>'deleted'
-        AND ${editPermission(a, sql`contents.course_id`, sql`contents.author_id`)}`);
+        AND ${editPermission(a, sql`contents.author_id`)}`);
     assertChanged(result);
     return readableDetail(c, row.id);
 }

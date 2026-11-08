@@ -77,7 +77,7 @@ materialRoutes.delete('/materials/:id/versions/:version', async c => {
     const version = versionNumber(c.req.param('version'));
     const allowed = sql`material_id=${content.id} AND version=${version} AND EXISTS(SELECT 1 FROM contents m
         WHERE m.id=file_versions.material_id AND m.kind='material' AND m.status<>'deleted'
-        AND (${editPermission(a, sql`m.course_id`, sql`m.author_id`)} OR ${management(a, sql`m.course_id`)}))`;
+        AND (${editPermission(a, sql`m.author_id`)} OR ${management(a, sql`m.course_id`)}))`;
     if (!await createDatabase(c.env.DB).get(sql`SELECT 1 FROM file_versions WHERE ${allowed}`)) throw new HttpError(404, 'FILE_VERSION_UNAVAILABLE', '文件版本不存在或不可用');
     if (!await createDatabase(c.env.DB).get(sql`SELECT 1 FROM file_versions WHERE material_id=${content.id} AND version<>${version}`)) {
         throw new HttpError(409, 'MATERIAL_LAST_VERSION', '资料至少保留一个版本；如需移除最后一个版本，请删除整份资料');
