@@ -47,9 +47,10 @@ classRoutes.get('/terms', async c => {
     return respond(c, rows.map(r => ({ ...r, current: Boolean(r.current) })));
 });
 classRoutes.put('/terms/current', async c => {
-    const a = await requireAdministrator(c), data = await input(c, z.object({ termId: idSchema.nullable() }).strict());
+    // Switching back to an earlier term is allowed; the current term cannot be cleared.
+    const a = await requireAdministrator(c), data = await input(c, z.object({ termId: idSchema }).strict());
     const db = createDatabase(c.env.DB);
-    if (data.termId !== null && !await db.get(sql`SELECT 1 FROM terms WHERE id=${data.termId}`)) throw new HttpError(404, 'TERM_NOT_FOUND', '学期不存在');
+    if (!await db.get(sql`SELECT 1 FROM terms WHERE id=${data.termId}`)) throw new HttpError(404, 'TERM_NOT_FOUND', '学期不存在');
     await c.env.DB.batch([
         sql`UPDATE terms SET current=0 WHERE current=1 AND ${administration(a)}`,
         sql`UPDATE terms SET current=1 WHERE id=${data.termId} AND ${administration(a)}`,

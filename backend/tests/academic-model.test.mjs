@@ -86,8 +86,11 @@ test('semester APIs preserve history, validate unknown targets and revoke former
     assert.equal((await h.api('GET', ownClass, 'teacher-a')).status, 403);
     assert.equal((await h.api('GET', ownClass, 'admin')).status, 200);
     assert.deepEqual((await h.database.prepare('SELECT * FROM teaching_classes ORDER BY course_id,term_id,teacher_id').all()).results, before);
-    assert.equal((await h.api('PUT', '/terms/current', 'admin', { termId: null })).status, 200);
-    assert.equal((await h.api('GET', '/courses/course-a/entry', 'teacher-b')).data.permissions.canManageContent, false);
+    // The current term can be switched back but never cleared.
+    assert.equal((await h.api('PUT', '/terms/current', 'admin', { termId: null })).status, 400);
+    assert.equal(await h.database.prepare('SELECT id FROM terms WHERE current=1').first('id'), 'term-old');
+    assert.equal((await h.api('PUT', '/terms/current', 'admin', { termId: 'term-active' })).status, 200);
+    assert.equal((await h.api('GET', '/courses/course-a/entry', 'teacher-a')).data.permissions.canManageContent, true);
 });
 
 test('teachers co-manage content but only their own roster, rules and manual awards', async () => {

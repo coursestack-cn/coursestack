@@ -12,6 +12,7 @@
     import Badge from "$lib/components/ui/Badge.svelte";
     import Button from "$lib/components/ui/Button.svelte";
     import Card from "$lib/components/ui/Card.svelte";
+    import ConfirmDialog from "$lib/components/ui/ConfirmDialog.svelte";
     import Dialog from "$lib/components/ui/Dialog.svelte";
     import Field from "$lib/components/ui/Field.svelte";
     import TextInput from "$lib/components/ui/TextInput.svelte";
@@ -31,7 +32,6 @@
     const current = $derived(items?.find(term => term.current));
     let pending = $state(false);
     const busy = $derived(pending || terms.refreshing || !items);
-    let actionError = $state("");
     let formOpen = $state(false);
     let selected = $state.raw<Term | null>(null);
     let termId = $state<string | number>("");
@@ -73,20 +73,27 @@
         } finally { if (alive && viewer === session.user?.id) pending = false; }
     }
 
-    async function setCurrent(id: string | null) {
+    let switching = $state.raw<Term | null>(null);
+    let switchOpen = $state(false), switchError = $state("");
+    const switchDescription = $derived(switching ? `${current ? `将当前学期从“${current.name}”切换为“${switching.name}”。` : `将“${switching.name}”设为当前学期。`}`
+        + "切换后，教师权限按目标学期的教学班确定。任课教师可管理所授课程的内容和本人班级的名单。"
+        + "新内容归入目标学期，符合条件的新发布和采纳按该学期计分。历史资料、名单和积分记录保留。重新上架内容时，奖励按内容首发学期核算。" : "");
+
+    function confirmSwitch(term: Term) {
         if (busy || !isAdmin) return;
+        switchError = ""; switching = term; switchOpen = true;
+    }
+
+    async function switchTerm() {
+        if (!switching) return;
         const viewer = session.user?.id;
-        pending = true; actionError = "";
+        pending = true;
         try {
-            await api.put("/api/terms/current", { termId: id });
-            if (!alive || viewer !== session.user?.id) return;
-            toast.success(id === null ? "已清除当前学期" : "已切换当前学期");
-            terms.reload();
-        } catch (cause) {
-            if (!alive || viewer !== session.user?.id) return;
-            actionError = userMessage(cause, { TERM_NOT_FOUND: "该学期已不存在，请刷新列表后重试。" });
-            terms.reload();
-        } finally { if (alive && viewer === session.user?.id) pending = false; }
+            await api.put("/api/terms/current", { termId: switching.id });
+            if (alive && viewer === session.user?.id) toast.success("已切换当前学期");
+        } finally {
+            if (alive && viewer === session.user?.id) { pending = false; terms.reload(); }
+        }
     }
 </script>
 
@@ -103,7 +110,6 @@
         <StateBlock kind="forbidden" description="需要管理员身份才能设置学期。" />
     {:else}
         <ManageNav />
-        {#if actionError}<p class="error" role="alert">{actionError}</p>{/if}
         <ResourceState status={terms.status} error={terms.error} refreshing={terms.refreshing} reload={terms.reload}>
             {#if items}
                 <Card padding="lg">
@@ -113,7 +119,6 @@
                             <p>{current ? `${current.name} · ${current.id}` : "尚未设置当前学期"}</p>
                             <p class="muted">切换当前学期后，教师的内容管理和教学班权限随之切换，历史资料与积分保留。</p>
                         </div>
-                        {#if current}<Button disabled={busy} onclick={() => setCurrent(null)}>清除当前学期</Button>{/if}
                     </div>
                 </Card>
                 {#if items.length}
@@ -127,7 +132,7 @@
                                         <td>{#if term.current}<Badge tone="accent">当前学期</Badge>{:else}<span class="muted">—</span>{/if}</td>
                                         <td><div class="row-actions">
                                             <Button size="sm" disabled={busy} onclick={() => openForm(term)}>重命名</Button>
-                                            <Button size="sm" disabled={busy || term.current} onclick={() => setCurrent(term.id)}>设为当前</Button>
+                                            <Button size="sm" disabled={busy || term.current} onclick={() => confirmSwitch(term)}>设为当前</Button>
                                         </div></td>
                                     </tr>
                                 {/each}
@@ -162,6 +167,13 @@
             </div>
         </form>
     </Dialog>
+    {#if switching}
+        <ConfirmDialog bind:open={switchOpen} title={`切换当前学期为“${switching.name}”？`} description={switchDescription}
+            confirmLabel="切换学期" onconfirm={switchTerm} onclose={() => { switching = null; }}
+            onerror={cause => { switchError = userMessage(cause, { TERM_NOT_FOUND: "该学期已不存在，请关闭弹窗并刷新列表。" }); }}>
+            {#if switchError}<p class="error" role="alert">{switchError}</p>{/if}
+        </ConfirmDialog>
+    {/if}
 {/if}
 
 <style>

@@ -56,7 +56,7 @@ const defs: Definition[] = [
     { method: 'get', path: '/courses/{id}', summary: '课程详情及本学期全部任课教师', response: ref('Course') },
     { method: 'patch', path: '/courses/{id}', summary: '管理员编辑课程名称及简介；课程号不可修改', auth: 'session', request: object(courseFields, []), response: ref('Course') },
     { method: 'get', path: '/terms', summary: '学期列表，当前学期优先', response: { type: 'array', items: ref('Term') } },
-    { method: 'put', path: '/terms/current', summary: '管理员切换当前学期，null 清除；保留所有历史关系', auth: 'session', request: object({ termId: { anyOf: [id, { type: 'null' }] } }), response: object({ termId: { anyOf: [id, { type: 'null' }] } }) },
+    { method: 'put', path: '/terms/current', summary: '管理员切换当前学期，可切回历年学期，不能清除；保留所有历史关系', auth: 'session', request: object({ termId: id }), response: object({ termId: id }) },
     { method: 'put', path: '/terms/{termId}', summary: '管理员建立或重命名学期；ID 不可为 current', auth: 'session', request: object({ name: str(120) }), response: object({ id, name: str(120) }) },
     { method: 'get', path: '/courses/{id}/terms', summary: '课程已安排开设的学期', response: { type: 'array', items: ref('Term') } },
     { method: 'put', path: '/courses/{id}/terms/{termId}', summary: '管理员安排课程在指定学期开设，可重复调用', auth: 'session', response: object({ courseId, termId: id }) },
