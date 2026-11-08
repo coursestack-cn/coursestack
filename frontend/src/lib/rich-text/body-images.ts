@@ -1,3 +1,4 @@
+import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
 import { Plugin } from "@tiptap/pm/state";
 import { Mapping } from "@tiptap/pm/transform";
 import { api, ApiError } from "$lib/api/client";
@@ -70,29 +71,28 @@ export class BodyImageDrafts {
         return new Plugin({
             appendTransaction: (transactions, before, after) => {
                 if (!transactions.some(tr => tr.docChanged)) return null;
-                const positions = new Map<string, number[]>();
+                const images = new Map<string, { pos: number; node: ProseMirrorNode }[]>();
                 after.doc.descendants((node, pos) => {
                     if (node.type.name !== "image") return;
                     const path = managedImagePath(node.attrs.src, location.origin);
                     if (!path) return;
-                    const existing = positions.get(path);
-                    if (existing) existing.push(pos); else positions.set(path, [pos]);
+                    const existing = images.get(path);
+                    if (existing) existing.push({ pos, node }); else images.set(path, [{ pos, node }]);
                 });
-                if (!positions.size) return null;
+                if (!images.size) return null;
                 const mapping = new Mapping();
                 for (const tr of transactions) mapping.appendMapping(tr.mapping);
                 const retained = new Map<string, number>();
                 before.doc.descendants((node, pos) => {
                     if (node.type.name !== "image") return;
                     const path = node.attrs.src as string, mapped = mapping.map(pos);
-                    if (positions.get(path)?.includes(mapped)) retained.set(path, mapped);
+                    if (images.get(path)?.some(image => image.pos === mapped)) retained.set(path, mapped);
                 });
                 const tr = after.tr;
-                for (const [path, occurrences] of positions) {
+                for (const [path, occurrences] of images) {
                     const own = this.originals.has(path) || this.entries.has(path);
-                    const keep = own ? retained.get(path) ?? occurrences[0] : -1;
-                    for (const pos of occurrences) {
-                        const node = after.doc.nodeAt(pos)!;
+                    const keep = own ? retained.get(path) ?? occurrences[0].pos : -1;
+                    for (const { pos, node } of occurrences) {
                         const src = pos === keep ? path : this.copy(path);
                         if (src !== node.attrs.src) tr.setNodeMarkup(pos, undefined, { ...node.attrs, src });
                     }
