@@ -77,6 +77,10 @@
 
     $effect(() => { search = router.pathname === "/search" ? router.query.get("q") ?? "" : ""; });
 
+    function submitSearch() {
+        void navigate(`/search?${new URLSearchParams({ q: search.trim() })}`, { focusHeading: false });
+    }
+
     onMount(() => {
         const media = window.matchMedia(`(max-width: ${sm - 1}px)`);
         const resize = () => { narrow = media.matches; };
@@ -111,10 +115,12 @@
                 </nav>
             {/if}
         </div>
-        <div class="desktop-search" role="search" aria-label="站内搜索">
+        <form class="desktop-search" role="search" aria-label="站内搜索"
+            onsubmit={(event) => { event.preventDefault(); submitSearch(); }}>
             <SearchInput bind:value={search} aria-label="搜索课程、资料、问题和回答" placeholder="搜索课程、资料、问题和回答"
-                onsubmit={(value) => { void navigate(`/search?${new URLSearchParams({ q: value.trim() })}`); }} />
-        </div>
+                onsubmit={submitSearch} />
+            <Button type="submit" variant="primary">搜索</Button>
+        </form>
         <div class="header-actions">
             {#if narrow}<Button href="/search" variant="ghost" iconOnly aria-label="搜索"><Search size="1em" /></Button>{/if}
             <Menu items={themeItems}>
@@ -155,7 +161,7 @@
     :global(.shell-nav-link) { display: block; padding: var(--space-2) var(--space-3); border-radius: var(--radius-md); color: var(--color-text-secondary); font-size: var(--font-size-md); }
     :global(.shell-nav-link:hover) { color: var(--color-accent); background: var(--color-surface-sunken); text-decoration: none; }
     :global(.shell-nav-link[aria-current="page"]), :global(.shell-nav-link:active) { color: var(--color-accent-soft-text); background: var(--color-accent-soft); }
-    .desktop-search { flex: 1; min-width: 0; max-width: calc(var(--width-prose) / 2); margin-inline: auto; }
+    .desktop-search { display: grid; grid-template-columns: minmax(0, 1fr) max-content; align-items: center; gap: var(--space-2); flex: 1; min-width: 0; max-width: calc(var(--width-prose) / 2); margin-inline: auto; }
     .header-actions { display: flex; align-items: center; gap: var(--space-2); margin-inline-start: auto; flex-shrink: 0; }
     .unread-count { position: absolute; top: 0; right: 0; transform: translate(25%, -25%); min-width: var(--space-4); padding-inline: var(--space-1); border-radius: var(--radius-full); background: var(--color-accent); color: var(--color-on-accent); font-size: var(--font-size-xs); font-weight: var(--font-weight-bold); line-height: var(--line-height-tight); }
     .session-loading { display: flex; align-items: center; justify-content: center; width: var(--space-10); }
