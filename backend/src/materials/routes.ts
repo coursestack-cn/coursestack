@@ -4,9 +4,9 @@ import { z } from 'zod';
 import { actor } from '../auth/middleware.ts';
 import { reasonSchema } from '../moderation/routes.ts';
 import { createDatabase, prepareStatement } from '../db/index.ts';
-import { contentDto, editContent, publicSelect, rawContent, requireEditor } from '../discussions/service.ts';
-import { type AppEnv, type PublicRow } from '../discussions/types.ts';
-import { HttpError, input, idSchema, listResult, page, parsedEnum, queryPage, respond } from '../http.ts';
+import { contentDto, editContent, hasPublicAcceptance, publicRootPage, rawContent, requireEditor } from '../discussions/service.ts';
+import { type AppEnv } from '../discussions/types.ts';
+import { HttpError, input, idSchema, listResult, page, parsedEnum, respond } from '../http.ts';
 import { editPermission, management, requireManagement } from '../permissions.ts';
 import { courseIdentity, materialContent, materialDetail, selectedVersion, versionDto, versionPage, withMaterialVersions } from './service.ts';
 import { materialId, materialMimes, maxBytes, now, versionNumber } from './validation.ts';
@@ -26,18 +26,13 @@ materialRoutes.get('/courses/:id/contents', async c => {
     if (termId !== undefined && !idSchema.safeParse(termId).success) throw new HttpError(400, 'INVALID_FILTER', '学期筛选无效');
     if (title && Array.from(title).length > 200) throw new HttpError(400, 'INVALID_FILTER', '标题最长200字');
     if (tag && Array.from(tag).length > 30) throw new HttpError(400, 'INVALID_FILTER', '标签最长30字');
-    const order = sort === 'score' ? sql`score DESC,c.created_at DESC,c.id ASC` : sort === 'newest' ? sql`c.created_at DESC,c.id ASC`
-        : sql`(WITH RECURSIVE activity(id,updated_at) AS (
-            SELECT id,updated_at FROM accessible_contents WHERE id=c.id
-            UNION ALL SELECT child.id,child.updated_at FROM accessible_contents child JOIN activity parent ON child.target_id=parent.id
-        ) SELECT MAX(updated_at) FROM activity) DESC,c.id ASC`;
-    const { rows, total } = await queryPage<PublicRow>(c, p, sql`${publicSelect(c)} WHERE c.course_id=${courseId}
+    const { rows, total } = await publicRootPage(c, p, sql`c.course_id=${courseId}
         ${termId === undefined ? sql`` : sql`AND c.term_id=${termId}`}
         ${authorId === undefined ? sql`` : sql`AND c.author_id=${authorId}`}
         AND c.kind IN ('question','material') ${kind === 'all' ? sql`` : sql`AND c.kind=${kind}`}
         ${title ? sql`AND instr(lower(c.title),lower(${title}))>0` : sql``}
-        ${state === 'solved' ? sql`AND accepted.answer_id IS NOT NULL` : state === 'unresolved' ? sql`AND accepted.answer_id IS NULL` : sql``}
-        ${tag ? sql`AND EXISTS(SELECT 1 FROM json_each(c.tags) WHERE instr(lower(value),lower(${tag}))>0)` : sql``} ORDER BY ${order}`);
+        ${state === 'all' ? sql`` : sql`AND ${state === 'solved' ? sql`` : sql`NOT`} ${hasPublicAcceptance}`}
+        ${tag ? sql`AND EXISTS(SELECT 1 FROM json_each(c.tags) WHERE instr(lower(value),lower(${tag}))>0)` : sql``}`, sort ?? 'active');
     return respond(c, listResult(await withMaterialVersions(c, rows.map(contentDto)), p, total));
 });
 materialRoutes.get('/materials/policy', c => respond(c, { maxBytes: maxBytes(c.env), mimeTypes: [...materialMimes],

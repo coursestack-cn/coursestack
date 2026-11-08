@@ -7,7 +7,7 @@ import { HttpError, respond, assertChanged, input, listResult, page, requestIden
 import { activeUser, editPermission } from '../permissions.ts';
 import { actor } from '../auth/middleware.ts';
 import type { AppEnv, Ctx, ContentRow, PublicRow } from '../discussions/types.ts';
-import { accessibleContent, contentDto, editContent, publicDetail, publicSelect, rawContent, readableContent, readableDetail, requireEditor, tombstone, tombstoneDto, visibleContent } from '../discussions/service.ts';
+import { accessibleContent, contentDto, editContent, hasPublicAcceptance, publicDetail, publicRootPage, publicSelect, rawContent, readableContent, readableDetail, requireEditor, tombstone, tombstoneDto, visibleContent } from '../discussions/service.ts';
 import { normalizeBodyImages, bodySchema, type ProseMirrorDocument } from './body.ts';
 import { ownerDeletionAllowed, cleanupDeletedFiles } from './deletion.ts';
 import { createDatabase, prepareStatement } from '../db/index.ts';
@@ -50,18 +50,10 @@ discussionRoutes.get('/courses/:id/questions', async c => {
     if (termId !== undefined && !idSchema.safeParse(termId).success) throw new HttpError(400, 'INVALID_FILTER', '学期筛选无效');
     if (c.req.query('fileVersionId') !== undefined) throw new HttpError(400, 'INVALID_FILTER', '资料引用使用正文链接，不支持按文件版本筛选');
     if (tag && Array.from(tag).length > 30) throw new HttpError(400, 'INVALID_FILTER', '标签最长30字');
-    const stateFilter = state === 'solved' ? sql`AND accepted.answer_id IS NOT NULL`
-        : state === 'unresolved' ? sql`AND accepted.answer_id IS NULL` : sql``;
-    const order = sort === 'score' ? sql`score DESC,c.created_at DESC,c.id ASC` : sort === 'active'
-        ? sql`(WITH RECURSIVE activity(id,updated_at) AS (
-                SELECT id,updated_at FROM accessible_contents WHERE id=c.id
-                UNION ALL SELECT child.id,child.updated_at FROM accessible_contents child JOIN activity parent ON child.target_id=parent.id
-            ) SELECT MAX(updated_at) FROM activity) DESC,c.id ASC`
-        : sql`c.created_at DESC,c.id ASC`;
-    const { rows, total } = await queryPage<PublicRow>(c, p, sql`${publicSelect(c)} WHERE c.kind='question' AND c.course_id=${courseId}
-        ${stateFilter} ${termId === undefined ? sql`` : sql`AND c.term_id=${termId}`}
-        ${tag ? sql`AND EXISTS(SELECT 1 FROM json_each(c.tags) WHERE value=${tag})` : sql``}
-        ORDER BY ${order}`);
+    const { rows, total } = await publicRootPage(c, p, sql`c.kind='question' AND c.course_id=${courseId}
+        ${state === 'all' ? sql`` : sql`AND ${state === 'solved' ? sql`` : sql`NOT`} ${hasPublicAcceptance}`}
+        ${termId === undefined ? sql`` : sql`AND c.term_id=${termId}`}
+        ${tag ? sql`AND EXISTS(SELECT 1 FROM json_each(c.tags) WHERE value=${tag})` : sql``}`, sort ?? 'newest');
     return respond(c, listResult(rows.map(contentDto), p, total));
 });
 discussionRoutes.post('/courses/:id/questions', async c => {

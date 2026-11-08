@@ -52,9 +52,24 @@ export async function requireEditor(c: Ctx, row: ContentRow) {
     if (!allowed) throw new HttpError(403, 'CONTENT_PERMISSION_DENIED', '只有内容所有者可以编辑内容');
     return a;
 }
+// Questions and materials are roots; answers belong to questions and comments to a question, answer or material.
+// An ownership chain is therefore at most three levels deep, so visibility can be checked upwards per row
+// instead of expanding the recursive public_contents view over the whole table.
+export function publicContent(row: SQL): SQL {
+    return sql`(${row}.status='visible' AND (${row}.target_id IS NULL OR EXISTS(SELECT 1 FROM contents ancestor
+        WHERE ancestor.id=${row}.target_id AND ancestor.status='visible' AND (ancestor.target_id IS NULL OR EXISTS(SELECT 1
+            FROM contents content_root WHERE content_root.id=ancestor.target_id AND content_root.status='visible' AND content_root.target_id IS NULL)))))`;
+}
+// Matches accessible_contents: a deleted comment stays reachable as a placeholder under a public parent.
+function reachableContent(row: SQL): SQL {
+    return sql`((${row}.target_id IS NULL AND ${row}.status='visible') OR (${row}.target_id IS NOT NULL
+        AND (${row}.status='visible' OR (${row}.kind='comment' AND ${row}.status='deleted'))
+        AND EXISTS(SELECT 1 FROM contents owner WHERE owner.id=${row}.target_id AND ${publicContent(sql`owner`)})))`;
+}
 export function publicSelect(c: Ctx, includeDeleted = false, source?: SQL) {
     const viewerId = c.get('actor')?.id ?? '';
-    return sql`SELECT c.*,(${viewerId}=c.author_id AND c.status<>'deleted' AND ${ownerDeletionAllowed(sql`c.id`)}) AS can_delete,EXISTS(SELECT 1 FROM public_contents visible WHERE visible.id=c.id) AS publicly_visible,(SELECT kind FROM contents WHERE id=c.target_id) AS parent_kind,accepted.answer_id AS acceptedAnswerId,CASE WHEN u.status='deleted' THEN '已删除' ELSE u.nickname END AS author_name,
+    const visible = publicContent(sql`c`);
+    return sql`SELECT c.*,(${viewerId}=c.author_id AND c.status<>'deleted' AND ${ownerDeletionAllowed(sql`c.id`)}) AS can_delete,${visible} AS publicly_visible,(SELECT kind FROM contents WHERE id=c.target_id) AS parent_kind,accepted.answer_id AS acceptedAnswerId,CASE WHEN u.status='deleted' THEN '已删除' ELSE u.nickname END AS author_name,
         CASE WHEN u.status='deleted' THEN NULL ELSE u.role END AS author_role,u.status='deleted' AS author_deleted,
         CASE WHEN u.status='active' THEN u.avatar_key ELSE NULL END AS author_avatar_key,
         EXISTS(SELECT 1 FROM teaching_classes ct JOIN terms term ON term.id=ct.term_id AND term.current=1
@@ -63,13 +78,47 @@ export function publicSelect(c: Ctx, includeDeleted = false, source?: SQL) {
         COALESCE((SELECT value FROM votes v WHERE v.content_id=c.id AND v.user_id=${viewerId}),0) AS my_vote,
         parent.id AS reply_summary_id,CASE WHEN parent_author.status='deleted' THEN '已删除' ELSE parent_author.nickname END AS reply_to_name,
         parent_author.status='deleted' AS reply_to_author_deleted,parent.status<>'visible' AS reply_to_deleted,
-        CASE WHEN c.kind='question' THEN (SELECT COUNT(*) FROM public_contents answer
-            WHERE answer.kind='answer' AND answer.target_id=c.id) ELSE 0 END AS answer_count,
-        (SELECT COUNT(*) FROM public_contents reply WHERE reply.kind='comment'
-            AND (CASE WHEN c.kind='comment' THEN reply.reply_to_id=c.id ELSE reply.target_id=c.id END)) AS comment_count
+        CASE WHEN c.kind='question' AND ${visible} THEN (SELECT COUNT(*) FROM contents answer
+            WHERE answer.target_id=c.id AND answer.status='visible' AND answer.kind='answer') ELSE 0 END AS answer_count,
+        CASE WHEN c.kind='comment' THEN CASE WHEN EXISTS(SELECT 1 FROM contents owner WHERE owner.id=c.target_id AND ${publicContent(sql`owner`)})
+                THEN (SELECT COUNT(*) FROM contents reply WHERE reply.reply_to_id=c.id AND reply.status='visible' AND reply.kind='comment') ELSE 0 END
+            WHEN ${visible} THEN (SELECT COUNT(*) FROM contents reply WHERE reply.target_id=c.id AND reply.status='visible' AND reply.kind='comment')
+            ELSE 0 END AS comment_count
         FROM ${source ?? (includeDeleted ? sql`accessible_contents` : sql`public_contents`)} c JOIN accounts u ON u.id=c.author_id
-        LEFT JOIN public_acceptances accepted ON accepted.question_id=c.id
-        LEFT JOIN accessible_contents parent ON parent.id=COALESCE(c.reply_to_id,c.target_id) LEFT JOIN accounts parent_author ON parent_author.id=parent.author_id`;
+        LEFT JOIN acceptances accepted ON accepted.question_id=c.id AND ${visible}
+            AND EXISTS(SELECT 1 FROM contents accepted_answer WHERE accepted_answer.id=accepted.answer_id AND accepted_answer.status='visible')
+        LEFT JOIN contents parent ON parent.id=COALESCE(c.reply_to_id,c.target_id) AND ${reachableContent(sql`parent`)}
+        LEFT JOIN accounts parent_author ON parent_author.id=parent.author_id`;
+}
+export type RootSort = 'newest' | 'active' | 'score';
+// For a public root question `c`, an accepted answer is public exactly when it is visible.
+export const hasPublicAcceptance = sql`EXISTS(SELECT 1 FROM acceptances accepted_root
+    JOIN contents accepted_answer ON accepted_answer.id=accepted_root.answer_id AND accepted_answer.status='visible'
+    WHERE accepted_root.question_id=c.id)`;
+// Lists public questions and materials of a course. `filter` refers to the root as `c`.
+// Counting and ordering work on the roots alone, and only the selected page is projected.
+export async function publicRootPage(c: Ctx, p: { pageSize: number; offset: number }, filter: SQL, sort: RootSort) {
+    const roots = sql`FROM contents c WHERE c.target_id IS NULL AND c.status='visible' AND ${filter}`;
+    const ranked = sort === 'active'
+        ? sql`roots AS MATERIALIZED (SELECT c.id ${roots}),
+            branch(root_id,id,updated_at) AS (
+                SELECT roots.id,c.id,c.updated_at FROM roots JOIN contents c ON c.id=roots.id
+                UNION ALL SELECT branch.root_id,child.id,child.updated_at FROM contents child JOIN branch ON child.target_id=branch.id
+                WHERE child.status='visible' OR (child.kind='comment' AND child.status='deleted')
+            ),
+            ranked AS (SELECT root_id AS id,ROW_NUMBER() OVER (ORDER BY MAX(updated_at) DESC,root_id ASC) AS position FROM branch GROUP BY root_id)`
+        : sql`ranked AS (SELECT c.id,ROW_NUMBER() OVER (ORDER BY ${sort === 'score'
+            ? sql`COALESCE((SELECT SUM(v.value) FROM votes v WHERE v.content_id=c.id),0) DESC,c.created_at DESC,c.id ASC`
+            : sql`c.created_at DESC,c.id ASC`}) AS position ${roots})`;
+    const db = createDatabase(c.env.DB);
+    const [count, rows] = await Promise.all([
+        db.get<{ total: number }>(sql`SELECT COUNT(*) AS total ${roots}`),
+        db.all<PublicRow>(sql`WITH RECURSIVE ${ranked},
+            selected AS MATERIALIZED (SELECT id,position FROM ranked ORDER BY position LIMIT ${p.pageSize} OFFSET ${p.offset})
+            ${publicSelect(c, false, sql`(SELECT contents.*,selected.position FROM selected JOIN contents ON contents.id=selected.id)`)}
+            ORDER BY c.position`),
+    ]);
+    return { rows, total: count?.total ?? 0 };
 }
 export function ownedSelect(c: Ctx) {
     const a = actor(c);
