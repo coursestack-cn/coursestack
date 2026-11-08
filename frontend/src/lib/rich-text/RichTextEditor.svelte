@@ -254,11 +254,14 @@
         editor = instance;
         publish(instance);
         return { destroy() {
-            for (const controller of controllers.values()) controller.abort();
-            controllers.clear();
-            instance.destroy();
-            imageDrafts.dispose();
-            editor = null;
+            try {
+                for (const controller of controllers.values()) controller.abort();
+                controllers.clear();
+                instance.destroy();
+            } finally {
+                editor = null;
+                imageDrafts.dispose();
+            }
         } };
     }
 
