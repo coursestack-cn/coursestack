@@ -19,10 +19,8 @@
     import ManageNav from "./ManageNav.svelte";
     import JoinCourseDialog from "./JoinCourseDialog.svelte";
     import CourseTermsDialog from "./CourseTermsDialog.svelte";
-    import TermSettingsDialog from "./TermSettingsDialog.svelte";
-    import CourseClassesDialog from "./CourseClassesDialog.svelte";
     import CourseFormDialog from "./CourseFormDialog.svelte";
-    import type { Course } from "./course";
+    import { courseClassesHref, type Course } from "./course";
 
     type CourseList = { items: Course[]; page: number; pageSize: number; total: number };
     type MyCourseList = Omit<CourseList, "items"> & { items: { course: Course }[] };
@@ -63,9 +61,7 @@
     });
 
     let formOpen = $state(false);
-    let classesOpen = $state(false);
     let termsOpen = $state(false);
-    let termSettingsOpen = $state(false);
     let joinOpen = $state(false);
     let selected = $state.raw<Course | null>(null);
 
@@ -103,7 +99,6 @@
 
 <PageLayout title="课程管理" subtitle={isAdmin ? "维护课程信息、开课安排与各教师的教学班。" : "加入本学期已开设的课程，管理自己的教学班。"}>
     {#snippet actions()}
-        {#if isAdmin}<Button onclick={() => { termSettingsOpen = true; }}>学期设置</Button>{/if}
         {#if canManage}
             <Button variant="primary" onclick={() => { void updateQuery({ new: "1" }); }}>
                 {#snippet icon()}<Plus size="1em" />{/snippet}
@@ -131,8 +126,7 @@
             <ResourceState status={courses.status} error={courses.error} refreshing={courses.refreshing} reload={courses.reload}>
                 {#if courses.data?.viewer === session.user?.id && courses.data?.items.length}
                     <div class="table-scroll">
-                        <table>
-                            <caption class="sr-only">课程列表</caption>
+                        <table aria-label="课程列表">
                             <thead><tr><th>课程编号</th><th>课程名称</th><th>当前教师</th><th>更新时间</th><th>操作</th></tr></thead>
                             <tbody>
                                 {#each courses.data.items as course (course.id)}
@@ -147,7 +141,7 @@
                                                 <Button size="sm" onclick={() => { selected = course; formOpen = true; }}>编辑</Button>
                                                 <Button size="sm" onclick={() => { selected = course; termsOpen = true; }}>开设学期</Button>
                                             {/if}
-                                            <Button size="sm" onclick={() => { selected = course; classesOpen = true; }}>教学班</Button>
+                                            <Button size="sm" href={courseClassesHref(course.id)}>教学班</Button>
                                         </div></td>
                                     </tr>
                                 {/each}
@@ -166,11 +160,9 @@
 {#if isAdmin}
     <CourseFormDialog bind:open={formOpen} course={selected} onsaved={saved} onfailed={courses.reload} onclose={closeCreate} />
     <CourseTermsDialog bind:open={termsOpen} course={selected} onsaved={courses.reload} />
-    <TermSettingsDialog bind:open={termSettingsOpen} onsaved={courses.reload} />
 {:else if canManage}
     <JoinCourseDialog bind:open={joinOpen} onsaved={saved} onclose={closeCreate} />
 {/if}
-{#if canManage}<CourseClassesDialog bind:open={classesOpen} course={selected} />{/if}
 
 <style>
     .search { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-4); }

@@ -117,7 +117,7 @@ test('local demo initializes empty state and always resets while migration and a
     try {
         const initial = await runDemoCommand(flags, options);
         assert.equal(initial.administratorId, null);
-        assert.equal(initial.createdAccounts, 101);
+        assert.equal(initial.createdAccounts, 105);
         platform = await openLocalTarget(persist);
         let db = platform.env.DB;
         assert.equal(await db.prepare('SELECT count(*) AS n FROM terms').first('n'), 2);
@@ -133,17 +133,17 @@ test('local demo initializes empty state and always resets while migration and a
         assert.equal(status.state.id, administratorId);
         const reset = await runDemoCommand(flags, options);
         assert.equal(reset.deletedFiles, 1);
-        assert.equal(reset.createdAccounts, 101);
+        assert.equal(reset.createdAccounts, 105);
         platform = await openLocalTarget(persist);
         db = platform.env.DB;
         assert.deepEqual(await db.prepare("SELECT id,password FROM accounts WHERE role='admin'").first(), { id: administratorId, password: 'kept-hash' });
         assert.equal(await db.prepare('SELECT count(*) AS n FROM sessions').first('n'), 0);
-        assert.equal(await db.prepare('SELECT count(*) AS n FROM accounts').first('n'), 102);
+        assert.equal(await db.prepare('SELECT count(*) AS n FROM accounts').first('n'), 106);
         const student = await db.prepare("SELECT nickname,password FROM accounts WHERE school_number='S0001'").first();
         assert.equal(student.nickname, '演示同学 001');
         assert.notEqual(student.password, 'changed-hash');
-        assert.deepEqual((await db.prepare('SELECT id,current FROM terms ORDER BY id').all()).results, [
-            { id: 'demo-current', current: 1 }, { id: 'demo-previous', current: 0 },
+        assert.deepEqual((await db.prepare('SELECT id,name,current FROM terms ORDER BY id').all()).results, [
+            { id: '25-2', name: '2026春', current: 0 }, { id: '26-1', name: '2026秋', current: 1 },
         ]);
         assert.deepEqual((await db.prepare('SELECT name FROM d1_migrations ORDER BY id').all()).results.map(row => row.name), (await readMigrations()).map(m => m.name));
         assert.deepEqual((await platform.env.FILES.list()).objects, []);

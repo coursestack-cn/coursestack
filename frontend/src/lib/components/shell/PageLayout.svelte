@@ -8,6 +8,8 @@
         subtitle?: string;
         breadcrumbs?: BreadcrumbItem[];
         width?: "page" | "prose";
+        /** Show placeholders instead of the breadcrumb and title until the page knows the names they contain. */
+        loading?: boolean;
         heading?: Snippet;
         actions?: Snippet;
         children?: Snippet;
@@ -16,17 +18,21 @@
 
 <script lang="ts">
     import Breadcrumb from "$lib/components/ui/Breadcrumb.svelte";
+    import Skeleton from "$lib/components/ui/Skeleton.svelte";
 
-    let { title, subtitle, breadcrumbs = [], width = "page", heading, actions, children, class: className = "", ...rest }: Props = $props();
+    let { title, subtitle, breadcrumbs = [], width = "page", loading = false, heading, actions, children, class: className = "", ...rest }: Props = $props();
 </script>
 
 <section {...rest} class={`page-layout ${width} ${className}`}>
-    {#if breadcrumbs.length}<Breadcrumb items={breadcrumbs} />{/if}
+    {#if breadcrumbs.length}
+        {#if loading}<Skeleton variant="block" width="16em" height="calc(var(--font-size-sm) * var(--line-height-base))" />
+        {:else}<Breadcrumb items={breadcrumbs} />{/if}
+    {/if}
     {#if heading}
         {@render heading()}
     {:else}<header class="page-heading">
         <div class="heading-copy">
-            <h1 tabindex="-1">{title}</h1>
+            <h1 tabindex="-1">{#if loading}<Skeleton variant="block" width="8em" height="1.4em" />{:else}{title}{/if}</h1>
             {#if subtitle}<p class="subtitle">{subtitle}</p>{/if}
         </div>
         {#if actions}<div class="actions">{@render actions()}</div>{/if}

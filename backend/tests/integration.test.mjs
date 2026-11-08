@@ -72,7 +72,8 @@ test('教学班默认积分规则失败时，加入教学班整体回滚', async
 test('删除问题撤销奖励并阻止后续回答，管理员可以跨课程审查', async () => {
     await h.policy(); const q = await h.postQuestion(), a = await h.postAnswer(q); await h.accept(q, a);
     assert.equal((await h.api('GET', `/moderation/contents/${q}`, 'admin')).status, 200);
-    assert.equal((await h.api('DELETE', `/contents/${q}`, 'student-a', { })).status, 200);
+    assert.equal((await h.api('DELETE', `/contents/${q}`, 'student-a', { })).status, 409);
+    assert.equal((await h.api('PUT', `/contents/${q}/moderation`, 'admin', { action: 'delete' })).status, 200);
     assert.equal((await h.api('POST', `/questions/${q}/answers`, 'student-b', { body: doc('删除后回复') })).status, 404);
     assert.equal(await h.database.prepare('SELECT SUM(delta_points) AS n FROM bonus_ledger').first('n'), 0);
     for (const id of [q, a]) assert.equal((await h.api('GET', `/contents/${id}`)).status, 404);

@@ -8,6 +8,7 @@
     import { onDestroy, untrack } from "svelte";
     import { api } from "$lib/api/client";
     import { userMessage } from "$lib/api/errors";
+    import { onBeforeLeave } from "$lib/router/leave.svelte.js";
     import Button from "$lib/components/ui/Button.svelte";
     import Dialog from "$lib/components/ui/Dialog.svelte";
     import Field from "$lib/components/ui/Field.svelte";
@@ -46,6 +47,7 @@
 
     const parse = (value: string | number) => String(value).trim() === "" ? NaN : Number(value);
     const changed = $derived(Boolean(course) && fields.some(({ key }) => parse(values[key]) !== course?.bonusPolicy[key]));
+    onBeforeLeave(() => !open || !pending && !changed);
 
     async function save(event: SubmitEvent) {
         event.preventDefault();

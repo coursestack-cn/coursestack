@@ -1,3 +1,5 @@
+import { bodySearchText } from '../search/text.ts';
+import { normalizeBodyImages } from '../discussions/body.ts';
 import { Hono } from 'hono';
 import { sql } from 'drizzle-orm';
 import { CONTENT_REQUEST_MAX_BYTES } from '../../../shared/rich-text/index.ts';
@@ -41,6 +43,7 @@ materialUploadRoutes.post('/material-uploads', async c => {
     const a = actor(c), data = await input(c, uploadInput, CONTENT_REQUEST_MAX_BYTES);
     if (data.file.size > maxBytes(c.env)) throw new HttpError(413, 'FILE_TOO_LARGE', '文件超过上传大小限制');
     requireStorage(c.env);
+    if (data.mode === 'create') normalizeBodyImages(data.body, new URL(c.req.url).origin);
     const identity = await requestIdentity(c, data), db = createDatabase(c.env.DB);
     let row = await db.get<UploadRow>(sql`SELECT * FROM material_upload_sessions WHERE owner_id=${a.id} AND request_key=${identity.key}`);
     if (!row) {
@@ -115,14 +118,14 @@ materialUploadRoutes.post('/material-uploads/:id/confirm', async c => {
         const gate = sql`u.id=${row.id} AND u.owner_id=${a.id} AND u.status='confirming' AND u.lease_token=${lease}
             AND u.lease_until>=${finishedAt} AND u.expires_at>${finishedAt} AND ${activeUser(a)}`;
         await c.env.DB.batch([
-            sql`INSERT INTO contents(id,kind,course_id,author_id,title,body,tags,updated_by,created_at,updated_at,request_key,request_hash)
-                SELECT u.material_id,'material',u.course_id,u.owner_id,json_extract(u.creation_draft,'$.title'),json_extract(u.creation_draft,'$.body'),
-                    json_extract(u.creation_draft,'$.tags'),${a.id},${finishedAt},${finishedAt},'material-upload:'||u.id,u.request_hash
+            sql`INSERT INTO contents(id,kind,course_id,term_id,author_id,title,body,body_text,tags,updated_by,created_at,updated_at,request_key,request_hash)
+                SELECT u.material_id,'material',u.course_id,(SELECT id FROM terms WHERE current=1),u.owner_id,json_extract(u.creation_draft,'$.title'),json_extract(u.creation_draft,'$.body'),
+                    ${bodySearchText(row.creation_draft ? JSON.parse(row.creation_draft).body : null)},json_extract(u.creation_draft,'$.tags'),${a.id},${finishedAt},${finishedAt},'material-upload:'||u.id,u.request_hash
                 FROM material_upload_sessions u WHERE ${gate} AND u.mode='create' ON CONFLICT(author_id,request_key) DO NOTHING`,
             sql`INSERT INTO file_versions(material_id,version,storage_key,size,mime,uploaded_by,updated_by,created_at)
                 SELECT u.material_id,COALESCE(counter.next_version,1),${key},u.expected_size,u.mime,${a.id},${a.id},${finishedAt}
-                FROM material_upload_sessions u JOIN public_contents m ON m.id=u.material_id AND m.kind='material' AND m.course_id=u.course_id
-                LEFT JOIN material_next_versions counter ON counter.material_id=m.id WHERE ${gate} AND ${editPermission(a, sql`m.course_id`, sql`m.author_id`)}
+                FROM material_upload_sessions u JOIN contents m ON m.id=u.material_id AND m.kind='material' AND m.status<>'deleted' AND m.course_id=u.course_id
+                LEFT JOIN material_next_versions counter ON counter.material_id=m.id WHERE ${gate} AND ${editPermission(a, sql`m.author_id`)}
                 ON CONFLICT(storage_key) DO NOTHING`,
             sql`UPDATE contents SET updated_at=${finishedAt},updated_by=${a.id} WHERE id=${row.material_id}
                 AND EXISTS(SELECT 1 FROM material_upload_sessions u JOIN file_versions f ON f.storage_key=${key} AND f.material_id=u.material_id WHERE ${gate})`,

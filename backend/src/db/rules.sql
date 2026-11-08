@@ -10,14 +10,57 @@ SELECT c.* FROM contents c JOIN reachable r ON r.id=c.id;
 --> statement-breakpoint
 CREATE VIEW public_contents AS SELECT * FROM accessible_contents WHERE status='visible';
 --> statement-breakpoint
--- Rewards follow moderation only: deleting a parent hides its branch but keeps points already earned below it.
-CREATE VIEW rewardable_contents AS
-WITH RECURSIVE unhidden(id) AS (
-    SELECT id FROM contents WHERE target_id IS NULL AND status IN ('visible','deleted')
-    UNION ALL
-    SELECT c.id FROM contents c JOIN unhidden p ON c.target_id=p.id WHERE c.status IN ('visible','deleted')
-)
-SELECT c.* FROM contents c JOIN unhidden u ON u.id=c.id WHERE c.status='visible';
+-- All body writes claim each managed key under the same ownership and expiry rules.
+CREATE VIEW content_image_attachments AS SELECT id,uploaded_by,content_id,draft_upload_id FROM content_images;
+--> statement-breakpoint
+CREATE TRIGGER content_image_attach INSTEAD OF INSERT ON content_image_attachments BEGIN
+  UPDATE content_images SET content_id=NEW.content_id,draft_upload_id=NEW.draft_upload_id,cleanup_at=NULL
+    WHERE id=NEW.id AND (content_id=NEW.content_id OR (uploaded_by=NEW.uploaded_by AND content_id IS NULL AND
+      (cleanup_at>unixepoch() OR EXISTS(SELECT 1 FROM material_upload_sessions u WHERE u.id=content_images.draft_upload_id
+        AND u.material_id=NEW.content_id AND u.owner_id=NEW.uploaded_by AND u.status='confirming'))));
+  SELECT RAISE(ABORT,'body_image_unavailable') WHERE changes()<>1;
+END;
+--> statement-breakpoint
+CREATE TRIGGER content_images_insert AFTER INSERT ON contents WHEN NEW.body IS NOT NULL BEGIN
+  INSERT INTO content_image_attachments(id,uploaded_by,content_id)
+    SELECT substr(atom,length('/api/body-images/')+1),NEW.updated_by,NEW.id FROM json_tree(NEW.body)
+    WHERE key='src' AND atom GLOB '/api/body-images/*';
+END;
+--> statement-breakpoint
+CREATE TRIGGER content_images_edit AFTER UPDATE OF body ON contents WHEN NEW.body IS NOT OLD.body BEGIN
+  UPDATE content_images SET content_id=NULL,cleanup_at=unixepoch() WHERE content_id=NEW.id
+    AND '/api/body-images/'||id NOT IN (SELECT atom FROM json_tree(NEW.body) WHERE key='src' AND type='text');
+  INSERT INTO content_image_attachments(id,uploaded_by,content_id)
+    SELECT substr(atom,length('/api/body-images/')+1),NEW.updated_by,NEW.id FROM json_tree(NEW.body)
+    WHERE key='src' AND atom GLOB '/api/body-images/*';
+END;
+--> statement-breakpoint
+CREATE TRIGGER content_images_delete AFTER DELETE ON contents BEGIN
+  UPDATE content_images SET content_id=NULL,cleanup_at=unixepoch() WHERE content_id=OLD.id;
+END;
+--> statement-breakpoint
+CREATE TRIGGER content_images_hold_draft AFTER INSERT ON material_upload_sessions WHEN NEW.creation_draft IS NOT NULL BEGIN
+  INSERT INTO content_image_attachments(id,uploaded_by,draft_upload_id)
+    SELECT substr(atom,length('/api/body-images/')+1),NEW.owner_id,NEW.id FROM json_tree(NEW.creation_draft,'$.body')
+    WHERE key='src' AND atom GLOB '/api/body-images/*';
+END;
+--> statement-breakpoint
+CREATE TRIGGER content_images_release_draft AFTER UPDATE OF creation_draft ON material_upload_sessions
+WHEN OLD.creation_draft IS NOT NULL AND NEW.creation_draft IS NULL BEGIN
+  UPDATE content_images SET draft_upload_id=NULL,cleanup_at=unixepoch() WHERE draft_upload_id=NEW.id;
+END;
+--> statement-breakpoint
+CREATE TRIGGER content_images_delete_draft AFTER DELETE ON material_upload_sessions BEGIN
+  UPDATE content_images SET draft_upload_id=NULL,cleanup_at=unixepoch() WHERE draft_upload_id=OLD.id;
+END;
+--> statement-breakpoint
+CREATE TRIGGER content_search_deleted AFTER UPDATE OF status ON contents
+WHEN NEW.status='deleted' AND NEW.body_text<>'' BEGIN
+    UPDATE contents SET body_text='' WHERE id=NEW.id;
+END;
+--> statement-breakpoint
+-- Automatic rewards require a publicly available source; deletion and hiding both retract the affected branch.
+CREATE VIEW rewardable_contents AS SELECT * FROM public_contents;
 --> statement-breakpoint
 CREATE VIEW public_acceptances AS
 SELECT a.* FROM acceptances a JOIN public_contents q ON q.id=a.question_id JOIN public_contents answer ON answer.id=a.answer_id;
@@ -32,21 +75,51 @@ CREATE VIEW bonus_state AS
 SELECT l.* FROM bonus_ledger l WHERE l.source_kind<>'manual'
     AND NOT EXISTS(SELECT 1 FROM bonus_ledger next WHERE next.reverses_id=l.id);
 --> statement-breakpoint
+-- Restoration uses the content's own term, never the current term. Legacy rows may use their original award's term.
+CREATE VIEW bonus_recalculation AS
+WITH sources AS (
+    SELECT c.id AS content_id,c.kind AS source_kind,c.id AS source_id,c.course_id,c.term_id,c.author_id AS student_id,0 AS version
+      FROM public_contents c WHERE c.kind IN ('question','answer','comment')
+    UNION ALL SELECT c.id,'acceptance',c.id,c.course_id,c.term_id,c.author_id,0
+      FROM public_acceptances a JOIN public_contents c ON c.id=a.answer_id
+    UNION ALL SELECT c.id,'material',c.id||'@'||f.version,c.course_id,c.term_id,f.uploaded_by,f.version
+      FROM public_contents c JOIN file_versions f ON f.material_id=c.id
+), term_sources AS (
+    SELECT s.*,COALESCE(s.term_id,(SELECT l.term_id FROM bonus_ledger l
+      WHERE l.source_kind=s.source_kind AND l.source_id=s.source_id AND l.reverses_id IS NULL)) AS reward_term
+    FROM sources s
+)
+SELECT s.content_id,s.source_kind,s.source_id,s.course_id,s.reward_term AS term_id,s.student_id,e.teacher_id,
+    CASE s.source_kind WHEN 'question' THEN r.points_question WHEN 'answer' THEN r.points_answer
+      WHEN 'comment' THEN r.points_comment WHEN 'acceptance' THEN r.points_acceptance
+      ELSE CASE WHEN s.version=1 THEN r.points_material ELSE r.points_material_version END END AS points
+FROM term_sources s JOIN accounts a ON a.id=s.student_id AND a.role='student'
+JOIN class_students e ON e.course_id=s.course_id AND e.term_id=s.reward_term AND e.student_id=s.student_id
+JOIN class_bonus_rules r ON r.course_id=e.course_id AND r.term_id=e.term_id AND r.teacher_id=e.teacher_id;
+--> statement-breakpoint
 CREATE TRIGGER account_role_immutable BEFORE UPDATE OF role ON accounts
 WHEN NEW.role <> OLD.role
 BEGIN SELECT RAISE(ABORT, 'replace_account_identity'); END;
 --> statement-breakpoint
 CREATE TRIGGER content_identity_immutable BEFORE UPDATE ON contents
 WHEN NEW.id<>OLD.id OR NEW.kind<>OLD.kind OR NEW.course_id<>OLD.course_id OR NEW.author_id<>OLD.author_id
-    OR NEW.target_id IS NOT OLD.target_id
+    OR NEW.target_id IS NOT OLD.target_id OR NEW.reply_to_id IS NOT OLD.reply_to_id OR NEW.term_id IS NOT OLD.term_id
 BEGIN SELECT RAISE(ABORT,'content_identity_immutable'); END;
 --> statement-breakpoint
 CREATE TRIGGER content_insert_guard BEFORE INSERT ON contents
-WHEN NEW.target_id IS NOT NULL BEGIN
+WHEN NEW.target_id IS NOT NULL OR NEW.reply_to_id IS NOT NULL BEGIN
     SELECT RAISE(ABORT,'invalid_content_target') WHERE NOT EXISTS (
         SELECT 1 FROM public_contents p WHERE p.id=NEW.target_id AND p.course_id=NEW.course_id
-            AND (NEW.kind<>'answer' OR p.kind='question'));
+            AND ((NEW.kind='answer' AND p.kind='question') OR (NEW.kind='comment' AND p.kind IN ('question','answer','material'))));
+    SELECT RAISE(ABORT,'invalid_comment_reply') WHERE NEW.reply_to_id IS NOT NULL AND NOT EXISTS(
+        SELECT 1 FROM public_contents reply WHERE reply.id=NEW.reply_to_id AND reply.kind='comment'
+            AND reply.target_id=NEW.target_id AND reply.course_id=NEW.course_id);
 END;
+--> statement-breakpoint
+CREATE TRIGGER moderation_version_guard BEFORE INSERT ON moderation_actions
+WHEN NEW.version IS NOT NULL AND (NEW.version<=0 OR NEW.new_status<>'deleted'
+  OR NOT EXISTS(SELECT 1 FROM contents WHERE id=NEW.content_id AND kind='material'))
+BEGIN SELECT RAISE(ABORT,'invalid_moderation_version'); END;
 --> statement-breakpoint
 CREATE TRIGGER course_creator_guard BEFORE INSERT ON courses
 WHEN NOT EXISTS(SELECT 1 FROM accounts WHERE id=NEW.created_by AND role='admin' AND status<>'deleted')
@@ -80,14 +153,60 @@ CREATE TRIGGER class_student_insert_guard BEFORE INSERT ON class_students BEGIN
 END;
 --> statement-breakpoint
 CREATE TRIGGER class_student_identity_immutable BEFORE UPDATE ON class_students
-WHEN NEW.course_id<>OLD.course_id OR NEW.term_id<>OLD.term_id OR NEW.student_id<>OLD.student_id OR NEW.teacher_id<>OLD.teacher_id
+WHEN NEW.course_id<>OLD.course_id OR NEW.term_id<>OLD.term_id OR NEW.student_id<>OLD.student_id
 BEGIN SELECT RAISE(ABORT,'class_student_identity_immutable'); END;
 --> statement-breakpoint
+CREATE TRIGGER class_student_transferred AFTER UPDATE OF teacher_id ON class_students
+WHEN NEW.teacher_id<>OLD.teacher_id BEGIN
+  UPDATE bonus_ledger SET teacher_id=NEW.teacher_id
+  WHERE course_id=NEW.course_id AND term_id=NEW.term_id AND student_id=NEW.student_id AND teacher_id<>NEW.teacher_id;
+END;
+--> statement-breakpoint
+-- A restored award can belong to a different term from its original award. When one
+-- enrollment is erased, reconnect surviving entries for that source in ledger order.
+CREATE VIEW detached_bonus_links AS
+SELECT l.id,l.course_id,l.student_id,(SELECT MAX(p.id) FROM bonus_ledger p WHERE p.source_kind=l.source_kind
+    AND p.source_id=l.source_id AND p.id<l.id) AS previous_id
+FROM bonus_ledger l WHERE l.reverses_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM bonus_ledger p WHERE p.id=l.reverses_id);
+--> statement-breakpoint
+CREATE TRIGGER class_student_removed AFTER DELETE ON class_students BEGIN
+  DELETE FROM bonus_ledger WHERE course_id=OLD.course_id AND term_id=OLD.term_id AND student_id=OLD.student_id;
+  UPDATE bonus_ledger SET reverses_id=(SELECT previous_id FROM detached_bonus_links WHERE id=bonus_ledger.id)
+    WHERE id IN (SELECT id FROM detached_bonus_links WHERE course_id=OLD.course_id AND student_id=OLD.student_id);
+END;
+--> statement-breakpoint
+CREATE TRIGGER teaching_class_removed BEFORE DELETE ON teaching_classes BEGIN
+  -- Older rosters could change without moving existing ledger entries. Keep those
+  -- students' scores with their surviving enrollment before cleaning up this class.
+  UPDATE bonus_ledger SET teacher_id=(SELECT e.teacher_id FROM class_students e WHERE e.course_id=OLD.course_id
+      AND e.term_id=OLD.term_id AND e.student_id=bonus_ledger.student_id)
+    WHERE course_id=OLD.course_id AND term_id=OLD.term_id AND teacher_id=OLD.teacher_id
+      AND EXISTS(SELECT 1 FROM class_students e WHERE e.course_id=OLD.course_id AND e.term_id=OLD.term_id
+        AND e.student_id=bonus_ledger.student_id AND e.teacher_id<>OLD.teacher_id);
+  DELETE FROM class_students WHERE course_id=OLD.course_id AND term_id=OLD.term_id AND teacher_id=OLD.teacher_id;
+  DELETE FROM bonus_ledger WHERE course_id=OLD.course_id AND term_id=OLD.term_id AND teacher_id=OLD.teacher_id;
+  UPDATE bonus_ledger SET reverses_id=(SELECT previous_id FROM detached_bonus_links WHERE id=bonus_ledger.id)
+    WHERE id IN (SELECT id FROM detached_bonus_links WHERE course_id=OLD.course_id);
+  DELETE FROM class_bonus_rules WHERE course_id=OLD.course_id AND term_id=OLD.term_id AND teacher_id=OLD.teacher_id;
+END;
+--> statement-breakpoint
 CREATE TRIGGER ledger_no_delete BEFORE DELETE ON bonus_ledger
+WHEN EXISTS(SELECT 1 FROM class_students WHERE course_id=OLD.course_id AND term_id=OLD.term_id AND student_id=OLD.student_id)
 BEGIN SELECT RAISE(ABORT,'immutable_ledger'); END;
 --> statement-breakpoint
-CREATE TRIGGER ledger_no_update BEFORE UPDATE ON bonus_ledger
-BEGIN SELECT RAISE(ABORT,'immutable_ledger'); END;
+CREATE TRIGGER ledger_no_update BEFORE UPDATE ON bonus_ledger BEGIN
+  SELECT RAISE(ABORT,'immutable_ledger') WHERE
+    (NEW.id,NEW.course_id,NEW.term_id,NEW.student_id,NEW.delta_points,NEW.source_kind,NEW.source_id,NEW.operator_id,NEW.reason,NEW.request_hash,NEW.created_at)
+    IS NOT (OLD.id,OLD.course_id,OLD.term_id,OLD.student_id,OLD.delta_points,OLD.source_kind,OLD.source_id,OLD.operator_id,OLD.reason,OLD.request_hash,OLD.created_at);
+  SELECT RAISE(ABORT,'immutable_ledger') WHERE NEW.teacher_id<>OLD.teacher_id AND NOT EXISTS(
+    SELECT 1 FROM class_students WHERE course_id=OLD.course_id AND term_id=OLD.term_id AND student_id=OLD.student_id AND teacher_id=NEW.teacher_id);
+  SELECT RAISE(ABORT,'immutable_ledger') WHERE NEW.reverses_id IS NOT OLD.reverses_id AND NOT EXISTS(
+    SELECT 1 FROM detached_bonus_links WHERE id=OLD.id AND previous_id IS NEW.reverses_id);
+END;
+--> statement-breakpoint
+CREATE TRIGGER ledger_notification_removed AFTER DELETE ON bonus_ledger BEGIN
+  DELETE FROM notifications WHERE account_id=OLD.student_id AND kind='bonus' AND source_id=CAST(OLD.id AS TEXT);
+END;
 --> statement-breakpoint
 CREATE TRIGGER content_created_bonus AFTER INSERT ON contents
 WHEN NEW.kind IN ('question','answer','comment') BEGIN
@@ -102,6 +221,23 @@ WHEN NEW.kind IN ('question','answer','comment') BEGIN
     AND CASE NEW.kind WHEN 'question' THEN r.points_question WHEN 'answer' THEN r.points_answer ELSE r.points_comment END>0;
 END;
 --> statement-breakpoint
+-- Keep deletion terminal, including on private owner routes.
+CREATE TRIGGER content_deleted_terminal BEFORE UPDATE OF status ON contents
+WHEN OLD.status='deleted' AND NEW.status<>'deleted'
+BEGIN SELECT RAISE(ABORT,'deleted_content'); END;
+--> statement-breakpoint
+CREATE TRIGGER content_deleted_cascade AFTER UPDATE OF status ON contents
+WHEN NEW.status='deleted' AND OLD.status<>'deleted' BEGIN
+  UPDATE contents SET status='deleted',title=NULL,body=NULL,tags=NULL,updated_at=NEW.updated_at,updated_by=NEW.updated_by
+    WHERE status<>'deleted' AND id IN (WITH RECURSIVE branch(id) AS (
+      SELECT id FROM contents WHERE target_id=NEW.id
+      UNION ALL SELECT child.id FROM contents child JOIN branch parent ON child.target_id=parent.id
+    ) SELECT id FROM branch);
+  UPDATE file_versions SET updated_by=NEW.updated_by WHERE material_id=NEW.id;
+  UPDATE material_upload_sessions SET cleaned_at=NULL WHERE material_id=NEW.id AND status='published';
+  DELETE FROM file_versions WHERE material_id=NEW.id;
+END;
+--> statement-breakpoint
 CREATE TRIGGER content_status_bonus AFTER UPDATE OF status ON contents WHEN NEW.status<>OLD.status BEGIN
   UPDATE acceptances SET operator_id=NEW.updated_by
     WHERE NEW.status='deleted' AND (question_id=NEW.id OR answer_id=NEW.id);
@@ -109,7 +245,14 @@ CREATE TRIGGER content_status_bonus AFTER UPDATE OF status ON contents WHEN NEW.
   INSERT INTO bonus_ledger(course_id,term_id,teacher_id,student_id,delta_points,source_kind,source_id,operator_id,created_at,reverses_id)
   SELECT l.course_id,l.term_id,l.teacher_id,l.student_id,-l.delta_points,l.source_kind,l.source_id,NEW.updated_by,NEW.updated_at,l.id
   FROM bonus_state l LEFT JOIN bonus_sources s ON s.source_kind=l.source_kind AND s.source_id=l.source_id
-  WHERE l.course_id=NEW.course_id AND ((l.delta_points>0 AND s.source_id IS NULL) OR (l.delta_points<0 AND s.source_id IS NOT NULL));
+  WHERE l.course_id=NEW.course_id AND (l.delta_points>0 AND s.source_id IS NULL);
+  INSERT INTO bonus_ledger(course_id,term_id,teacher_id,student_id,delta_points,source_kind,source_id,operator_id,created_at,reverses_id)
+  SELECT r.course_id,r.term_id,r.teacher_id,r.student_id,r.points,r.source_kind,r.source_id,NEW.updated_by,NEW.updated_at,l.id
+  FROM bonus_recalculation r LEFT JOIN bonus_state l ON l.source_kind=r.source_kind AND l.source_id=r.source_id
+  WHERE OLD.status='hidden' AND NEW.status='visible' AND r.points>0 AND (l.id IS NULL OR l.delta_points<0)
+    AND r.content_id IN (WITH RECURSIVE branch(id) AS (
+      SELECT NEW.id UNION ALL SELECT c.id FROM contents c JOIN branch p ON c.target_id=p.id
+    ) SELECT id FROM branch);
 END;
 --> statement-breakpoint
 CREATE TRIGGER acceptance_insert_guard BEFORE INSERT ON acceptances BEGIN
@@ -138,7 +281,7 @@ CREATE TRIGGER acceptance_created AFTER INSERT ON acceptances BEGIN
   INSERT INTO bonus_ledger(course_id,term_id,teacher_id,student_id,delta_points,source_kind,source_id,operator_id,created_at,reverses_id)
   SELECT l.course_id,l.term_id,l.teacher_id,l.student_id,-l.delta_points,l.source_kind,l.source_id,NEW.operator_id,unixepoch(),l.id
   FROM bonus_state l LEFT JOIN bonus_sources s ON s.source_kind=l.source_kind AND s.source_id=l.source_id
-  WHERE l.course_id=(SELECT course_id FROM contents WHERE id=NEW.question_id) AND ((l.delta_points>0 AND s.source_id IS NULL) OR (l.delta_points<0 AND s.source_id IS NOT NULL));
+  WHERE l.course_id=(SELECT course_id FROM contents WHERE id=NEW.question_id) AND ((l.delta_points>0 AND s.source_id IS NULL) OR (l.delta_points<0 AND s.source_id IS NOT NULL AND l.source_kind='acceptance' AND l.source_id=NEW.answer_id));
 END;
 --> statement-breakpoint
 CREATE TRIGGER acceptance_changed AFTER UPDATE OF answer_id ON acceptances WHEN NEW.answer_id<>OLD.answer_id BEGIN
@@ -152,18 +295,18 @@ CREATE TRIGGER acceptance_changed AFTER UPDATE OF answer_id ON acceptances WHEN 
   INSERT INTO bonus_ledger(course_id,term_id,teacher_id,student_id,delta_points,source_kind,source_id,operator_id,created_at,reverses_id)
   SELECT l.course_id,l.term_id,l.teacher_id,l.student_id,-l.delta_points,l.source_kind,l.source_id,NEW.operator_id,unixepoch(),l.id
   FROM bonus_state l LEFT JOIN bonus_sources s ON s.source_kind=l.source_kind AND s.source_id=l.source_id
-  WHERE l.course_id=(SELECT course_id FROM contents WHERE id=NEW.question_id) AND ((l.delta_points>0 AND s.source_id IS NULL) OR (l.delta_points<0 AND s.source_id IS NOT NULL));
+  WHERE l.course_id=(SELECT course_id FROM contents WHERE id=NEW.question_id) AND ((l.delta_points>0 AND s.source_id IS NULL) OR (l.delta_points<0 AND s.source_id IS NOT NULL AND l.source_kind='acceptance' AND l.source_id=NEW.answer_id));
 END;
 --> statement-breakpoint
 CREATE TRIGGER acceptance_removed AFTER DELETE ON acceptances BEGIN
   INSERT INTO bonus_ledger(course_id,term_id,teacher_id,student_id,delta_points,source_kind,source_id,operator_id,created_at,reverses_id)
   SELECT l.course_id,l.term_id,l.teacher_id,l.student_id,-l.delta_points,l.source_kind,l.source_id,OLD.operator_id,unixepoch(),l.id
   FROM bonus_state l LEFT JOIN bonus_sources s ON s.source_kind=l.source_kind AND s.source_id=l.source_id
-  WHERE l.course_id=(SELECT course_id FROM contents WHERE id=OLD.question_id) AND ((l.delta_points>0 AND s.source_id IS NULL) OR (l.delta_points<0 AND s.source_id IS NOT NULL));
+  WHERE l.course_id=(SELECT course_id FROM contents WHERE id=OLD.question_id) AND (l.delta_points>0 AND s.source_id IS NULL);
 END;
 --> statement-breakpoint
 CREATE TRIGGER file_version_insert_guard BEFORE INSERT ON file_versions BEGIN
-  SELECT RAISE(ABORT,'invalid_material') WHERE NOT EXISTS(SELECT 1 FROM contents WHERE id=NEW.material_id AND kind='material');
+  SELECT RAISE(ABORT,'invalid_material') WHERE NOT EXISTS(SELECT 1 FROM contents WHERE id=NEW.material_id AND kind='material' AND status<>'deleted');
   SELECT RAISE(ABORT,'invalid_file_actor') WHERE NOT EXISTS(SELECT 1 FROM accounts WHERE id=NEW.uploaded_by AND status<>'deleted')
     OR NOT EXISTS(SELECT 1 FROM accounts WHERE id=NEW.updated_by AND status<>'deleted');
 END;
@@ -189,14 +332,20 @@ CREATE TRIGGER file_version_created_bonus AFTER INSERT ON file_versions BEGIN
   INSERT INTO bonus_ledger(course_id,term_id,teacher_id,student_id,delta_points,source_kind,source_id,operator_id,created_at,reverses_id)
   SELECT l.course_id,l.term_id,l.teacher_id,l.student_id,-l.delta_points,l.source_kind,l.source_id,NEW.updated_by,unixepoch(),l.id
   FROM bonus_state l LEFT JOIN bonus_sources s ON s.source_kind=l.source_kind AND s.source_id=l.source_id
-  WHERE l.course_id=(SELECT course_id FROM contents WHERE id=NEW.material_id) AND ((l.delta_points>0 AND s.source_id IS NULL) OR (l.delta_points<0 AND s.source_id IS NOT NULL));
+  WHERE l.course_id=(SELECT course_id FROM contents WHERE id=NEW.material_id) AND (l.delta_points>0 AND s.source_id IS NULL);
 END;
+--> statement-breakpoint
+-- The last version can only be removed as part of deleting the entire material.
+CREATE TRIGGER file_version_keep_one BEFORE DELETE ON file_versions
+WHEN EXISTS(SELECT 1 FROM contents WHERE id=OLD.material_id AND status<>'deleted')
+  AND NOT EXISTS(SELECT 1 FROM file_versions WHERE material_id=OLD.material_id AND version<>OLD.version)
+BEGIN SELECT RAISE(ABORT,'material_last_version'); END;
 --> statement-breakpoint
 CREATE TRIGGER file_version_deleted_bonus AFTER DELETE ON file_versions BEGIN
   INSERT INTO bonus_ledger(course_id,term_id,teacher_id,student_id,delta_points,source_kind,source_id,operator_id,created_at,reverses_id)
   SELECT l.course_id,l.term_id,l.teacher_id,l.student_id,-l.delta_points,l.source_kind,l.source_id,OLD.updated_by,unixepoch(),l.id
   FROM bonus_state l LEFT JOIN bonus_sources s ON s.source_kind=l.source_kind AND s.source_id=l.source_id
-  WHERE l.course_id=(SELECT course_id FROM contents WHERE id=OLD.material_id) AND ((l.delta_points>0 AND s.source_id IS NULL) OR (l.delta_points<0 AND s.source_id IS NOT NULL));
+  WHERE l.course_id=(SELECT course_id FROM contents WHERE id=OLD.material_id) AND (l.delta_points>0 AND s.source_id IS NULL);
 END;
 --> statement-breakpoint
 CREATE TRIGGER bonus_ledger_guard BEFORE INSERT ON bonus_ledger BEGIN
@@ -206,6 +355,118 @@ CREATE TRIGGER bonus_ledger_guard BEFORE INSERT ON bonus_ledger BEGIN
   SELECT RAISE(ABORT,'invalid_bonus_student') WHERE NOT EXISTS(SELECT 1 FROM accounts WHERE id=NEW.student_id AND role='student');
   SELECT RAISE(ABORT,'invalid_bonus_reversal') WHERE NEW.reverses_id IS NOT NULL AND NOT EXISTS(
     SELECT 1 FROM bonus_ledger previous WHERE previous.id=NEW.reverses_id AND previous.source_kind<>'manual'
-      AND previous.course_id=NEW.course_id AND previous.term_id=NEW.term_id AND previous.teacher_id=NEW.teacher_id AND previous.student_id=NEW.student_id
-      AND previous.source_kind=NEW.source_kind AND previous.source_id=NEW.source_id AND previous.delta_points=-NEW.delta_points);
+      AND previous.course_id=NEW.course_id AND previous.student_id=NEW.student_id
+      AND previous.source_kind=NEW.source_kind AND previous.source_id=NEW.source_id
+      AND ((previous.term_id=NEW.term_id AND previous.teacher_id=NEW.teacher_id AND previous.delta_points=-NEW.delta_points)
+        OR (previous.delta_points<0 AND NEW.delta_points>0 AND EXISTS(
+          SELECT 1 FROM bonus_recalculation r WHERE r.source_kind=NEW.source_kind AND r.source_id=NEW.source_id
+            AND r.course_id=NEW.course_id AND r.term_id=NEW.term_id AND r.teacher_id=NEW.teacher_id
+            AND r.student_id=NEW.student_id AND r.points=NEW.delta_points))));
+END;
+--> statement-breakpoint
+CREATE TRIGGER moderation_notification_created AFTER INSERT ON moderation_actions BEGIN
+  INSERT INTO notifications(account_id,actor_id,kind,source_id,content_id,created_at)
+  SELECT c.author_id,NEW.actor_id,'moderation',CAST(NEW.id AS TEXT),c.id,NEW.created_at
+  FROM contents c JOIN accounts a ON a.id=c.author_id
+  WHERE c.id=NEW.content_id AND c.author_id<>NEW.actor_id AND a.status<>'deleted'
+  ON CONFLICT DO NOTHING;
+END;
+--> statement-breakpoint
+-- Own-operation rewards remain toast-only; all external adjustments have a durable inbox entry.
+CREATE TRIGGER bonus_notification_created AFTER INSERT ON bonus_ledger
+WHEN NEW.operator_id<>NEW.student_id BEGIN
+  INSERT INTO notifications(account_id,actor_id,kind,source_id,content_id,created_at)
+  SELECT NEW.student_id,NEW.operator_id,'bonus',CAST(NEW.id AS TEXT),
+      CASE WHEN NEW.source_kind='manual' THEN NULL WHEN NEW.source_kind='material'
+        THEN substr(NEW.source_id,1,instr(NEW.source_id,'@')-1) ELSE NEW.source_id END,NEW.created_at
+  FROM accounts a WHERE a.id=NEW.student_id AND a.status<>'deleted'
+  ON CONFLICT DO NOTHING;
+END;
+--> statement-breakpoint
+CREATE TRIGGER favorite_content_guard BEFORE INSERT ON favorites
+WHEN NEW.content_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM public_contents WHERE id=NEW.content_id AND kind IN ('material','question'))
+BEGIN SELECT RAISE(ABORT,'invalid_favorite_target'); END;
+--> statement-breakpoint
+CREATE TRIGGER favorite_identity_immutable BEFORE UPDATE ON favorites
+BEGIN SELECT RAISE(ABORT,'favorite_identity_immutable'); END;
+--> statement-breakpoint
+CREATE TRIGGER content_events_no_update BEFORE UPDATE ON content_events
+BEGIN SELECT RAISE(ABORT,'immutable_content_event'); END;
+--> statement-breakpoint
+CREATE TRIGGER content_events_no_delete BEFORE DELETE ON content_events
+BEGIN SELECT RAISE(ABORT,'immutable_content_event'); END;
+--> statement-breakpoint
+CREATE VIEW content_roots AS
+WITH RECURSIVE roots(id,root_id) AS (
+  SELECT id,id FROM contents WHERE target_id IS NULL
+  UNION ALL SELECT child.id,roots.root_id FROM contents child JOIN roots ON child.target_id=roots.id
+)
+SELECT id,root_id FROM roots;
+--> statement-breakpoint
+CREATE TRIGGER content_event_created AFTER INSERT ON contents
+WHEN NEW.kind IN ('question','answer','comment') BEGIN
+  INSERT INTO content_events(source_key,kind,course_id,root_id,content_id,actor_id,created_at)
+  SELECT 'created:'||NEW.id,NEW.kind||'_created',NEW.course_id,r.root_id,NEW.id,NEW.author_id,NEW.created_at
+  FROM content_roots r JOIN public_contents p ON p.id=r.id WHERE r.id=NEW.id;
+END;
+--> statement-breakpoint
+CREATE TRIGGER material_event_created AFTER INSERT ON file_versions BEGIN
+  INSERT INTO content_events(source_key,kind,course_id,root_id,content_id,actor_id,version,created_at)
+  SELECT 'version:'||NEW.material_id||'@'||NEW.version,CASE WHEN NEW.version=1 THEN 'material_created' ELSE 'material_version' END,
+      m.course_id,m.id,m.id,NEW.uploaded_by,NEW.version,NEW.created_at
+  FROM public_contents m WHERE m.id=NEW.material_id;
+END;
+--> statement-breakpoint
+CREATE TRIGGER content_event_edited AFTER UPDATE OF title,body,tags ON contents
+WHEN NEW.status<>'deleted' AND (NEW.title IS NOT OLD.title OR NEW.body IS NOT OLD.body OR NEW.tags IS NOT OLD.tags) BEGIN
+  INSERT INTO content_events(source_key,kind,course_id,root_id,content_id,actor_id,created_at)
+  SELECT 'edit:'||lower(hex(randomblob(16))),'content_edited',NEW.course_id,r.root_id,NEW.id,NEW.updated_by,NEW.updated_at
+  FROM content_roots r JOIN public_contents p ON p.id=r.id WHERE r.id=NEW.id;
+END;
+--> statement-breakpoint
+CREATE TRIGGER acceptance_event_created AFTER INSERT ON acceptances BEGIN
+  INSERT INTO content_events(source_key,kind,course_id,root_id,content_id,actor_id,new_answer_id)
+  SELECT 'acceptance:'||lower(hex(randomblob(16))),'acceptance_changed',q.course_id,q.id,q.id,NEW.operator_id,NEW.answer_id
+  FROM public_contents q WHERE q.id=NEW.question_id;
+END;
+--> statement-breakpoint
+CREATE TRIGGER acceptance_event_changed AFTER UPDATE OF answer_id ON acceptances WHEN NEW.answer_id<>OLD.answer_id BEGIN
+  INSERT INTO content_events(source_key,kind,course_id,root_id,content_id,actor_id,old_answer_id,new_answer_id)
+  SELECT 'acceptance:'||lower(hex(randomblob(16))),'acceptance_changed',q.course_id,q.id,q.id,NEW.operator_id,OLD.answer_id,NEW.answer_id
+  FROM public_contents q WHERE q.id=NEW.question_id;
+END;
+--> statement-breakpoint
+CREATE TRIGGER acceptance_event_removed AFTER DELETE ON acceptances BEGIN
+  INSERT INTO content_events(source_key,kind,course_id,root_id,content_id,actor_id,old_answer_id)
+  SELECT 'acceptance:'||lower(hex(randomblob(16))),'acceptance_changed',q.course_id,q.id,q.id,OLD.operator_id,OLD.answer_id
+  FROM public_contents q WHERE q.id=OLD.question_id AND EXISTS(SELECT 1 FROM public_contents WHERE id=OLD.answer_id);
+END;
+--> statement-breakpoint
+-- Recipients are captured in the event transaction. One event has at most one entry per account.
+CREATE TRIGGER favorite_event_notifications AFTER INSERT ON content_events
+WHEN NEW.kind NOT IN ('question_created','material_created') BEGIN
+  INSERT INTO notifications(account_id,actor_id,kind,source_id,event_id,content_id,created_at)
+  SELECT recipient.id,NEW.actor_id,
+    CASE
+      WHEN NEW.kind='answer_created' AND recipient.id=parent.author_id THEN 'answer'
+      WHEN NEW.kind='comment_created' AND recipient.id=reply.author_id THEN 'reply'
+      WHEN NEW.kind='comment_created' AND recipient.id=parent.author_id THEN 'comment'
+      WHEN NEW.kind='acceptance_changed' AND recipient.id=new_answer.author_id THEN 'accepted'
+      WHEN NEW.kind='acceptance_changed' AND recipient.id=old_answer.author_id THEN 'unaccepted'
+      ELSE 'favorite' END,
+    'event:'||NEW.id,NEW.id,
+    CASE WHEN NEW.kind='acceptance_changed' THEN
+      CASE WHEN recipient.id=new_answer.author_id THEN NEW.new_answer_id
+           WHEN recipient.id=old_answer.author_id THEN NEW.old_answer_id ELSE NEW.root_id END
+      ELSE NEW.content_id END,NEW.created_at
+  FROM accounts recipient JOIN contents subject ON subject.id=NEW.content_id JOIN contents root ON root.id=NEW.root_id
+    LEFT JOIN contents parent ON parent.id=subject.target_id LEFT JOIN contents reply ON reply.id=subject.reply_to_id
+    LEFT JOIN contents new_answer ON new_answer.id=NEW.new_answer_id LEFT JOIN contents old_answer ON old_answer.id=NEW.old_answer_id
+  WHERE recipient.id<>NEW.actor_id AND recipient.status<>'deleted' AND (
+    (NEW.kind IN ('answer_created','comment_created') AND recipient.id IN (parent.author_id,reply.author_id))
+    OR (NEW.kind='acceptance_changed' AND recipient.id IN (new_answer.author_id,old_answer.author_id))
+    OR (EXISTS(SELECT 1 FROM favorites f WHERE f.account_id=recipient.id AND f.content_id=NEW.root_id)
+        AND ((root.kind='question' AND NEW.kind IN ('answer_created','acceptance_changed'))
+             OR (root.kind='material' AND NEW.kind='material_version')))
+  ) ON CONFLICT DO NOTHING;
 END;

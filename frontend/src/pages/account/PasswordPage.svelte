@@ -23,8 +23,9 @@
         if (pending) return;
         error = "";
         const password = String(newPassword);
-        if (Array.from(password).length < 8 || new TextEncoder().encode(password).length > 72) {
-            error = "新密码至少 8 个字符，UTF-8 编码不超过 72 字节。";
+        const length = Array.from(password).length;
+        if (length < 8 || length > 64) {
+            error = "新密码须为 8-64 字符。";
             return;
         }
         if (password !== String(confirmation)) { error = "两次输入的新密码不一致。"; return; }
@@ -40,7 +41,7 @@
         } catch (cause) {
             error = userMessage(cause, {
                 INVALID_CURRENT_PASSWORD: "当前密码不正确。",
-                INVALID_PASSWORD: "新密码至少 8 个字符，UTF-8 编码不超过 72 字节。",
+                INVALID_PASSWORD: "密码不符合要求，请检查后重试。",
                 PASSWORD_UNCHANGED: "新密码不能与临时密码相同。",
                 SESSION_CHANGED: "会话已变化，请重新登录后再试。"
             });
@@ -61,7 +62,7 @@
                         autocomplete="current-password" bind:value={oldPassword} disabled={pending} />
                 {/snippet}
             </Field>
-            <Field label="新密码" required help="至少 8 个字符，UTF-8 编码不超过 72 字节。">
+            <Field label="新密码" required help="8-64 字符">
                 {#snippet children({ id, describedBy, invalid, required })}
                     <TextInput {id} {invalid} {required} aria-describedby={describedBy} name="newPassword" type="password"
                         autocomplete="new-password" bind:value={newPassword} disabled={pending} />

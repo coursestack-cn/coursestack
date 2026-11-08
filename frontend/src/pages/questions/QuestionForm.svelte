@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onDestroy, untrack } from "svelte";
-    import { api } from "$lib/api/client";
-    import { isAborted, userMessage } from "$lib/api/errors";
+    import { api, ApiError } from "$lib/api/client";
+    import { isAborted, publishMessage } from "$lib/api/errors";
     import { redirect } from "$lib/router/router.svelte.js";
     import { onBeforeLeave } from "$lib/router/leave.svelte.js";
     import { session } from "$lib/session.svelte.js";
@@ -27,16 +27,19 @@
     const titleError = $derived(!String(title).trim() ? "填写问题标题" : String(title).trim().length > 200 ? "标题最多 200 个字符" : undefined);
     const tagsError = $derived(validateTags(tags));
     const dirty = $derived(!saved && JSON.stringify([title, body, tags]) !== initial);
+    let imageEditor = $state<ReturnType<typeof RichTextEditor>>();
     const request = publisher(), controller = new AbortController();
     onDestroy(() => controller.abort());
     onBeforeLeave(() => !dirty && !pending);
 
     async function submit() {
-        if (pending || !session.user || invalidInitial || titleError || tagsError || !valid || !body || isEmptyDoc(body) || !validateDoc(body).ok) return;
+        if (pending || !imageEditor || !session.user || invalidInitial || titleError || tagsError || !valid || !body || isEmptyDoc(body) || !validateDoc(body).ok) return;
         pending = true;
         error = "";
-        const data = { title: String(title).trim(), body, tags };
+        let sent = false;
         try {
+            const data = { title: String(title).trim(), body: await imageEditor.prepareImages(body, controller.signal), tags };
+            sent = !question;
             const result = question ? await api.patch<{ id: string }>(`/api/contents/${encode(question.id)}`, data, { signal: controller.signal })
                 : await request.post<{ id: string }>(`/api/courses/${encode(course.id)}/questions`, data, session.user.id, controller.signal);
             if (controller.signal.aborted) return;
@@ -45,7 +48,8 @@
             toast.success(question ? "已保存修改" : "已发布问题");
             redirect(questionHref(result.id));
         } catch (cause) {
-            if (!isAborted(cause)) error = userMessage(cause, { CONTENT_UNAVAILABLE: "问题已不可用，返回课程问答查看。" });
+            if (cause instanceof ApiError && cause.code === "BODY_IMAGE_UNAVAILABLE") imageEditor?.resetImageUploads();
+            if (!isAborted(cause)) error = publishMessage(cause, sent, { CONTENT_UNAVAILABLE: "问题已不可用，返回课程问答查看。" });
         } finally { pending = false; }
     }
 </script>
@@ -58,7 +62,7 @@
             {#snippet children({ id, describedBy, invalid })}<TextInput {id} {invalid} aria-describedby={describedBy} bind:value={title} disabled={pending} placeholder="你想讨论什么问题？" />{/snippet}
         </Field>
         <Field label="问题正文" required help="说明背景、已经尝试的方法和具体疑问。可以插入公式、代码和资料链接。">
-            {#snippet children(control)}<RichTextEditor {...control} bind:value={body} disabled={pending} onstatechange={state => { valid = state.valid; }} onsubmit={() => { void submit(); }} />{/snippet}
+            {#snippet children(control)}<RichTextEditor {...control} bind:this={imageEditor} bind:value={body} disabled={pending} onstatechange={state => { valid = state.valid; }} onsubmit={() => { void submit(); }} />{/snippet}
         </Field>
         <Field label="标签" error={tagsError}>{#snippet children(control)}<TagInput {...control} bind:value={tags} disabled={pending} />{/snippet}</Field>
         {#if error}<p class="error" role="alert">{error}</p>{/if}

@@ -1,4 +1,5 @@
 import { digest, hashPassword, passwordField, randomToken } from '../auth/crypto.ts';
+import { signInFailureKeys } from '../auth/service.ts';
 import { HttpError, stringField } from '../http.ts';
 import { mutateAccount, type Session } from './mutations.ts';
 import { allowFields, optionalProfileField, pagination } from './validation.ts';
@@ -119,12 +120,13 @@ export async function resetMemberPassword(binding: D1Database, session: Session,
     const current = await accountDetail(binding, id);
     if (current.role === 'admin') throw new HttpError(403, 'ADMIN_PROTECTED', '管理员密码只能通过改密或外部重置命令修改');
     if (!current.schoolNumber) throw new HttpError(409, 'CREDENTIALS_REQUIRED', '该账号尚未设置学工号');
-    const throttles = [await digest(`member:${current.schoolNumber}`), await digest(`password:${id}`)];
+    const member = await signInFailureKeys(current.schoolNumber);
+    const throttles = [member.exact, await digest(`password:${id}`), member.prefix];
     await mutateAccount(binding, session, id, true, gate => [
         binding.prepare(`UPDATE accounts SET password = ?, credential_version = credential_version + 1, must_change_password = ? WHERE id = ? AND ${gate}`)
             .bind(passwordHash, body.mustChangePassword ? 1 : 0, id),
         binding.prepare(`DELETE FROM sessions WHERE account_id = ? AND ${gate}`).bind(id),
-        binding.prepare(`DELETE FROM login_attempts WHERE key IN (?, ?) AND ${gate}`).bind(...throttles),
+        binding.prepare(`DELETE FROM login_attempts WHERE (key IN (?, ?) OR substr(key, 1, 65) = ?) AND ${gate}`).bind(...throttles),
     ]);
     return { ...await accountDetail(binding, id), ...(generatedPassword ? { generatedPassword } : {}) };
 }

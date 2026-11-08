@@ -75,13 +75,10 @@
         <ResourceState status={courses.status} error={courses.error} refreshing={courses.refreshing} reload={courses.reload}>
             {#if courses.data}
                 {@const data = courses.data}
-                <div class="list-summary">
-                    <p role="status" aria-live="polite">
-                        {#if data.query}<span class="keyword">“{data.query}”</span> 的搜索结果 · {/if}
-                        共 <strong>{data.total}</strong> 门课程
-                    </p>
-                    {#if data.total > 0}<span class="sort-label">最新创建</span>{/if}
-                </div>
+                <p class="list-summary" role="status" aria-live="polite">
+                    {#if data.query}<span class="keyword">“{data.query}”</span> 的搜索结果 · {/if}
+                    共 <strong>{data.total}</strong> 门课程
+                </p>
 
                 {#if data.items.length}
                     <ul class="course-grid" aria-label="课程列表">
@@ -140,11 +137,11 @@
     .search-form { display: flex; align-items: flex-start; gap: var(--space-3); max-width: var(--width-prose); }
     .search-form :global(.search) { flex: 1; }
     .search-form :global(.cs-button[type="submit"]) { flex-shrink: 0; }
-    .list-summary, .list-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); color: var(--color-text-secondary); font-size: var(--font-size-sm); }
-    .list-summary p { min-width: 0; overflow-wrap: anywhere; }
+    .list-summary, .list-footer { color: var(--color-text-secondary); font-size: var(--font-size-sm); }
+    .list-summary { min-width: 0; overflow-wrap: anywhere; }
+    .list-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); }
     .list-summary strong { color: var(--color-text); }
     .keyword { color: var(--color-text); }
-    .sort-label { flex-shrink: 0; }
     .course-grid { list-style: none; padding: 0; display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-5); }
     .course-grid li { min-width: 0; }
     .course-grid :global(.course-card) { height: 100%; }

@@ -48,7 +48,8 @@ export async function runDemoCommand(args, { environment = process.env, invoke =
                 migrate: () => databaseStep('migrate'), seed: () => databaseStep('seed'),
             });
             output.write(`已删除 ${result.droppedObjects} 个表或视图、${result.deletedFiles} 个 R2 文件，并应用全部迁移。\n`);
-            output.write(`演示数据：${result.courseName} (${result.courseId})，学期 ${result.termName}，新增 ${result.createdAccounts} 个账号。\n`);
+            const courses = result.courses.map(course => `${course.name}（${course.id}）`).join('、');
+            output.write(`已准备${courses}。当前学期为“${result.termName}”，新增 ${result.createdAccounts} 个演示账号。\n`);
             output.write(result.administratorId ? `已保留管理员 ${result.administratorId}，密码不变。\n` : '重置前没有已初始化的管理员，需要时执行 admin:init 并指定同一目标。\n');
             return result;
         }, invoke);

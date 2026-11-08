@@ -47,9 +47,10 @@ classRoutes.get('/terms', async c => {
     return respond(c, rows.map(r => ({ ...r, current: Boolean(r.current) })));
 });
 classRoutes.put('/terms/current', async c => {
-    const a = await requireAdministrator(c), data = await input(c, z.object({ termId: idSchema.nullable() }).strict());
+    // Switching back to an earlier term is allowed; the current term cannot be cleared.
+    const a = await requireAdministrator(c), data = await input(c, z.object({ termId: idSchema }).strict());
     const db = createDatabase(c.env.DB);
-    if (data.termId !== null && !await db.get(sql`SELECT 1 FROM terms WHERE id=${data.termId}`)) throw new HttpError(404, 'TERM_NOT_FOUND', '学期不存在');
+    if (!await db.get(sql`SELECT 1 FROM terms WHERE id=${data.termId}`)) throw new HttpError(404, 'TERM_NOT_FOUND', '学期不存在');
     await c.env.DB.batch([
         sql`UPDATE terms SET current=0 WHERE current=1 AND ${administration(a)}`,
         sql`UPDATE terms SET current=1 WHERE id=${data.termId} AND ${administration(a)}`,
@@ -79,7 +80,7 @@ classRoutes.put('/courses/:id/terms/:termId', async c => {
 });
 classRoutes.delete('/courses/:id/terms/:termId', async c => {
     const a = await requireAdministrator(c), courseId = c.req.param('id'), termId = c.req.param('termId');
-    // Once a teacher joins, the offering anchors class history and cannot be cancelled here.
+    // The offering's foreign key requires its teaching classes to be removed first.
     await createDatabase(c.env.DB).run(sql`DELETE FROM course_terms WHERE course_id=${courseId} AND term_id=${termId} AND ${administration(a)}`);
     await requireAdministrator(c);
     return respond(c, { courseId, termId });
@@ -108,6 +109,13 @@ classRoutes.get(classPath, async c => {
     const { courseId, termId, teacherId } = await requireClass(c);
     return respond(c, await classDetail(c, courseId, termId, teacherId));
 });
+classRoutes.delete(classPath, async c => {
+    const a = await requireAdministrator(c), { courseId, termId, teacherId } = classKey(c);
+    await createDatabase(c.env.DB).run(sql`DELETE FROM teaching_classes
+        WHERE course_id=${courseId} AND term_id=${termId} AND teacher_id=${teacherId} AND ${administration(a)}`);
+    await requireAdministrator(c);
+    return respond(c, { courseId, termId, teacherId });
+});
 classRoutes.put(`${classPath}/bonus-policy`, async c => {
     const { a, courseId, termId, teacherId } = await requireClass(c);
     const data = await input(c, z.object({ pointsQuestion: pointsSchema, pointsAnswer: pointsSchema, pointsAcceptance: pointsSchema,
@@ -121,7 +129,10 @@ classRoutes.put(`${classPath}/bonus-policy`, async c => {
 classRoutes.get(`${classPath}/students`, async c => {
     const { a, courseId, termId, teacherId } = await requireClass(c), p = page(c);
     const { rows, total } = await queryPage(c, p, sql`SELECT a.id AS studentId,CASE WHEN a.status='deleted' THEN '已删除' ELSE a.nickname END AS nickname,
-        a.status,a.school_number AS schoolNumber,a.name,a.department,a.major,a.grade FROM class_students s JOIN accounts a ON a.id=s.student_id
+        a.status,a.school_number AS schoolNumber,a.name,a.department,a.major,a.grade,
+        (SELECT COALESCE(SUM(l.delta_points),0) FROM bonus_ledger l WHERE l.course_id=s.course_id
+            AND l.term_id=s.term_id AND l.teacher_id=s.teacher_id AND l.student_id=s.student_id) AS totalPoints
+        FROM class_students s JOIN accounts a ON a.id=s.student_id
         WHERE s.course_id=${courseId} AND s.term_id=${termId} AND s.teacher_id=${teacherId}
         AND ${classManagement(a, sql`s.course_id`, sql`s.term_id`, sql`s.teacher_id`)} ORDER BY a.school_number,a.id`);
     return respond(c, listResult(rows, p, total));
@@ -140,4 +151,74 @@ classRoutes.post(`${classPath}/students`, async c => {
         AND ${classManagement(a, sql`s.course_id`, sql`s.term_id`, sql`s.teacher_id`)}`);
     if (!assigned) throw new HttpError(409, 'STUDENT_ASSIGNMENT_CONFLICT', '学生已在本课程其他教师班中，或当前学期及操作权限已变化');
     return respond(c, { studentId: student.id });
+});
+const studentPath = `${classPath}/students/:studentId`;
+classRoutes.delete(studentPath, async c => {
+    const { a, courseId, termId, teacherId } = await requireClass(c), studentId = c.req.param('studentId');
+    const removed = await createDatabase(c.env.DB).run(sql`DELETE FROM class_students
+        WHERE course_id=${courseId} AND term_id=${termId} AND teacher_id=${teacherId} AND student_id=${studentId}
+        AND ${classManagement(a, sql`class_students.course_id`, sql`class_students.term_id`, sql`class_students.teacher_id`)}`);
+    if (!removed.meta.changes) await requireClass(c);
+    return respond(c, { studentId });
+});
+classRoutes.put(`${studentPath}/transfer`, async c => {
+    const a = await requireAdministrator(c), { courseId, termId, teacherId } = classKey(c), studentId = c.req.param('studentId');
+    const { targetTeacherId } = await input(c, z.object({ targetTeacherId: idSchema }).strict());
+    const targetExists = sql`EXISTS(SELECT 1 FROM teaching_classes tc JOIN accounts t ON t.id=tc.teacher_id AND t.status<>'deleted'
+        WHERE tc.course_id=${courseId} AND tc.term_id=${termId} AND tc.teacher_id=${targetTeacherId})`;
+    const [, state] = await c.env.DB.batch<{ targetExists: number; assigned: string | null }>([
+        sql`UPDATE class_students SET teacher_id=${targetTeacherId} WHERE course_id=${courseId} AND term_id=${termId}
+            AND student_id=${studentId} AND teacher_id=${teacherId} AND teacher_id<>${targetTeacherId}
+            AND ${targetExists} AND ${administration(a)}`,
+        sql`SELECT ${targetExists} AS targetExists,(SELECT teacher_id FROM class_students WHERE course_id=${courseId}
+            AND term_id=${termId} AND student_id=${studentId}) AS assigned WHERE ${administration(a)}`,
+    ].map(statement => prepareStatement(c.env.DB, statement)));
+    const result = state.results[0];
+    if (!result) throw new HttpError(403, 'ADMIN_REQUIRED', '需要管理员权限');
+    if (!result.targetExists) throw new HttpError(404, 'TARGET_CLASS_NOT_FOUND', '该课程学期没有这个目标教学班');
+    if (result.assigned == null) throw new HttpError(404, 'ENROLLMENT_NOT_FOUND', '学生已不在该课程学期的名单中');
+    if (result.assigned !== targetTeacherId) throw new HttpError(409, 'STUDENT_ASSIGNMENT_CONFLICT', '学生已转到其他教学班，请刷新名单');
+    return respond(c, { studentId, teacherId: targetTeacherId });
+});
+classRoutes.post(`${classPath}/students/import`, async c => {
+    const { a, courseId, termId, teacherId } = await requireClass(c);
+    const data = await input(c, z.object({ schoolNumbers: z.array(z.string()).min(1).max(500) }).strict());
+    const numbers = data.schoolNumbers.map(number => number.trim()).filter(Boolean);
+    if (!numbers.length) throw new HttpError(400, 'VALIDATION_ERROR', '至少填写一个学号');
+    const unique = [...new Set(numbers)], valid = unique.filter(number => number.length <= 80);
+    const payload = JSON.stringify(valid);
+    const allowed = sql`EXISTS(SELECT 1 FROM teaching_classes tc JOIN terms t ON t.id=tc.term_id AND t.current=1
+        WHERE tc.course_id=${courseId} AND tc.term_id=${termId} AND tc.teacher_id=${teacherId})
+        AND ${classManagement(a, sql`${courseId}`, sql`${termId}`, sql`${teacherId}`)}`;
+    // The write and result lookup share a transaction: concurrent imports cannot change the reported outcome.
+    const [permission, inserted, assigned] = await c.env.DB.batch([
+        sql`SELECT (${allowed}) AS allowed`,
+        sql`INSERT INTO class_students(course_id,term_id,teacher_id,student_id)
+            SELECT ${courseId},${termId},${teacherId},student.id FROM json_each(${payload}) n
+            JOIN accounts student ON student.school_number=n.value AND student.role='student' AND student.status<>'deleted'
+            WHERE ${allowed} ON CONFLICT(course_id,term_id,student_id) DO NOTHING RETURNING student_id AS studentId`,
+        sql`SELECT n.value AS schoolNumber,student.id AS studentId,s.teacher_id AS teacherId FROM json_each(${payload}) n
+            LEFT JOIN accounts student ON student.school_number=n.value AND student.role='student' AND student.status<>'deleted'
+            LEFT JOIN class_students s ON s.student_id=student.id AND s.course_id=${courseId} AND s.term_id=${termId}
+            WHERE ${allowed}`,
+    ].map(statement => prepareStatement(c.env.DB, statement))) as [D1Result<{ allowed: number }>, D1Result<{ studentId: string }>,
+        D1Result<{ schoolNumber: string; studentId: string | null; teacherId: string | null }>];
+    if (!permission.results[0]?.allowed) throw new HttpError(409, 'CLASS_IMPORT_UNAVAILABLE', '当前学期、教学班或操作权限已变化，请刷新后重试');
+    const added = new Set(inserted.results.map(row => row.studentId));
+    const assignments = new Map(assigned.results.map(row => [row.schoolNumber, row]));
+    const items = unique.map(schoolNumber => {
+        const failure = (code: string, message: string) => ({ schoolNumber, status: 'failed' as const, code, message });
+        if (schoolNumber.length > 80) return failure('INVALID_SCHOOL_NUMBER', '学号最多80个字符');
+        const student = assignments.get(schoolNumber);
+        if (!student?.studentId) return failure('STUDENT_NOT_FOUND', '学生账号不存在、已删除或不是学生');
+        if (student.teacherId !== teacherId) return failure('STUDENT_ASSIGNMENT_CONFLICT', '学生已在本课程本学期其他教师的教学班中');
+        return { schoolNumber, status: added.has(student.studentId) ? 'added' as const : 'existing' as const };
+    });
+    return respond(c, {
+        addedCount: items.filter(item => item.status === 'added').length,
+        existingCount: items.filter(item => item.status === 'existing').length,
+        failedCount: items.filter(item => item.status === 'failed').length,
+        duplicateCount: numbers.length - unique.length,
+        items,
+    });
 });

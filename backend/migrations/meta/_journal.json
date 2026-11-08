@@ -36,6 +36,69 @@
       "when": 1793599878471,
       "tag": "0004_teaching_classes",
       "breakpoints": true
+    },
+    {
+      "idx": 5,
+      "version": "6",
+      "when": 1793763369547,
+      "tag": "0005_content_term",
+      "breakpoints": true
+    },
+    {
+      "idx": 6,
+      "version": "6",
+      "when": 1793770425551,
+      "tag": "0006_content_moderation",
+      "breakpoints": true
+    },
+    {
+      "idx": 7,
+      "version": "6",
+      "when": 1793777383816,
+      "tag": "0007_content_deletion",
+      "breakpoints": true
+    },
+    {
+      "idx": 8,
+      "version": "6",
+      "when": 1793995036542,
+      "tag": "0008_notifications",
+      "breakpoints": true
+    },
+    {
+      "idx": 9,
+      "version": "6",
+      "when": 1793997633101,
+      "tag": "0009_account_creation_requests",
+      "breakpoints": true
+    },
+    {
+      "idx": 10,
+      "version": "6",
+      "when": 1793998692796,
+      "tag": "0010_favorites",
+      "breakpoints": true
+    },
+    {
+      "idx": 11,
+      "version": "6",
+      "when": 1793998735434,
+      "tag": "0011_global_search",
+      "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1794059366551,
+      "tag": "0012_class_roster_management",
+      "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1794060483561,
+      "tag": "0013_content_images",
+      "breakpoints": true
     }
   ]
 }

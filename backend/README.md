@@ -2,7 +2,7 @@
 
 当前提供 Workers / TypeScript / Hono / Drizzle / D1 后端，以及本地模拟 R2 绑定。账号、会话、受控资料与头像接口见[账号与权限](../docs/账号与权限.md)；课程、问答、采纳加分、审查及内部供数接口见[课程与讨论](../docs/课程与讨论.md)；统一内容列表、单文件上传、版本管理和预览下载见[资料与文件](../docs/资料与文件.md)。
 
-教学班模型目前完成数据层与增量迁移，课程路由、演示数据脚本、部分业务测试夹具及前端仍使用旧模型；须完成[接续适配](../docs/课程与讨论.md#数据层实现与接续范围)后再将 0004 与应用一起发布。本轮验证使用隔离临时库，未改动开发或远程数据库。
+课程路由、演示数据脚本、业务测试和前端均已采用教学班模型，模型说明见[课程学期与教学班](../docs/课程与讨论.md#课程学期与教学班目标设计)。
 
 ## 启动
 
@@ -56,6 +56,7 @@ curl.exe --fail http://127.0.0.1:8787/api/health
 | `db:check` | 仅检查仓库中的迁移文件、快照与源定义，不连接数据库 |
 | `db:diagram` | 启动结构可视化，读取 schema，不连接业务数据库 |
 | `db:migrate` | 对指定目标应用尚未执行的迁移 |
+| `search:backfill` | 对指定目标分页回填正文检索文字；`--check` 只读检查一致性 |
 | `admin:init` | 初始化唯一管理员及密码，拒绝覆盖已有密码 |
 | `admin:reset` | 重置管理员密码并撤销其会话 |
 | `admin:status` | 只读查询管理员状态 |
@@ -67,20 +68,27 @@ curl.exe --fail http://127.0.0.1:8787/api/health
 
 ## 开题演示账号
 
-`demo` 每次重置目标 D1 与 R2，再应用完整迁移历史并创建两个演示学期、100 个学生账号、1 个教师账号、“数据库系统原理”课程及选课和授课关系。全新目标也可以直接执行，无需先执行迁移或配置学期；演示学期只由该命令创建，没有独立种子命令。
+`demo` 每次重置目标 D1 与 R2，应用完整迁移历史，创建 100 个学生账号、5 个教师账号和 3 门课程。当前学期为“2026秋”（`26-1`），历年学期为“2026春”（`25-2`），教学班安排见下表。全新目标可直接执行该命令。
 
 ```sh
 pnpm demo --local
 pnpm demo --remote .local/remote.json
 ```
 
-每次执行都会重建演示数据，不需要 `--confirm` 或交互确认。已初始化管理员的 ID、昵称和密码散列保留，其余账号、会话、头像和业务内容全部删除；管理员不存在时不会自动创建，可随后执行 `admin:init` 并指定同一目标。
+每次执行都会重建演示数据，不需要 `--confirm` 或交互确认。已初始化管理员的 ID、昵称和密码散列保留，其余账号、会话、头像和业务内容全部删除；重置前没有已初始化的管理员时，会创建一个没有登录密码的管理员占位，随后执行 `admin:init` 并指定同一目标设置密码。
 
-学生账号为 **S0001–S0100**，教师账号为 **T0001**，初始密码同账号，均不要求首次改密。姓名均为虚构名称；学生为计算机学院、计算机科学与技术专业、2024 级，教师为同学院同专业、不填年级。课程关系归属“演示当前学期”，同时创建“演示历年学期”。这些是供课堂体验的共享测试账号，初始密码公开，不承载真实个人资料。
+学生账号为 **S0001–S0100**，教师账号为 **T0001–T0005**。教师显示为“演示教师 001”至“演示教师 005”。初始密码与各自的账号相同，首次登录可直接使用。这些课堂体验账号使用公开初始密码和虚构姓名。学生为计算机学院、计算机科学与技术专业、2024 级，教师为同学院同专业，年级留空。
+
+| 课程号 | 课程 | 学期 | 教师与班内学生学号 |
+| --- | --- | --- | --- |
+| 304208040 | 数据库系统原理 | 2026秋 | T0001（S0001–S0050） |
+| 304064030 | 现代软件工程（双语） | 2026秋 | T0001（S0026–S0050）、T0002（S0051–S0075） |
+| 101103020 | 大学美育·音乐鉴赏 | 2026秋 | T0003（S0076–S0084）、T0004（S0085–S0092）、T0005（S0093–S0100） |
+| 101103020 | 大学美育·音乐鉴赏 | 2026春 | T0003（S0051–S0075）、T0004（S0076–S0100） |
 
 远程配置必须包含 `accountId`、`databaseId`、`bucketName`。Token 需要 D1 写权限和账号级 Workers R2 Storage Write（桶级 Bucket Item Write 不能调用脚本使用的 R2 REST 接口）。命令只操作所选目标，不部署网站；部署工作流在开启数据重置时调用同一命令，见[演示数据重置](../docs/部署与运维.md#演示数据重置)。
 
-脚本先清理 R2，失败时不改动 D1，再删除 D1 的全部表和视图（含 `d1_migrations`）并重新应用迁移。管理员在迁移完成后立即恢复，再初始化演示学期、账号和课程。删除 D1 后若迁移失败，库为空且管理员丢失，可用 D1 Time Travel 恢复到重置前，或修复后重新运行再执行 `admin:init`。
+脚本先清理 R2，失败时不改动 D1，再删除 D1 的全部表和视图（含 `d1_migrations`）并重新应用迁移。管理员在迁移完成后立即恢复，再初始化演示学期、账号和课程。Wrangler 逐个迁移文件提交，删除 D1 后若某个迁移失败，库会停在此前迁移已完成的状态，管理员也尚未恢复；修复原因后重新运行本命令，再执行 `admin:init`。
 
 ## 目录结构
 
@@ -89,19 +97,25 @@ pnpm demo --remote .local/remote.json
 | `src/index.ts` | Worker 入口和错误响应 |
 | `src/auth/` | 密码、会话、账号接口 |
 | `src/accounts/` | 账号查询维护、资料与头像 |
-| `src/courses/` | 课程创建、维护、统计与动态 |
+| `src/courses/` | 课程创建、维护、统计与动态，学期、开课安排、教学班与学生名单 |
+| `src/teachers/` | 教师公开主页与公开内容 |
+| `src/search/` | 全站搜索与正文检索文字提取 |
+| `src/body-images.ts` | 正文图片上传、读取与到期清理 |
 | `src/discussions/` | 问答、评论、投票、采纳与加分流水 |
 | `src/materials/` | 统一内容列表、上传会话、文件版本、受控预览下载及清理 |
 | `src/moderation/` | 举报队列、下架恢复、审查记录 |
 | `src/integration/` | 本人动态、内部可见文档及内容详情 |
-| `src/openapi.ts`、`src/materials/openapi.ts` | 课程、讨论与资料 API 的 OpenAPI 规范 |
-| `src/permissions.ts` | 管理员、当前授课教师权限与公开资料查询 |
+| `src/favorites/` | 统一收藏、批量状态与首页课程动态 |
+| `src/notifications/` | 通用通知、游标分页、状态同步与已读 |
+| `src/openapi.ts`、`src/*/openapi.ts` | OpenAPI 规范，由 `src/openapi.ts` 组合各模块定义 |
+| `src/manual-routes.ts` | 账号、头像与登录接口的手动分发清单，入口分发与 OpenAPI 检查共用 |
+| `src/permissions.ts` | 管理员、当前授课教师与教学班权限的 SQL 判断，公开资料查询 |
 | `src/db/schema.ts` | 共享 Drizzle 表定义 |
 | `src/db/rules.sql` | 当前视图、约束与积分事务触发器 |
 | `drizzle.config.ts` | Drizzle Lab 读取 schema 的配置 |
 | `migrations/*.sql`、`migrations/meta/` | 按编号追加的 SQL、Drizzle 快照与规则快照，由 Wrangler 按执行记录应用 |
 | `seed/local.sql` | `demo` 内部使用的演示学期数据 |
-| `tests/` | 长期保留的账号、隐私、会话、管理员运维和 R2 回归测试 |
+| `tests/` | 长期保留的回归测试，覆盖账号、权限、会话、课程与教学班、讨论、积分、资料、正文图片、搜索、通知、迁移与运维脚本 |
 | `scripts/demo.mjs` | 重置目标并初始化全部课堂演示数据 |
 | `scripts/admin.mjs`、`scripts/lib/` | 独立管理员运维命令、终端输入和 D1 访问 |
 
@@ -132,6 +146,14 @@ pnpm check
 `0002_material_table_names.sql` 重命名两张资料表；`0003_material_version_contract.sql` 将上传 payload 改为 creation_draft，移除更新说明、独立版本状态及版本审查记录。版本只允许删除，资料整体下架沿用 contents。该迁移若检测到隐藏版本会以 `material_versions_require_no_hidden_rows` 中止并回滚，需先明确恢复或删除这些版本，避免它们被自动公开。
 
 `0004_teaching_classes.sql` 将课程号作为课程主键，拆分课程学期、教学班和学生归属，按教学班保存积分规则及流水归属。已有内容、上传会话、文件版本、版本计数、积分金额与撤回链保留；迁移不会重新奖励旧内容。课程旧 ID 与新编号交叉重合也按完整映射处理。迁移前置校验的 `academic_valid_member_roles`、`academic_unique_legacy_teacher`、`academic_legacy_rules_required` 分别表示成员身份错误、教师归属无法唯一确定和旧积分规则缺失，应核实数据后处理，不能跳过校验。
+
+`0005_content_term.sql` 为 contents 添加可空 term_id 及课程学期查询索引，保留全部旧记录且不猜测其学期。新内容在首次发布（资料为确认发布）时记录当前学期，后续编辑或版本不改变归属。先应用迁移再启动新后端；本次仅在隔离测试库验证，未应用到日常开发或远程数据库。
+
+`0011_global_search.sql` 增加正文派生列 body_text 和删除清理触发器。已有库需先迁移、启用新后端同步写入，再运行 `pnpm search:backfill --local` 和 `pnpm search:backfill --local --check`；远程显式使用 `--remote <配置文件>`。检查通过后开放搜索入口，避免历史正文漏搜。回填保留并发编辑、更新时间与积分；完整顺序见[全站搜索](../docs/全站搜索.md#升级与历史数据回填)。
+
+部署正文图片前，先应用 `0013_content_images.sql`。迁移创建图片归属表及与正文、资料上传会话同步的触发器。已有正文无需回填。上传接口与 R2 清理见[正文图片](../docs/资料与文件.md#正文图片)。
+
+部署班级管理功能前，先应用 `0012_class_roster_management.sql`。迁移更新视图和触发器，为清理修读时的跨学期撤回关系增加索引，已有数据不需回填。转班、移除学生、删除教学班的积分和通知处理见[课程与讨论](../docs/课程与讨论.md#积分归属)。
 
 课程与教学班采用目标契约，迁移、后端和前端必须一同集成发布；旧的教师建课、code 字段和课程级积分接口不兼容。演示脚本也使用新模型：账号、开课安排、教学班及学生归属在同一批次写入；空库会创建无登录密码的管理员占位，仍需 admin:init 初始化登录。
 
@@ -173,6 +195,30 @@ pnpm openapi:export
 pnpm openapi:check
 ```
 
-前者将规范导出到仓库根目录的 `openapi/openapi.json`（前后端共用的接口契约），后者检查业务方法与实际路由及静态规范一致。修改 `src/openapi.ts` 或 `src/materials/openapi.ts` 后依次执行。`GET /api/openapi.json` 返回标准 OpenAPI 3.1 文档，不加 data 包装；它描述课程、讨论和资料模块，账号接口见[账号与权限](../docs/账号与权限.md)。仅本地开放的资料 PUT 传输接口见[资料与文件](../docs/资料与文件.md#本地与云端)。
+前者将规范导出到仓库根目录的 `openapi/openapi.json`（前后端共用的接口契约），后者检查业务方法与规范及静态导出一致，范围包括 Hono 注册的路由和 `src/manual-routes.ts` 中手动分发的账号、头像与登录接口，共 107 个方法。修改 `src/openapi.ts` 或任一 `src/*/openapi.ts` 后依次执行。`GET /api/openapi.json` 返回标准 OpenAPI 3.1 文档，不加 data 包装；它描述全部业务接口，账号相关的业务规则见[账号与权限](../docs/账号与权限.md)。仅本地开放的资料 PUT 传输接口见[资料与文件](../docs/资料与文件.md#本地与云端)。
 
 参考：[Drizzle D1](https://orm.drizzle.team/docs/get-started/d1-new)、[D1 外键](https://developers.cloudflare.com/d1/sql-api/foreign-keys/)、[Wrangler 配置](https://developers.cloudflare.com/workers/wrangler/configuration/)、[Workers CPU 限制](https://developers.cloudflare.com/workers/platform/limits/#cpu-time)。
+
+## 内容审查迁移与联调
+
+`0006_content_moderation.sql` 新增上下架通知已读回执表并替换积分触发器/视图，不删除既有内容、文件、修读关系或流水。部署新接口前必须将迁移应用到同一目标数据库；仅运行 `db:check` 不会应用迁移。
+
+只有所有者能编辑、上传版本；所有者删除受讨论、采纳及最后版本约束，管理者通过审查接口完整删除所属分支。组员1同步 reply_to_id、管理事件 version 和举报 deleted 状态；组员3维护所属级联、权限与积分事务；组员4维护版本至少保留一项、文件清理和管理通知；组员2同步 canDelete、回复引用与举报三种结果。接口与字段见 OpenAPI，规则见[课程与讨论](../docs/课程与讨论.md)。
+
+`0007_content_deletion.sql` 追加评论 reply_to_id 与管理事件 version，扩展举报删除结果，替换所属级联、积分和最后版本约束。旧评论的回复引用保留，target_id 归一到问题、回答或资料；原先因父评论隐藏的回复保持 hidden，避免升级时意外公开。内容与审查记录采用 ADD COLUMN，保留其外键引用和通知回执。已有正文、流水及原学期不重写。部署前应先应用迁移，随后一同更新前后端；仓库检查不能代替目标迁移。
+
+## CSV 账号导入迁移与联调
+
+`0009_account_creation_requests.sql` 新增账号创建请求表，不重写账号或教学班关系。发布前先对目标数据库应用迁移，再更新前后端；`db:check` 和隔离测试不会更新日常开发库或远程库。本地已有环境可执行 `pnpm db:migrate --local` 应用尚未执行的迁移。
+
+管理员预检接口为 `POST /api/admin/accounts/import/preview`，单账号创建增加可选 `Idempotency-Key` 和 `mustChangePassword`。批量任务由前端限制并发，不在一个 Worker 请求内派生500个密码。字段、逐行状态及重试行为见[CSV 批量创建账号](../docs/账号与权限.md#csv-批量创建账号)。定向回归使用隔离数据库：`node --experimental-strip-types --test tests/account-csv.test.mjs tests/account-import.test.mjs tests/accounts.test.mjs tests/password-reset.test.mjs tests/session-account.test.mjs tests/migrations.test.mjs`。
+
+## 站内通知迁移与联调
+
+`0008_notifications.sql` 新增统一通知表、索引及内容、采纳、管理、积分触发器。旧管理通知保留原 ID，已读回执迁入 read_at；旧表保留以兼容迁移，不补发历史互动和积分。业务变更及通知在同一事务内提交，不需要额外后台任务。
+
+新通知接口改为 unread/read/all 筛选和 ID 游标，每批最多20条；新增总数、指定条目状态及固定 ID 上限的全部已读接口，替换旧页码契约。前后端应在应用迁移后一起更新，具体字段与分工见[站内通知](../docs/课程与讨论.md#站内通知)。`db:check` 仅检查迁移文件，不会更新日常开发库或远程库。定向回归可运行 `node --experimental-strip-types --test tests/notifications.test.mjs tests/moderation.test.mjs tests/deletion.test.mjs tests/migrations.test.mjs`，使用隔离临时数据库。
+
+## 收藏与动态迁移与联调
+
+`0008_notifications.sql` 建立通用通知表并迁入旧审查回执；`0010_favorites.sql` 在此基础上新增收藏、不可变内容事件和通知事件关联。升级保留既有通知 ID、来源与已读时间，只回填能够确认的问题发布、资料发布和现存后续版本事件，回填期间不投递历史通知。收藏、触发条件与模块影响见[收藏与动态](../docs/收藏与动态.md)。先按序迁移同一目标数据库，再更新前后端；`db:check` 只验证仓库，不能代替迁移。

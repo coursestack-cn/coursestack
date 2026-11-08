@@ -1,8 +1,9 @@
 <script lang="ts">
-    import PagePlaceholder from "$lib/components/shell/PagePlaceholder.svelte";
-    import type { PageProps } from "$lib/router/types";
+    import { type PageProps } from "$lib/router/types";
+    import PageLayout from "$lib/components/shell/PageLayout.svelte";
+    import FavoriteList from "./FavoriteList.svelte";
 
-    let { params }: PageProps = $props();
+    let {}: PageProps = $props();
 </script>
 
-<PagePlaceholder {params} />
+<PageLayout title="我的收藏"><FavoriteList /></PageLayout>

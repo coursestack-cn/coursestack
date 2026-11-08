@@ -1,7 +1,7 @@
 import { Hono } from 'hono';
 import { sql } from 'drizzle-orm';
 import { z } from 'zod';
-import { HttpError, respond, assertChanged, input, listResult, page, requestIdentity, queryPage, parsedEnum } from '../http.ts';
+import { HttpError, respond, assertChanged, idSchema, input, listResult, page, requestIdentity, queryPage, parsedEnum } from '../http.ts';
 import { administration, management, requireAdministrator } from '../permissions.ts';
 import { actor } from '../auth/middleware.ts';
 import { type AppEnv, type Ctx } from '../discussions/types.ts';
@@ -55,7 +55,7 @@ courseRoutes.get('/courses', async c => {
     const { rows, total } = await queryPage<Course>(c, p, sql`${courseSelect}
         WHERE ${id === undefined ? sql`1` : sql`c.id=${id}`} AND (instr(c.name,${q})>0 OR instr(c.id,${q})>0)
         ${term === undefined ? sql`` : sql`AND EXISTS(SELECT 1 FROM course_terms ct WHERE ct.course_id=c.id AND ct.term_id=${term})`}
-        ORDER BY c.created_at DESC,c.id ASC`);
+        ORDER BY c.id ASC`);
     return respond(c, listResult(rows.map(courseDto), p, total));
 });
 courseRoutes.post('/courses', async c => {
@@ -84,14 +84,29 @@ courseRoutes.patch('/courses/:id', async c => {
     assertChanged(result); return respond(c, courseDto(await getCourse(c, id)));
 });
 courseRoutes.get('/courses/:id/entry', async c => {
-    const id = c.req.param('id'), course = await getCourse(c, id), viewer = c.get('actor');
+    const id = c.req.param('id'), course = await getCourse(c, id), viewer = c.get('actor'), termId = c.req.query('termId');
+    if (termId !== undefined && !idSchema.safeParse(termId).success) throw new HttpError(400, 'INVALID_FILTER', '学期无效');
+    const db = createDatabase(c.env.DB);
+    const terms = (await db.all<{ id: string; name: string; current: number }>(sql`SELECT * FROM terms ORDER BY current DESC,id DESC`))
+        .map(term => ({ ...term, current: Boolean(term.current) }));
+    const term = termId === undefined ? null : terms.find(item => item.id === termId);
+    if (termId !== undefined && (!term || !await db.get(sql`SELECT 1 FROM course_terms WHERE course_id=${id} AND term_id=${termId}`))) {
+        throw new HttpError(404, 'COURSE_TERM_NOT_FOUND', '该课程学期不存在');
+    }
+    const memberships = viewer ? await db.all<{ term_id: string }>(sql`SELECT term_id FROM class_students WHERE course_id=${id} AND student_id=${viewer.id}
+        UNION SELECT term_id FROM teaching_classes WHERE course_id=${id} AND teacher_id=${viewer.id}`) : [];
+    const myTerms = terms.filter(item => memberships.some(membership => membership.term_id === item.id));
+    const teachers = term ? (await db.all<{ id: string; nickname: string | null; isDeleted: number }>(sql`
+        SELECT a.id,CASE WHEN a.status='deleted' THEN '已删除' ELSE a.nickname END AS nickname,a.status='deleted' AS isDeleted
+        FROM teaching_classes tc JOIN accounts a ON a.id=tc.teacher_id WHERE tc.course_id=${id} AND tc.term_id=${term.id} ORDER BY a.id`))
+        .map(teacher => ({ ...teacher, isDeleted: Boolean(teacher.isDeleted) })) : JSON.parse(course.teachers);
     const canManageContent = viewer ? Boolean(await createDatabase(c.env.DB).get(sql`SELECT 1 WHERE ${management(viewer, sql`${id}`)}`)) : false;
     const summary = await createDatabase(c.env.DB).get<{ questions: number; unresolved: number; answers: number }>(sql`SELECT
         COUNT(CASE WHEN kind='question' THEN 1 END) AS questions,
         COUNT(CASE WHEN kind='question' AND NOT EXISTS(SELECT 1 FROM public_acceptances a WHERE a.question_id=public_contents.id) THEN 1 END) AS unresolved,
         COUNT(CASE WHEN kind='answer' THEN 1 END) AS answers FROM public_contents WHERE course_id=${id}`);
     const path = `/api/courses/${encodeURIComponent(id)}`;
-    return respond(c, { course: courseDto(course), summary, permissions: { canManageContent, canManageCourse: viewer?.role === 'admin' },
+    return respond(c, { course: courseDto(course), term: term ?? null, terms, myTerms, teachers, summary, permissions: { canManageContent, canManageCourse: viewer?.role === 'admin' },
         links: { questions: `${path}/questions`, activity: `${path}/activity`, materials: `${path}/contents?kind=material`, contents: `${path}/contents` } });
 });
 courseRoutes.get('/courses/:id/activity', async c => {

@@ -13,6 +13,9 @@
     import StateBlock from "$lib/components/ui/StateBlock.svelte";
     import Tabs from "$lib/components/ui/Tabs.svelte";
 
+    import FavoriteList from "../me/FavoriteList.svelte";
+    import CourseFeed from "./CourseFeed.svelte";
+
     type Term = { id: string; name: string; current: boolean };
     type MyCourse = {
         course: import("../manage/course").Course;
@@ -27,27 +30,40 @@
         currentTerm: { id: string; name: string } | null;
     };
 
-    const tabs = [{ value: "current", label: "本学期" }, { value: "history", label: "历年" }];
-    const scope = $derived(router.query.get("tab") === "history" ? "history" : "current");
+    const scope = $derived(router.query.get("tab") === "favorites" ? "favorites" : router.query.get("tab") === "history" ? "history" : "current");
     const page = $derived.by(() => {
         const value = Number(router.query.get("page") ?? 1);
         return Number.isInteger(value) && value >= 1 && value <= 10000 ? value : 1;
     });
     const canCreate = $derived(session.hasRole("teacher") || session.hasRole("admin"));
     const relation = $derived(session.hasRole("teacher") ? "授课" : session.hasRole("student") ? "修读" : "参与");
-    const courses = resource((signal) => {
+    const courses = resource(async (signal) => {
+        if (scope === "favorites") {
+            const terms = await api.get<Term[]>("/api/terms", { signal });
+            return { termName: terms.find(term => term.current)?.name, list: null };
+        }
         const query = new URLSearchParams({ scope, page: String(page), pageSize: "12" });
-        return api.get<MyCourseList>(`/api/me/courses?${query}`, { signal });
+        const list = await api.get<MyCourseList>(`/api/me/courses?${query}`, { signal });
+        return { termName: list.currentTerm?.name, list };
     });
-    const status = $derived(courses.data && courses.data.scope !== scope ? "loading" : courses.status);
+    const tabs = $derived([
+        { value: "current", label: courses.data?.termName ?? "本学期" },
+        { value: "history", label: "历年" },
+        { value: "favorites", label: "收藏" }
+    ]);
+    const data = $derived(courses.data?.list);
+    const status = $derived(courses.status === "ready" && data?.scope !== scope ? "loading" : courses.status);
 
     $effect(() => {
-        const data = courses.data;
         if (!data || courses.refreshing || data.scope !== scope || data.page !== page) return;
         const lastPage = Math.max(1, Math.min(10000, Math.ceil(data.total / data.pageSize)));
         if (page > lastPage) void updateQuery({ page: lastPage === 1 ? null : lastPage }, { replace: true });
     });
 </script>
+
+{#snippet courseTotal(total: number)}
+    <p class="list-summary" role="status">共 <strong>{total}</strong> 门课程</p>
+{/snippet}
 
 <PageLayout title="我的课程与动态">
     {#snippet actions()}
@@ -61,23 +77,17 @@
     {/snippet}
 
     <Tabs items={tabs} value={scope} label="我的课程" onchange={(next) => { void updateQuery({ tab: next === "current" ? null : next, page: null }); }}>
+        {#if scope === "favorites"}<FavoriteList coursesOnly summary={courseTotal} />{:else}
         <ResourceState {status} error={courses.error} refreshing={courses.refreshing} reload={courses.reload}>
-            {#if courses.data && courses.data.scope === scope}
-                {@const data = courses.data}
-                <div class="list-summary">
-                    <p>
-                        {#if scope === "current" && data.currentTerm}<span class="term-name">{data.currentTerm.name}</span> · {/if}
-                        {scope === "current" ? `我${relation}的课程` : `我${relation}过的课程`}
-                    </p>
-                    <p role="status" aria-live="polite">共 <strong>{data.total}</strong> 门课程</p>
-                </div>
+            {#if data && data.scope === scope}
+                {@render courseTotal(data.total)}
 
                 {#if data.items.length}
                     <ul class="course-grid" aria-label={scope === "current" ? "本学期课程" : "历年课程"}>
                         {#each data.items as item (item.course.id)}
                             {@const course = item.course}
                             <li>
-                                <Card href={`/courses/${encodeURIComponent(course.id)}`} padding="lg" class="my-course-card" aria-label={`查看课程：${course.name}`}>
+                                <Card href={`/courses/${encodeURIComponent(course.id)}${item.terms.length === 1 ? `/terms/${encodeURIComponent(item.terms[0]!.id)}` : ""}`} padding="lg" class="my-course-card" aria-label={`查看课程：${course.name}`}>
                                     <div class="course-content">
                                         <div class="course-code"><BookOpen size="1.25em" aria-hidden="true" /><span>{course.id}</span></div>
                                         <h2>{course.name}</h2>
@@ -126,13 +136,16 @@
                 {/if}
             {/if}
         </ResourceState>
+        {/if}
     </Tabs>
+    <CourseFeed />
 </PageLayout>
 
 <style>
-    .list-summary, .list-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); color: var(--color-text-secondary); font-size: var(--font-size-sm); }
-    .list-summary p { min-width: 0; overflow-wrap: anywhere; }
-    .list-summary strong, .term-name { color: var(--color-text); }
+    .list-summary, .list-footer { color: var(--color-text-secondary); font-size: var(--font-size-sm); }
+    .list-summary { text-align: end; }
+    .list-summary strong { color: var(--color-text); }
+    .list-footer { display: flex; flex-wrap: wrap; align-items: center; justify-content: space-between; gap: var(--space-3); }
     .course-grid { display: grid; grid-template-columns: repeat(3, minmax(0, 1fr)); gap: var(--space-5); list-style: none; padding: 0; }
     .course-grid li { min-width: 0; }
     .course-grid :global(.my-course-card) { height: 100%; }

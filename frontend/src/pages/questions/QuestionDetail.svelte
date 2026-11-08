@@ -1,4 +1,5 @@
 <script lang="ts">
+    import FavoriteButton from "$lib/components/content/FavoriteButton.svelte";
     import { onDestroy, tick, untrack } from "svelte";
     import { api, ApiError } from "$lib/api/client";
     import { isAborted, userMessage } from "$lib/api/errors";
@@ -38,17 +39,19 @@
         return { ...location, answerPage: answers?.page, hash };
     });
     const activeFocus = $derived(focus.data?.hash === router.hash ? focus.data : null);
+    const answerPage = $derived(activeFocus?.answerPage ?? currentPage);
     const answers = resource(async signal => {
         const id = initial.id;
-        const page = activeFocus?.answerPage ?? currentPage;
+        const page = answerPage;
         return api.get<Page<Content>>(`/api/questions/${encode(id)}/answers?page=${page}&pageSize=20`, { signal });
     });
     let locatedHash = "";
+    let highlightedElement: HTMLElement | undefined;
     let highlightTimer: ReturnType<typeof setTimeout> | undefined;
     onDestroy(() => clearTimeout(highlightTimer));
-    async function locate() {
+    async function locate(repeat = false) {
         const hash = router.hash;
-        if (!activeFocus || hash === locatedHash) return;
+        if (!activeFocus || (!repeat && hash === locatedHash)) return;
         await tick();
         if (router.hash !== hash || controller.signal.aborted) return;
         const element = document.getElementById(decodeURIComponent(hash.slice(1)));
@@ -57,6 +60,8 @@
         element.scrollIntoView({ block: "start", behavior: "instant" });
         element.setAttribute("tabindex", "-1");
         element.focus({ preventScroll: true });
+        highlightedElement?.classList.remove("question-target");
+        highlightedElement = element;
         element.classList.add("question-target");
         clearTimeout(highlightTimer);
         highlightTimer = setTimeout(() => { element.classList.remove("question-target"); }, 2500);
@@ -108,11 +113,12 @@
 <PageLayout title={question.title ?? "问题详情"} width="prose" breadcrumbs={[
     { label: entry.course.name, href: courseQuestionsHref(entry.course) }, { label: "问题详情" }
 ]}>
+    {#snippet actions()}{#if !unavailable}<FavoriteButton type="question" id={question.id} available={question.isPublic} />{/if}{/snippet}
     {#if unavailable}<StateBlock kind="unavailable" title="内容不可用" />
     {:else}
         {#if question.tags?.length}<div class="tags" aria-label="问题标签">{#each question.tags as tag}<Link href={`${courseQuestionsHref(entry.course)}?${new URLSearchParams({ tag })}`}>{tag}</Link>{/each}</div>{/if}
         <DiscussionBlock content={question} canManage={entry.permissions.canManageContent}
-            focusComment={!activeFocus?.answerId ? activeFocus?.commentId : undefined} onchange={refresh} onremove={removed} onlocated={() => { void locate(); }} />
+            focusComment={!activeFocus?.answerId ? activeFocus?.commentId : undefined} onchange={refresh} onremove={removed} onlocated={repeat => { void locate(repeat); }} />
         {#if focus.status === "error"}<div class="focus-error"><ContentState status="error" error={focus.error} reload={focus.reload} /></div>{/if}
         <section class="answers" aria-label="回答列表">
             <div class="answers-heading"><h2>{question.answerCount ?? answers.data?.total ?? ""} 个回答</h2></div>
@@ -122,7 +128,7 @@
                         <DiscussionBlock content={{ ...answer, isAccepted: question.acceptedAnswerId === answer.id }} canManage={entry.permissions.canManageContent}
                             otherAccepted={Boolean(question.acceptedAnswerId && question.acceptedAnswerId !== answer.id)}
                             focusComment={activeFocus?.answerId === answer.id ? activeFocus.commentId : undefined}
-                            onaccept={() => accept(answer.id)} onunaccept={() => accept(null)} onchange={refresh} onremove={removed} onlocated={() => { void locate(); }} />
+                            onaccept={() => accept(answer.id)} onunaccept={() => accept(null)} onchange={refresh} onremove={removed} onlocated={repeat => { void locate(repeat); }} />
                     {:else}<StateBlock kind="empty" title="还没有回答" description="分享你的思路，帮助大家理解这个问题。" />{/each}
                     {#if pageCount(answers.data) > 1}<Pagination page={answers.data.page} pageCount={pageCount(answers.data)} disabled={answers.refreshing} onchange={(page: number) => { void goPage(page); }} />{/if}
                 {/if}

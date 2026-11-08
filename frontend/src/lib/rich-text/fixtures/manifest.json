@@ -102,11 +102,10 @@
             "path": "content[0].content[0].marks[0].attrs.target"
         },
         {
-            "file": "invalid-external-image.json",
-            "description": "不允许外部图片URL。",
-            "ok": false,
-            "reason": "invalid-image-src",
-            "path": "content[0].attrs.src"
+            "file": "valid-external-image.json",
+            "description": "外部 HTTP(S) 图片 URL 可直接使用。",
+            "ok": true,
+            "chars": 1
         },
         {
             "file": "invalid-data-image.json",

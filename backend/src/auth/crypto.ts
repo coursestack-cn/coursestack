@@ -8,10 +8,16 @@ const PASSWORD_HASH = /^pbkdf2-sha256\$([1-9]\d{0,5})\$([A-Za-z0-9+/]{22}==)\$([
 const encoder = new TextEncoder();
 
 export function passwordField(value: unknown): string {
-    if (typeof value !== 'string' || value.length === 0 || encoder.encode(value).length > 72) {
-        throw new HttpError(400, 'INVALID_PASSWORD', '密码不能为空，UTF-8 编码不超过 72 字节');
+    if (typeof value !== 'string' || value.length === 0 || Array.from(value).length > 64) {
+        throw new HttpError(400, 'INVALID_PASSWORD', '密码不能为空，最多 64 个字符');
     }
     return value;
+}
+
+// Keep passwords created under the former 72-byte limit usable for authentication.
+export function existingPasswordField(value: unknown): string {
+    if (typeof value === 'string' && value.length > 0 && encoder.encode(value).length <= 72) return value;
+    return passwordField(value);
 }
 
 // Only passwords chosen by the user have a minimum length. Login and trusted
@@ -19,7 +25,7 @@ export function passwordField(value: unknown): string {
 export function newPasswordField(value: unknown): string {
     const password = passwordField(value);
     if (Array.from(password).length < 8) {
-        throw new HttpError(400, 'INVALID_PASSWORD', '新密码至少 8 个字符，UTF-8 编码不超过 72 字节');
+        throw new HttpError(400, 'INVALID_PASSWORD', '新密码须为 8-64 字符');
     }
     return password;
 }

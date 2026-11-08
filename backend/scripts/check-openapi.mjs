@@ -1,10 +1,14 @@
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import assert from 'node:assert/strict';
 import { app } from '../src/index.ts';
+import { manualRoutes } from '../src/manual-routes.ts';
 import { openapi } from '../src/openapi.ts';
 
-const actual = new Set(app.routes.filter(r => r.method !== 'ALL' && !['/', '/openapi.json', '/api/openapi.json', '/api/health'].includes(r.path)
-  && !r.path.startsWith('/api/local/')).map(r => `${r.method.toLowerCase()} ${r.path.replace(/:(\w+)/g, '{$1}')}`));
+const business = app.routes.filter(r => r.method !== 'ALL' && !['/', '/openapi.json', '/api/openapi.json', '/api/health'].includes(r.path)
+  && !r.path.startsWith('/api/local/'));
+const manual = manualRoutes.flatMap(({ path, methods }) => Object.keys(methods).map(method => ({ path, method })));
+const actual = new Set([...business, ...manual].map(r => `${r.method.toLowerCase()} ${r.path.replace(/:(\w+)/g, '{$1}')}`));
+assert.equal(actual.size, business.length + manual.length, '业务接口不能被重复分发');
 const documented = new Set(Object.entries(openapi.paths).flatMap(([path, methods]) => Object.keys(methods).map(method => `${method} ${path}`)));
 assert.deepEqual([...actual].sort(), [...documented].sort(), 'OpenAPI 必须覆盖所有业务接口');
 const exported = JSON.stringify(openapi, null, 2);

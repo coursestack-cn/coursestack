@@ -10,10 +10,13 @@
     import CommentsSection from "./CommentsSection.svelte";
     import { blockView, capabilities, contentActions, encode, questionHref, voteState, type Content } from "./data";
 
-    let { content, canManage, otherAccepted = false, focusComment, onaccept, onunaccept, onchange, onremove, onlocated }: {
-        content: Content; canManage: boolean; otherAccepted?: boolean; focusComment?: string;
+    let { content, canManage, otherAccepted = false, focusComment, editHref, showCommentsButton = true, commentsHref, onaccept, onunaccept, onchange, onremove, onlocated }: {
+        content: Content; canManage: boolean; otherAccepted?: boolean; focusComment?: string; editHref?: string;
+        /** The page renders the comment area itself; the comment button links to it. */
+        commentsHref?: string;
+        showCommentsButton?: boolean;
         onaccept?: () => Promise<void>; onunaccept?: () => Promise<void>; onchange: () => void;
-        onremove: (id: string) => void; onlocated?: () => void;
+        onremove: (id: string) => void; onlocated?: (repeat: boolean) => void;
     } = $props();
     let commentsOpen = $state(false), commentsMounted = $state(false), editing = $state(false);
     let currentVote = $state<{ score: number; myVote: -1 | 0 | 1 }>();
@@ -32,10 +35,10 @@
 </script>
 
 <div class="discussion-block">
-    <ContentBlock content={shown} capabilities={capabilities(content.author.id, session.user?.id, canManage)}
+    <ContentBlock content={shown} capabilities={capabilities(content.author.id, session.user?.id, canManage, content.canDelete)}
         voteState={voteState(content.author.id, session.user?.id, session.status)} {otherAccepted}
-        bind:commentsExpanded={commentsOpen} onvote={async value => { currentVote = await actions.vote(content.id, value); }} onrequirelogin={login}
-        {onaccept} {onunaccept} editHref={content.kind === "question" ? `${questionHref(content.id)}/edit` : undefined}
+        bind:commentsExpanded={commentsOpen} {showCommentsButton} {commentsHref} onvote={async value => { currentVote = await actions.vote(content.id, value); }} onrequirelogin={login}
+        {onaccept} {onunaccept} editHref={editHref ?? (content.kind === "question" ? `${questionHref(content.id)}/edit` : undefined)}
         onedit={edit} ondelete={remove} onmoderate={hide} onreport={reason => actions.report(content.id, reason)} />
     {#if editing}
         <div class="editing"><BodyComposer label="编辑回答" guardSamePage path={`/api/contents/${encode(content.id)}`} initial={untrack(() => content.body)}
@@ -43,7 +46,7 @@
     {/if}
     {#if commentsMounted}
         <div class="comment-panel" hidden={!commentsOpen}>
-            <CommentsSection targetKind={content.kind === "question" ? "question" : "answer"} targetId={content.id} {canManage}
+            <CommentsSection targetKind={content.kind === "material" ? "material" : content.kind === "question" ? "question" : "answer"} targetId={content.id} {canManage}
                 focusId={focusComment} onchanged={onchange} {onlocated} />
         </div>
     {/if}

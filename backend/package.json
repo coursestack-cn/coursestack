@@ -14,6 +14,7 @@
         "admin:init": "node --experimental-strip-types scripts/admin.mjs init",
         "admin:reset": "node --experimental-strip-types scripts/admin.mjs reset",
         "admin:status": "node --experimental-strip-types scripts/admin.mjs status",
+        "search:backfill": "node --experimental-strip-types scripts/search-backfill.mjs",
         "db:generate": "node --experimental-strip-types scripts/generate-schema.mjs",
         "db:diagram": "drizzle-lab visualizer --config ./drizzle.config.ts --save-dir ./.local/schema-diagram --project-id coursestack --port 64738",
         "db:check": "node --experimental-strip-types scripts/check-migrations.mjs",

@@ -8,8 +8,15 @@ import { normalizeContentHash } from "$lib/router/ids";
 type ScrollPosition = { x: number; y: number };
 type Entry = { index: number; scroll: ScrollPosition };
 type NavigationKind = "initial" | "push" | "replace" | "pop";
-export type NavigationOptions = { replace?: boolean; scroll?: "top" };
+export type NavigationOptions = { replace?: boolean; scroll?: "top"; focusHeading?: boolean };
 export type QueryChanges = Record<string, string | number | boolean | readonly string[] | null | undefined>;
+
+// Dev only: after an edit anywhere in the route graph, Vite can evaluate this module again inside a running page.
+// A second copy keeps its own location state, so its navigations change the URL while RouterOutlet stays on the old page.
+if (import.meta.hot) {
+    if (import.meta.hot.data.loaded) window.location.reload();
+    import.meta.hot.data.loaded = true;
+}
 
 const stateKey = "coursestack";
 const zeroScroll = () => ({ x: 0, y: 0 });
@@ -17,7 +24,7 @@ let entry: Entry = { index: 0, scroll: zeroScroll() };
 let kind: NavigationKind = "initial";
 let pathChanged = false;
 let hashChanged = false;
-let scrollToTop = false;
+let navigationOptions: NavigationOptions = {};
 let authRedirectDeferrals = $state(0);
 let renderPending = true;
 let started = false;
@@ -94,11 +101,11 @@ function normalizeLocation(): void {
     }
 }
 
-function publish(nextKind: NavigationKind, top = false): void {
+function publish(nextKind: NavigationKind, options: NavigationOptions = {}): void {
     normalizeLocation();
     const previous = current;
     kind = nextKind;
-    scrollToTop = top;
+    navigationOptions = options;
     renderPending = true;
     current = readLocation(current.id + 1);
     pathChanged = previous.pathname !== current.pathname;
@@ -115,7 +122,7 @@ function commit(url: URL, options: NavigationOptions = {}, automatic = false): v
     const href = `${pathname}${url.search}${normalizeContentHash(url.hash)}`;
     if (options.replace) writeEntry(entry, href);
     else window.history.pushState({ [stateKey]: entry }, "", href);
-    publish(automatic && kind === "initial" && completed < 0 ? "initial" : options.replace ? "replace" : "push", options.scroll === "top");
+    publish(automatic && kind === "initial" && completed < 0 ? "initial" : options.replace ? "replace" : "push", options);
 }
 
 export async function navigate(href: string, options: NavigationOptions = {}): Promise<boolean> {
@@ -253,8 +260,11 @@ export async function finishNavigation(id: number): Promise<void> {
     await new Promise<void>((resolve) => window.requestAnimationFrame(() => resolve()));
     if (id !== current.id || completed === id) return;
     completed = id;
-    if (kind !== "initial" && pathChanged) document.querySelector<HTMLElement>("#main h1")?.focus({ preventScroll: true });
+    if (kind !== "initial" && pathChanged && navigationOptions.focusHeading !== false) {
+        document.querySelector<HTMLElement>("#main h1")?.focus({ preventScroll: true });
+    }
     // Restore history positions even with fragments; query-only changes must not re-focus an unchanged fragment.
+    const scrollToTop = navigationOptions.scroll === "top";
     const useAnchor = kind !== "pop" && !scrollToTop && current.hash && (kind === "initial" || pathChanged || hashChanged);
     const target = useAnchor ? anchorTarget(current.hash) : null;
     if (target) {

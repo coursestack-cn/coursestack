@@ -70,7 +70,7 @@ test('正文中的版本链接不受文件状态影响，编辑正文不会清�
     const edited = await h.api('PATCH', `/contents/${q}`, 'student-a', { body: doc('修改正文') });
     assert.equal(edited.status, 200); assert.equal(edited.data.fileVersionId, undefined); assert.deepEqual(edited.data.tags, ['极限']);
 });
-test('只能编辑本人或所管理课程内容；最后提交的正文生效', async () => {
+test('只能编辑本人内容；最后提交的正文生效', async () => {
     const q = await h.postQuestion();
     assert.equal((await h.api('PATCH', `/contents/${q}`, 'student-b', { body: doc('恶意覆盖') })).status, 403);
     assert.equal((await h.api('PATCH', `/contents/${q}`, 'teacher-b', { body: doc('越权覆盖') })).status, 403);
@@ -78,7 +78,7 @@ test('只能编辑本人或所管理课程内容；最后提交的正文生效',
     assert.equal((await h.api('PATCH', `/contents/${q}`, 'student-a', { body: doc('旧页面最后提交') })).status, 200);
     assert.deepEqual((await h.api('GET', `/questions/${q}`)).data.body, doc('旧页面最后提交'));
 });
-test('资料、问题和答案均可评论，回复只指向直接父评论', async () => {
+test('资料、问题和答案均可评论，回复引用与同级所属对象分开', async () => {
     const q = await h.postQuestion(), a = await h.postAnswer(q);
     const targets = [{ targetKind: 'material', targetId: 'material-a' }, { targetKind: 'question', targetId: q }, { targetKind: 'answer', targetId: a }];
     const ids           = [];
@@ -95,13 +95,13 @@ test('资料、问题和答案均可评论，回复只指向直接父评论', as
     const thread = await h.api('GET', '/comments?targetKind=material&targetId=material-a');
     assert.equal(thread.data.total, 2);
     const dto = thread.data.items.find(c => c.id === reply.data.id);
-    assert.equal(dto.targetKind, 'comment'); assert.equal(dto.targetId, ids[0]); assert.equal(dto.replyToId, undefined);
+    assert.equal(dto.targetKind, 'material'); assert.equal(dto.targetId, 'material-a'); assert.equal(dto.replyTo.id, ids[0]); assert.equal(dto.replyToId, undefined);
     assert.equal((await h.api('POST', '/comments', 'student-a', { targetKind: 'comment', targetId: q, body: doc('目标类型不匹配') })).status, 404);
 });
-test('赞踩可切换撤销且重试不累加；问题、回答和评论禁止自投', async () => {
+test('资料、问题、回答和评论均可赞踩，支持切换撤销和幂等重试，禁止自投', async () => {
     const q = await h.postQuestion(), a = await h.postAnswer(q, 'student-a');
     const comment = await h.api('POST', '/comments', 'student-a', { targetKind: 'question', targetId: q, body: doc('问题评论') });
-    for (const id of [q, a, comment.data.id]) {
+    for (const id of ['material-a', q, a, comment.data.id]) {
         assert.equal((await h.api('PUT', `/contents/${id}/vote`, 'student-a', { value: 1 })).status, 403);
         assert.equal((await h.api('PUT', `/contents/${id}/vote`, 'student-b', { value: 1 })).status, 200);
         await h.database.prepare("UPDATE votes SET created_at=1 WHERE content_id=? AND user_id='student-b'").bind(id).run();
@@ -115,6 +115,38 @@ test('赞踩可切换撤销且重试不累加；问题、回答和评论禁止�
         assert.ok(await h.database.prepare("SELECT created_at FROM votes WHERE content_id=? AND user_id='student-b'").bind(id).first('created_at') > 1);
     }
 });
+test('资料投票按整份资料统计，各版本详情与课程列表返回一致', async () => {
+    assert.equal((await h.api('PUT', '/contents/material-a/vote', 'student-b', { value: 1 })).status, 200);
+    const opposed = await h.api('PUT', '/contents/material-a/vote', 'visitor', { value: -1 });
+    assert.equal(opposed.status, 200); assert.equal(opposed.data.score, 0); assert.equal(opposed.data.myVote, -1);
+    for (const path of ['/contents/material-a', '/materials/material-a', '/materials/material-a?version=1', '/materials/material-a?version=2']) {
+        const detail = await h.api('GET', path, 'student-b');
+        assert.equal(detail.status, 200); assert.equal(detail.data.score, 0); assert.equal(detail.data.myVote, 1);
+    }
+    const list = await h.api('GET', '/courses/course-a/contents?kind=material', 'student-b');
+    assert.equal(list.status, 200);
+    const material = list.data.items.find(item => item.id === 'material-a');
+    assert.equal(material.score, 0); assert.equal(material.myVote, 1);
+    const anonymous = await h.api('GET', '/materials/material-a');
+    assert.equal(anonymous.status, 200); assert.equal(anonymous.data.score, 0); assert.equal(anonymous.data.myVote, 0);
+});
+test('资料投票仍校验登录、票值和公开状态', async () => {
+    assert.equal((await h.api('PUT', '/contents/material-a/vote', undefined, { value: 1 })).status, 401);
+    for (const value of [-2, 2, '1', null]) {
+        assert.equal((await h.api('PUT', '/contents/material-a/vote', 'student-b', { value })).status, 400);
+    }
+    assert.equal(await h.database.prepare('SELECT COUNT(*) AS n FROM votes').first('n'), 0);
+    assert.equal((await h.api('PUT', '/contents/material-a/vote', 'student-b', { value: 1 })).status, 200);
+    for (const action of ['hide', 'delete']) {
+        assert.equal((await h.api('PUT', '/contents/material-a/moderation', 'teacher-a', { action, reason: '验证非公开资料不可投票' })).status, 200);
+        for (const value of [-1, 0, 1]) {
+            const blocked = await h.api('PUT', '/contents/material-a/vote', 'student-b', { value });
+            assert.equal(blocked.status, 404); assert.equal(blocked.data.error.code, 'CONTENT_UNAVAILABLE');
+        }
+        assert.equal(await h.database.prepare("SELECT value FROM votes WHERE content_id='material-a' AND user_id='student-b'").first('value'), 1);
+    }
+    assert.equal((await h.api('PUT', '/contents/missing/vote', 'student-b', { value: 1 })).status, 404);
+});
 test('教师身份不自动置顶；净赞数排序，采纳后置顶', async () => {
     const q = await h.postQuestion(), teacher = await h.postAnswer(q, 'teacher-a'), student = await h.postAnswer(q);
     await h.api('PUT', `/contents/${student}/vote`, 'student-a', { value: 1 });
@@ -126,12 +158,12 @@ test('教师身份不自动置顶；净赞数排序，采纳后置顶', async ()
     assert.equal((await h.api('GET', '/courses/course-a/questions?state=solved')).data.items.length, 1);
     assert.equal((await h.api('GET', '/courses/course-a/questions?state=unresolved')).data.items.length, 0);
 });
-test('问题下架后，列表、答案、评论、个人空间、动态和搜索文档同步隐藏', async () => {
+test('问题下架后公开入口隐藏分支，所有者个人空间保留自己的内容', async () => {
     const q = await h.postQuestion(), a = await h.postAnswer(q);
     const comment = await h.api('POST', '/comments', 'student-b', { targetKind: 'answer', targetId: a, body: doc('答案评论') });
     await h.api('PUT', `/contents/${q}/moderation`, 'teacher-a', { action: 'hide', reason: '测试下架传播' });
     for (const id of [q, a, comment.data.id]) assert.equal((await h.api('GET', `/contents/${id}`)).status, 404);
-    for (const path of ['/courses/course-a/questions', '/courses/course-a/activity', '/me/activity']) {
+    for (const path of ['/courses/course-a/questions', '/courses/course-a/activity']) {
         const r = await h.api('GET', path, 'student-b'); assert.ok(r.data.items.every(item => ![q, a, comment.data.id].includes(item.id ?? item.contentId)), path);
     }
     const docs = await h.api('GET', '/internal/documents', undefined, undefined, { internal: true, headers: internalHeaders });
@@ -157,7 +189,7 @@ test('删除评论清空正文并保留关联占位与回复，删除内容不�
     assert.deepEqual(list.data.items.map(x => [x.id, x.status ?? 'visible']), [[parent.data.id, 'deleted'], [child.data.id, 'visible']]);
     assert.equal(list.data.total, 2); assert.equal(list.data.items[0].body, null); assert.equal('author' in list.data.items[0], false);
     assert.equal(list.data.items[0].targetKind, 'question'); assert.equal(list.data.items[0].targetId, q);
-    assert.equal(list.data.items[1].targetKind, 'comment'); assert.equal(list.data.items[1].targetId, parent.data.id);
+    assert.equal(list.data.items[1].targetKind, 'question'); assert.equal(list.data.items[1].targetId, q); assert.equal(list.data.items[1].replyTo.id, parent.data.id);
     assert.equal((await h.api('GET', `/contents/${lonely.data.id}`)).data.status, 'deleted');
     assert.equal((await h.api('GET', `/contents/${parent.data.id}`)).data.body, null);
     assert.equal(await h.database.prepare('SELECT body FROM contents WHERE id=?').bind(parent.data.id).first('body'), null);
@@ -172,10 +204,10 @@ test('举报去重、教师审查、处理结果和下架恢复审计', async ()
     assert.equal((await h.api('GET', '/moderation/reports', 'teacher-a')).data.items[0].id, report.data.id);
     await h.api('PUT', `/contents/${q}/moderation`, 'teacher-a', { action: 'hide', reason: '已确认需要下架' });
     assert.equal((await h.api('GET', `/moderation/contents/${q}`, 'teacher-a')).data.body.content.length > 0, true);
-    const resolved = await h.api('PATCH', `/moderation/reports/${report.data.id}`, 'teacher-a', { status: 'resolved', resolution: '已审查并下架' });
+    const resolved = await h.api('PATCH', `/moderation/reports/${report.data.id}`, 'teacher-a', { action: 'hide', resolution: '已审查并下架' });
     assert.equal(resolved.status, 200);
     assert.equal((await h.api('GET', '/moderation/actions', 'teacher-a')).data.items[0].newStatus, 'hidden');
-    assert.equal((await h.api('PATCH', `/moderation/reports/${report.data.id}`, 'teacher-a', { status: 'dismissed', resolution: '过期的处理' })).status, 409);
+    assert.equal((await h.api('PATCH', `/moderation/reports/${report.data.id}`, 'teacher-a', { action: 'none', resolution: '过期的处理' })).status, 409);
 });
 test('所有公开 DTO 不包含会话、学籍或内部幂等信息', async () => {
     const q = await h.postQuestion(), a = await h.postAnswer(q);
@@ -210,7 +242,6 @@ test('资料统一为内容，文件外键拒绝非资料，直接父级拒绝�
     assert.equal(material.data.kind, 'material'); assert.equal(material.data.targetId, null); assert.equal(material.data.targetKind, null);
     const edited = await h.api('PATCH', '/contents/material-a', 'student-a', { title: '新标题', body: doc('资料简介') });
     assert.equal(edited.status, 200); assert.equal(edited.data.title, '新标题');
-    assert.equal((await h.api('PUT', '/contents/material-a/vote', 'student-b', { value: 1 })).status, 400);
     const q = await h.postQuestion();
     await assert.rejects(() => h.database.prepare("INSERT INTO file_versions(material_id,version,storage_key,size,mime,uploaded_by,updated_by) VALUES (?,1,'invalid-version',8,'application/pdf','student-a','student-a')").bind(q).run(), /invalid_material/);
     await assert.rejects(() => h.database.prepare("UPDATE file_versions SET material_id=? WHERE material_id='material-a' AND version=1").bind(q).run(), /file_version_identity_immutable/);
@@ -237,11 +268,13 @@ test('资料统一为内容，文件外键拒绝非资料，直接父级拒绝�
     await assert.rejects(() => insert('comment', answer), /invalid_content_target/);
 });
 
-test('删除问题、资料或回答清空正文与标题，其下内容不再公开但关系与文件保留', async () => {
+test('管理者删除问题、资料或回答会连带清空子内容并删除文件', async () => {
     const q = await h.postQuestion('student-a', { tags: ['删除测试'] }), other = await h.postQuestion(), answer = await h.postAnswer(other);
     for (const [id, kind] of [[q, 'question'], ['material-a', 'material'], [answer, 'answer']]) {
         const comment = await h.api('POST', '/comments', 'student-b', { targetKind: kind, targetId: id, body: doc('下级内容') });
-        assert.equal((await h.api('DELETE', `/contents/${id}`, id === answer ? 'student-b' : 'student-a', { })).status, 200);
+        assert.equal((await h.api('DELETE', `/contents/${id}`, id === answer ? 'student-b' : 'student-a', { })).status, 409);
+        assert.equal((await h.api('PUT', `/contents/${id}/moderation`, 'teacher-a', { action: 'delete', reason: '删除内容及其讨论' })).status, 200);
+        assert.equal(await h.database.prepare('SELECT status FROM contents WHERE id=?').bind(comment.data.id).first('status'), 'deleted');
         assert.deepEqual(await h.database.prepare('SELECT title,body,tags FROM contents WHERE id=?').bind(id).first(), { title: null, body: null, tags: null });
         for (const path of [`/contents/${id}`, `/contents/${comment.data.id}`, `/comments?targetKind=${kind}&targetId=${id}`]) {
             assert.equal((await h.api('GET', path)).status, 404, path);
@@ -252,25 +285,26 @@ test('删除问题、资料或回答清空正文与标题，其下内容不再�
     assert.equal((await h.api('GET', `/questions/${q}`)).status, 404);
     assert.equal((await h.api('GET', `/questions/${q}/answers`)).status, 404);
     assert.equal((await h.api('GET', `/questions/${other}/answers`)).data.total, 0);
-    assert.equal(await h.database.prepare("SELECT material_id FROM file_versions WHERE material_id='material-a' AND version=1").first('material_id'), 'material-a');
+    assert.equal(await h.database.prepare("SELECT material_id FROM file_versions WHERE material_id='material-a' AND version=1").first('material_id'), null);
 });
 
-test('删除父内容不撤回其下回答已得的积分，下架才撤回', async () => {
+test('管理者删除父内容和下架均撤回分支自动积分', async () => {
     await h.policy({ pointsAnswer: 4 });
     const q = await h.postQuestion(), answer = await h.postAnswer(q);
     const points = () => h.database.prepare("SELECT COALESCE(SUM(delta_points),0) AS n FROM bonus_ledger WHERE student_id='student-b'").first('n');
     assert.equal(await points(), 4);
-    assert.equal((await h.api('DELETE', `/contents/${q}`, 'student-a', { })).status, 200);
+    assert.equal((await h.api('DELETE', `/contents/${q}`, 'student-a')).status, 409);
+    assert.equal((await h.api('PUT', `/contents/${q}/moderation`, 'teacher-a', { action: 'delete', reason: '删除整个讨论' })).status, 200);
     assert.equal((await h.api('GET', `/contents/${answer}`)).status, 404);
-    assert.equal(await points(), 4);
+    assert.equal(await points(), 0);
     const hidden = await h.postQuestion(), hiddenAnswer = await h.postAnswer(hidden);
-    assert.equal(await points(), 8);
+    assert.equal(await points(), 4);
     assert.equal((await h.api('PUT', `/contents/${hidden}/moderation`, 'teacher-a', { action: 'hide', reason: '下架整个分支' })).status, 200);
     assert.equal((await h.api('GET', `/contents/${hiddenAnswer}`)).status, 404);
-    assert.equal(await points(), 4);
+    assert.equal(await points(), 0);
 });
 
-test('任意层评论下架会隐藏整个分支，恢复后回复与活跃排序恢复', async () => {
+test('评论下架不影响同级回复及其活跃排序', async () => {
     const q = await h.postQuestion(), other = await h.postQuestion();
     const comment = async (kind, id) => {
         const r = await h.api('POST', '/comments', 'student-b', { targetKind: kind, targetId: id, body: doc('评论内容') });
@@ -285,9 +319,9 @@ test('任意层评论下架会隐藏整个分支，恢复后回复与活跃排�
     assert.equal((await h.api('GET', '/courses/course-a/questions?sort=active')).data.items[0].id, q);
     assert.equal((await h.api('GET', `/comments?targetKind=question&targetId=${q}`)).data.total, 3);
     assert.equal((await h.api('PUT', `/contents/${child}/moderation`, 'teacher-a', { action: 'hide', reason: '下架子分支' })).status, 200);
-    assert.equal((await h.api('GET', `/contents/${grandchild}`)).status, 404);
-    assert.equal((await h.api('GET', `/comments?targetKind=question&targetId=${q}`)).data.total, 1);
-    assert.equal((await h.api('GET', '/courses/course-a/questions?sort=active')).data.items[0].id, other);
+    assert.equal((await h.api('GET', `/contents/${grandchild}`)).status, 200);
+    assert.equal((await h.api('GET', `/comments?targetKind=question&targetId=${q}`)).data.total, 2);
+    assert.equal((await h.api('GET', '/courses/course-a/questions?sort=active')).data.items[0].id, q);
     assert.equal((await h.api('PUT', `/contents/${child}/moderation`, 'teacher-a', { action: 'restore', reason: '恢复子分支' })).status, 200);
     assert.equal((await h.api('GET', `/comments?targetKind=question&targetId=${q}`)).data.total, 3);
     assert.equal((await h.api('GET', '/courses/course-a/questions?sort=active')).data.items[0].id, q);

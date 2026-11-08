@@ -5,14 +5,16 @@
 
     const links = [
         { label: "账号管理", href: "/manage/accounts" },
-        { label: "课程管理", href: "/manage/courses" }
+        { label: "课程管理", href: "/manage/courses" },
+        { label: "学期设置", href: "/manage/terms" },
+        { label: "内容审查", href: "/manage/contents" }
     ];
 </script>
 
 {#if session.hasRole("admin")}
     <nav class="manage-nav" aria-label="管理导航">
         {#each links as link (link.href)}
-            <Link class="manage-link" href={link.href} aria-current={router.pathname === link.href ? "page" : undefined}>{link.label}</Link>
+            <Link class="manage-link" href={link.href} aria-current={router.pathname === link.href || router.pathname.startsWith(`${link.href}/`) ? "page" : undefined}>{link.label}</Link>
         {/each}
     </nav>
 {/if}

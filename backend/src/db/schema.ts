@@ -32,6 +32,17 @@ export const accounts = sqliteTable('accounts', {
     uniqueIndex('accounts_single_admin').on(t.role).where(sql`${t.role} = 'admin'`),
 ]);
 
+export const accountCreationRequests = sqliteTable('account_creation_requests', {
+    actorId: text('actor_id').notNull().references(() => accounts.id, { onDelete: 'cascade' }),
+    requestKey: text('request_key').notNull(),
+    accountId: text('account_id').notNull().references(() => accounts.id, { onDelete: 'cascade' }),
+    requestHash: text('request_hash').notNull(),
+    createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
+}, (t) => [
+    primaryKey({ columns: [t.actorId, t.requestKey] }),
+    uniqueIndex('account_creation_requests_account').on(t.accountId),
+]);
+
 // The course number is the primary key; offerings and teachers are independent.
 export const courses = sqliteTable('courses', {
     id: text('id').primaryKey().notNull(),
@@ -179,11 +190,15 @@ export const contents = sqliteTable('contents', {
     id: text('id').primaryKey().notNull(),
     kind: text('kind', { enum: ['material', 'question', 'answer', 'comment'] }).notNull(),
     courseId: text('course_id').notNull().references(() => courses.id),
+    termId: text('term_id').references(() => terms.id, { onDelete: 'restrict' }),
     authorId: text('author_id').notNull().references(() => accounts.id),
     title: text('title'),
     body: text('body'),
+    bodyText: text('body_text').notNull().default(''),
     tags: text('tags'),
     targetId: text('target_id'),
+    // Comments belong to a question, answer or material; replies never own other comments.
+    replyToId: text('reply_to_id'),
     status: text('status', { enum: ['visible', 'hidden', 'deleted'] }).notNull().default('visible'),
     createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
     editedAt: integer('edited_at'),
@@ -193,6 +208,7 @@ export const contents = sqliteTable('contents', {
     requestHash: text('request_hash').notNull(),
 }, (t) => [
     foreignKey({ columns: [t.targetId], foreignColumns: [t.id] }),
+    foreignKey({ columns: [t.replyToId], foreignColumns: [t.id] }),
     check('contents_body_json', sql`${t.body} IS NULL OR json_valid(${t.body})`),
     check('contents_deleted_payload', sql`${t.status} <> 'deleted' OR (${t.title} IS NULL AND ${t.body} IS NULL AND ${t.tags} IS NULL)`),
     check('contents_kind', sql`${t.kind} IN ('material', 'question', 'answer', 'comment')`),
@@ -202,8 +218,24 @@ export const contents = sqliteTable('contents', {
         OR (${t.kind} IN ('answer', 'comment') AND ${t.title} IS NULL AND ${t.targetId} IS NOT NULL)`),
     uniqueIndex('contents_request_unique').on(t.authorId, t.requestKey),
     index('contents_course_kind_time').on(t.courseId, t.kind, t.status, t.createdAt, t.id),
+    index('contents_course_term_kind_time').on(t.courseId, t.termId, t.kind, t.status, t.createdAt, t.id),
     index('contents_target').on(t.targetId, t.status),
+    index('contents_reply').on(t.replyToId),
     index('contents_author').on(t.authorId, t.kind, t.createdAt, t.id),
+]);
+
+// Each insertion owns its own R2 object at body-images/<id>.
+export const contentImages = sqliteTable('content_images', {
+    id: text('id').primaryKey().notNull(),
+    uploadedBy: text('uploaded_by').notNull().references(() => accounts.id),
+    contentId: text('content_id').references(() => contents.id),
+    draftUploadId: text('draft_upload_id').references(() => materialUploadSessions.id),
+    cleanupAt: integer('cleanup_at'),
+}, t => [
+    check('content_images_owner', sql`(${t.contentId} IS NOT NULL) + (${t.draftUploadId} IS NOT NULL) + (${t.cleanupAt} IS NOT NULL) = 1`),
+    index('content_images_content').on(t.contentId).where(sql`${t.contentId} IS NOT NULL`),
+    index('content_images_draft').on(t.draftUploadId).where(sql`${t.draftUploadId} IS NOT NULL`),
+    index('content_images_cleanup').on(t.cleanupAt).where(sql`${t.cleanupAt} IS NOT NULL`),
 ]);
 
 // One current acceptance per question. Rewards live exclusively in bonus_ledger.
@@ -242,7 +274,7 @@ export const bonusLedger = sqliteTable('bonus_ledger', {
     createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
 }, (t) => [
     foreignKey({ columns: [t.reversesId], foreignColumns: [t.id] }),
-    // Keep the historical class even if the student's current membership changes.
+    // The enrollment's transfer and removal triggers keep ledger attribution in sync.
     foreignKey({ columns: [t.courseId, t.termId, t.teacherId], foreignColumns: [teachingClasses.courseId, teachingClasses.termId, teachingClasses.teacherId] }).onDelete('restrict'),
     check('bonus_ledger_source_kind', sql`${t.sourceKind} IN ('question', 'answer', 'acceptance', 'comment', 'material', 'manual')`),
     check('bonus_ledger_delta', sql`${t.deltaPoints} <> 0 AND abs(${t.deltaPoints}) <= 9007199254740991`),
@@ -251,6 +283,7 @@ export const bonusLedger = sqliteTable('bonus_ledger', {
             AND (${t.reversesId} IS NOT NULL OR ${t.deltaPoints} > 0))`),
     uniqueIndex('bonus_original_award').on(t.sourceKind, t.sourceId).where(sql`${t.sourceKind} <> 'manual' AND ${t.reversesId} IS NULL`),
     uniqueIndex('bonus_reversal_once').on(t.reversesId),
+    index('bonus_student_reversals').on(t.courseId, t.studentId).where(sql`${t.reversesId} IS NOT NULL`),
     uniqueIndex('bonus_manual_request').on(t.operatorId, t.sourceId).where(sql`${t.sourceKind} = 'manual'`),
     index('bonus_course_term_student').on(t.courseId, t.termId, t.studentId),
     index('bonus_class_student').on(t.courseId, t.termId, t.teacherId, t.studentId),
@@ -261,7 +294,7 @@ export const reports = sqliteTable('reports', {
     contentId: text('content_id').notNull().references(() => contents.id),
     reporterId: text('reporter_id').notNull().references(() => accounts.id),
     reason: text('reason').notNull(),
-    status: text('status', { enum: ['pending', 'resolved', 'dismissed'] }).notNull().default('pending'),
+    status: text('status', { enum: ['pending', 'resolved', 'dismissed', 'deleted'] }).notNull().default('pending'),
     resolution: text('resolution'),
     handledBy: text('handled_by').references(() => accounts.id),
     handledAt: integer('handled_at'),
@@ -269,13 +302,15 @@ export const reports = sqliteTable('reports', {
     requestKey: text('request_key').notNull(),
     requestHash: text('request_hash').notNull(),
 }, (t) => [
-    check('reports_status', sql`${t.status} IN ('pending', 'resolved', 'dismissed')`),
+    check('reports_status', sql`${t.status} IN ('pending', 'resolved', 'dismissed', 'deleted')`),
     uniqueIndex('reports_request_unique').on(t.reporterId, t.requestKey),
     uniqueIndex('one_pending_report').on(t.contentId, t.reporterId).where(sql`${t.status} = 'pending'`),
     index('reports_queue').on(t.status, t.createdAt, t.id),
 ]);
 
 export const moderationActions = sqliteTable('moderation_actions', {
+    // A version deletion keeps its audit entry after the file version is removed.
+    version: integer('version'),
     id: integer('id').primaryKey({ autoIncrement: true }),
     contentId: text('content_id').notNull().references(() => contents.id),
     actorId: text('actor_id').notNull().references(() => accounts.id),
@@ -286,4 +321,66 @@ export const moderationActions = sqliteTable('moderation_actions', {
 }, (t) => [
     check('moderation_actions_old_status', sql`${t.oldStatus} IN ('visible', 'hidden', 'deleted')`),
     check('moderation_actions_new_status', sql`${t.newStatus} IN ('visible', 'hidden', 'deleted')`),
+]);
+
+// Retained for upgrading existing read receipts; new reads live in notifications.
+export const moderationNotificationReads = sqliteTable('moderation_notification_reads', {
+    actionId: integer('action_id').notNull().references(() => moderationActions.id),
+    accountId: text('account_id').notNull().references(() => accounts.id),
+    readAt: integer('read_at').notNull().default(sql`(unixepoch())`),
+}, t => [primaryKey({ columns: [t.actionId, t.accountId] })]);
+
+// One inbox entry per recipient and source event. Content text stays in contents.
+export const notifications = sqliteTable('notifications', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: text('account_id').notNull().references(() => accounts.id),
+    actorId: text('actor_id').notNull().references(() => accounts.id),
+    kind: text('kind', { enum: ['answer', 'comment', 'reply', 'accepted', 'unaccepted', 'moderation', 'bonus', 'favorite'] }).notNull(),
+    sourceId: text('source_id').notNull(),
+    eventId: integer('event_id').references(() => contentEvents.id),
+    contentId: text('content_id').references(() => contents.id),
+    createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
+    readAt: integer('read_at'),
+}, t => [
+    check('notifications_kind', sql`${t.kind} IN ('answer', 'comment', 'reply', 'accepted', 'unaccepted', 'moderation', 'bonus', 'favorite')`),
+    uniqueIndex('notifications_recipient_event').on(t.accountId, t.eventId),
+    uniqueIndex('notifications_recipient_source').on(t.accountId, t.kind, t.sourceId),
+    index('notifications_recipient_order').on(t.accountId, t.id),
+    index('notifications_unread').on(t.accountId, t.id).where(sql`${t.readAt} IS NULL`),
+    index('notifications_read').on(t.accountId, t.id).where(sql`${t.readAt} IS NOT NULL`),
+]);
+
+
+export const favorites = sqliteTable('favorites', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    accountId: text('account_id').notNull().references(() => accounts.id),
+    courseId: text('course_id').references(() => courses.id),
+    contentId: text('content_id').references(() => contents.id),
+    createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
+}, t => [
+    check('favorites_target', sql`(${t.courseId} IS NULL) <> (${t.contentId} IS NULL)`),
+    uniqueIndex('favorites_account_course').on(t.accountId, t.courseId),
+    uniqueIndex('favorites_account_content').on(t.accountId, t.contentId),
+    index('favorites_account_order').on(t.accountId, t.createdAt, t.id),
+    index('favorites_subscribers').on(t.contentId, t.accountId),
+]);
+
+// Immutable events carry references only; reads always recheck current public visibility.
+export const contentEvents = sqliteTable('content_events', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    sourceKey: text('source_key').notNull(),
+    kind: text('kind', { enum: ['question_created', 'material_created', 'material_version', 'answer_created', 'comment_created', 'content_edited', 'acceptance_changed'] }).notNull(),
+    courseId: text('course_id').notNull().references(() => courses.id),
+    rootId: text('root_id').notNull().references(() => contents.id),
+    contentId: text('content_id').notNull().references(() => contents.id),
+    actorId: text('actor_id').notNull().references(() => accounts.id),
+    version: integer('version'),
+    oldAnswerId: text('old_answer_id').references(() => contents.id),
+    newAnswerId: text('new_answer_id').references(() => contents.id),
+    createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
+}, t => [
+    uniqueIndex('content_events_source').on(t.sourceKey),
+    index('content_events_feed').on(t.courseId, t.createdAt, t.id),
+    check('content_events_kind', sql`${t.kind} IN ('question_created','material_created','material_version','answer_created','comment_created','content_edited','acceptance_changed')`),
+    check('content_events_version', sql`${t.version} IS NULL OR ${t.version}>0`),
 ]);

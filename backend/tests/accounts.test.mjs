@@ -200,6 +200,8 @@ test('administrator resets a member password, revoking sessions and clearing tha
     for (const key of ['member:001', 'password:student', 'member:002']) {
         await binding.prepare('INSERT INTO login_attempts VALUES (?, 99, unixepoch() + 900)').bind(await digest(key)).run();
     }
+    // Failure counters are kept per client address; the reset clears every address of this member.
+    await binding.prepare('INSERT INTO login_attempts VALUES (?, 9, unixepoch() + 900)').bind(`${await digest('member:001')}:${await digest('203.0.113.9')}`).run();
     const result = await resetPassword('student', { newPassword: nextPassword }, admin);
     assert.equal(result.status, 200);
     assert.equal('revision' in await data(result), false);

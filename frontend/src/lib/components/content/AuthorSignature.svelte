@@ -7,17 +7,19 @@
         size?: "sm" | "md";
         createdAt?: number;
         editedAt?: number | null;
+        linkTeacher?: boolean;
     };
 </script>
 
 <script lang="ts">
     import Avatar from "$lib/components/ui/Avatar.svelte";
     import Badge from "$lib/components/ui/Badge.svelte";
+    import Link from "$lib/components/ui/Link.svelte";
     import RelativeTime from "$lib/components/content/RelativeTime.svelte";
     import { displayName } from "$lib/content/display-name";
     import { formatRelativeTime } from "$lib/content/relative-time";
 
-    let { author, size = "md", createdAt, editedAt, class: className = "", ...rest }: Props = $props();
+    let { author, size = "md", createdAt, editedAt, linkTeacher = false, class: className = "", ...rest }: Props = $props();
     const name = $derived(displayName(author));
     const teacher = $derived(!author.isDeleted && (author.isCourseTeacher ? "本课程教师" : author.isTeacher ? "教师" : undefined));
     const edited = $derived(editedAt !== undefined && editedAt !== null);
@@ -28,7 +30,7 @@
     <Avatar accountId={author.isDeleted ? undefined : author.id} name={author.isDeleted ? "" : author.nickname ?? ""} src={author.isDeleted ? undefined : author.avatarUrl ?? undefined}
         {size} alt="" aria-hidden="true" />
     <span class="details">
-        <span class="identity"><span class="name">{name}</span>{#if teacher}<Badge tone="teacher">{teacher}</Badge>{/if}</span>
+        <span class="identity"><span class="name">{#if linkTeacher && teacher}<Link href={`/teachers/${encodeURIComponent(author.id)}`}>{name}</Link>{:else}{name}{/if}</span>{#if teacher}<Badge tone="teacher">{teacher}</Badge>{/if}</span>
         {#if createdAt !== undefined || edited}
             <span class="metadata">
                 {#if createdAt !== undefined}<RelativeTime timestamp={createdAt} />{/if}

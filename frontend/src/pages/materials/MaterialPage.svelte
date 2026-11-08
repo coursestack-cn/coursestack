@@ -12,9 +12,11 @@
     import MaterialDetail from "./MaterialDetail.svelte";
 
     let { params }: PageProps = $props();
+    const materialId = $derived(params.materialId!);
+    const version = $derived(router.query.get("version"));
     const result = resource(async signal => {
-        const id = params.materialId!, version = router.query.get("version"), viewer = session.user?.id;
-        const material = await getMaterial(id, selectedNumber(version), signal);
+        const id = materialId, selectedVersion = version, viewer = session.user?.id;
+        const material = await getMaterial(id, selectedNumber(selectedVersion), signal);
         return { material, entry: await courseEntry(material.courseId, signal), viewer };
     });
 </script>
@@ -22,7 +24,7 @@
 {#if result.data && result.status === "ready"}
     {#key result.data.viewer}<MaterialDetail material={result.data.material} entry={result.data.entry} refreshing={result.refreshing} reload={result.reload} />{/key}
 {:else}
-    <PageLayout title="资料详情">
+    <PageLayout title="资料详情" style="max-width: 1280px;">
         {#if result.error?.code === "FILE_VERSION_UNAVAILABLE"}
             <StateBlock kind="unavailable" title="此版本已不可用" description="版本可能已被删除，可以返回资料查看现存版本。">
                 {#snippet actions()}<Button href={materialHref(params.materialId!)}>查看资料</Button>{/snippet}

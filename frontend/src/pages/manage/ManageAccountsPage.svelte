@@ -13,8 +13,14 @@
     import TextInput from "$lib/components/ui/TextInput.svelte";
     import Checkbox from "$lib/components/ui/Checkbox.svelte";
     import Dialog from "$lib/components/ui/Dialog.svelte";
+    import ConfirmDialog from "$lib/components/ui/ConfirmDialog.svelte";
+    import Menu from "$lib/components/ui/Menu.svelte";
+    import { toast } from "$lib/components/ui/toast.svelte.js";
     import Pagination from "$lib/components/ui/Pagination.svelte";
     import AccountEditDialog, { type Account } from "./AccountEditDialog.svelte";
+    import AccountImportDialog from "./AccountImportDialog.svelte";
+    import { accountTemplate } from "../../../../shared/accounts/import";
+    import { downloadCsv } from "./account-import";
     import ManageNav from "./ManageNav.svelte";
 
     type AccountList = { items: Account[]; page: number; pageSize: number; total: number };
@@ -42,6 +48,10 @@
     let copyError = $state("");
     let editOpen = $state(false);
     let editing = $state.raw<Account | null>(null);
+    let importOpen = $state(false);
+    let identityAction = $state<{ account: Account; role: "teacher" | "student" | null } | null>(null);
+    let identityOpen = $state(false);
+    let identityError = $state("");
     let alive = true;
     onDestroy(() => { alive = false; });
     $effect(() => { query = activeQuery; });
@@ -54,7 +64,10 @@
         loading = true;
         error = null;
         api.get<AccountList>(`/api/admin/accounts?${search}`, { signal: controller.signal }).then((data) => {
-            if (!controller.signal.aborted) result = data;
+            if (controller.signal.aborted) return;
+            const lastPage = Math.max(1, Math.ceil(data.total / data.pageSize));
+            if (page > lastPage) void updateQuery({ page: lastPage === 1 ? null : lastPage }, { replace: true });
+            else result = data;
         }, (cause) => {
             if (!controller.signal.aborted && !isAborted(cause)) error = toApiError(cause);
         }).finally(() => { if (!controller.signal.aborted) loading = false; });
@@ -64,6 +77,24 @@
     function startEdit(account: Account) {
         editing = account;
         editOpen = true;
+    }
+
+    function confirmIdentity(account: Account, role: "teacher" | "student" | null) {
+        identityError = "";
+        identityAction = { account, role };
+        identityOpen = true;
+    }
+
+    async function changeIdentity() {
+        if (!identityAction) return;
+        const { account, role } = identityAction;
+        const path = `/api/admin/accounts/${encodeURIComponent(account.id)}`;
+        if (role) await api.patch(path, { role });
+        else await api.delete(path);
+        if (alive) {
+            toast.success(role ? `已切换为${roleNames[role]}` : "账号已删除");
+            reload++;
+        }
     }
 
     function startReset(account: Account) {
@@ -78,8 +109,8 @@
     async function reset(event: SubmitEvent) {
         event.preventDefault();
         if (pending || !selected) return;
-        if (new TextEncoder().encode(String(password)).length > 72) {
-            resetError = "密码的 UTF-8 编码不能超过 72 字节。";
+        if (Array.from(String(password)).length > 64) {
+            resetError = "密码不能超过 64 个字符。";
             return;
         }
         pending = true;
@@ -100,7 +131,7 @@
             if (!alive) return;
             resetError = userMessage(cause, {
                 ACCOUNT_DELETED: "账号身份已变更，请关闭弹窗并重新选择账号。",
-                INVALID_PASSWORD: "密码的 UTF-8 编码不能超过 72 字节。",
+                INVALID_PASSWORD: "密码不能超过 64 个字符。",
                 default: "未能确认重置结果。请先核对账号状态；如需再次重置，请重新打开弹窗。"
             });
             reload++;
@@ -116,7 +147,13 @@
     }
 </script>
 
-<PageLayout title="账号管理" subtitle="编辑学生和教师的账号信息，重置登录密码。">
+<PageLayout title="账号管理" subtitle="管理师生账号、登录密码和身份。">
+    {#snippet actions()}
+        {#if session.hasRole("admin")}
+            <Button onclick={() => downloadCsv("账号导入模板.csv", accountTemplate())}>下载CSV模板</Button>
+            <Button variant="primary" onclick={() => { importOpen = true; }}>CSV导入</Button>
+        {/if}
+    {/snippet}
     {#if !session.hasRole("admin")}
         <p role="alert">需要管理员权限才能查看账号。</p>
     {:else}
@@ -135,8 +172,7 @@
             <ResourceState status={error ? "error" : "loading"} {error} reload={() => { reload++; }} />
         {:else if result?.items.length}
             <div class="table-scroll">
-                <table>
-                    <caption class="sr-only">账号列表</caption>
+                <table aria-label="账号列表">
                     <thead><tr><th>学工号</th><th>昵称</th><th>身份</th><th>状态</th><th>需改密</th><th>操作</th></tr></thead>
                     <tbody>
                         {#each result.items as account (account.id)}
@@ -150,6 +186,12 @@
                                     {#if account.schoolNumber}
                                         <Button size="sm" onclick={() => startReset(account)} aria-label={`重置 ${account.schoolNumber} 的密码`}>重置密码</Button>
                                     {/if}
+                                    <Menu items={[
+                                        { label: `切换为${account.role === "student" ? "教师" : "学生"}`, onselect: () => confirmIdentity(account, account.role === "student" ? "teacher" : "student") },
+                                        { label: "删除账号", danger: true, onselect: () => confirmIdentity(account, null) }
+                                    ]}>
+                                        {#snippet trigger(props)}<Button {...props} size="sm" aria-label={`更多账号操作 ${account.schoolNumber ?? ""}`}>更多</Button>{/snippet}
+                                    </Menu>
                                 </div>{:else}—{/if}</td>
                             </tr>
                         {/each}
@@ -177,14 +219,14 @@
         <div><Button variant="primary" onclick={() => { open = false; }}>完成</Button></div>
     {:else}
         <form class="reset-form" onsubmit={reset} aria-busy={pending || undefined}>
-            <Field label="新密码（可选）" help="留空自动生成随机密码；管理员可以设置短密码。">
+            <Field label="新密码（可选）" help="留空自动生成随机密码；最多 64 个字符，管理员可以设置短密码。">
                 {#snippet children({ id, describedBy, invalid })}
                     <TextInput {id} {invalid} aria-describedby={describedBy} name="resetPassword" type="password"
                         autocomplete="new-password" bind:value={password} disabled={pending} />
                 {/snippet}
             </Field>
             <Checkbox label="要求用户重置密码" bind:checked={mustChangePassword} disabled={pending} />
-            <p class="hint">勾选后，用户下次登录需要先设置至少 8 个字符的新密码。</p>
+            <p class="hint">勾选后，用户下次登录需要先设置 8-64 字符的新密码。</p>
             {#if resetError}<p class="error" role="alert">{resetError}</p>{/if}
             <div class="actions">
                 <Button disabled={pending} onclick={() => { open = false; }}>取消</Button>
@@ -194,9 +236,23 @@
     {/if}
 </Dialog>
 
+{#if identityAction}
+    {@const { account, role } = identityAction}
+    {@const label = account.schoolNumber ?? account.nickname ?? account.id}
+    <ConfirmDialog bind:open={identityOpen} danger title={role ? `将 ${label} 切换为${roleNames[role]}？` : `删除账号 ${label}？`}
+        description={role ? "将建立新身份并注销原会话。学工号、密码与个人资料沿用，已发表的内容、课程关系及积分保存在原身份下。" : "该成员将无法登录，个人资料会清除。已发表的内容和历史积分会保留，公开署名显示为“已删除”。"}
+        confirmLabel={role ? "切换身份" : "删除账号"} onconfirm={changeIdentity}
+        onerror={cause => { identityError = userMessage(cause, { ACCOUNT_DELETED: "原账号身份已变更，请关闭弹窗并重新选择。" }); reload++; }}
+        onclose={() => { identityAction = null; }}>
+        {#if identityError}<p class="error" role="alert">{identityError}</p>{/if}
+    </ConfirmDialog>
+{/if}
+
 <AccountEditDialog bind:open={editOpen} account={editing} onfailed={() => { reload++; }} onsaved={(saved) => {
     if (result) result = { ...result, items: result.items.map((item) => item.id === saved.id ? saved : item) };
 }} />
+
+{#if session.hasRole("admin")}<AccountImportDialog bind:open={importOpen} onsaved={() => { reload++; }} />{/if}
 
 <style>
     .search { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-4); }

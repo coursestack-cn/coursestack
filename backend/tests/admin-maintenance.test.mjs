@@ -79,6 +79,7 @@ test('external reset revokes only administrator sessions and retains the profile
     for (const key of ['admin-login', 'password:admin', 'member:T-001', 'ip:local']) {
         await binding.prepare('INSERT INTO login_attempts VALUES (?, 99, unixepoch() + 900)').bind(await digest(key)).run();
     }
+    await binding.prepare('INSERT INTO login_attempts VALUES (?, 9, unixepoch() + 900)').bind(`${await digest('admin-login')}:${await digest('203.0.113.9')}`).run();
     await resetAdministratorPassword(binding, nextPassword, state);
     assert.equal((await administratorState(binding)).version, 2);
     assert.deepEqual(await binding.prepare("SELECT id, nickname, name, department, major, grade FROM accounts WHERE id = 'admin'").first(), privateBefore);

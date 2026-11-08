@@ -1,5 +1,7 @@
 import { entityId, urlId } from "./ids.ts";
 
+const contentIdParams = new Set(["questionId", "answerId", "commentId", "materialId", "contentId"]);
+
 export function normalizePath(path: string): string {
     return path.replace(/^\/(questions|answers|comments|materials)\/([^/]+)/, (original, kind: string, segment: string) => {
         try {
@@ -35,7 +37,7 @@ export function matchRoute<T extends { path: string }>(pathname: string, routes:
             } else if (part.startsWith(":")) {
                 if (!segments[index]) { matchesPath = false; break; }
                 const name = part.slice(1);
-                params[name] = name.endsWith("Id") ? entityId(segments[index]!) : segments[index]!;
+                params[name] = contentIdParams.has(name) ? entityId(segments[index]!) : segments[index]!;
                 score.push(1);
             } else if (part === segments[index]) {
                 score.push(2);

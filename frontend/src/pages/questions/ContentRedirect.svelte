@@ -3,14 +3,19 @@
     import { navigate } from "$lib/router/router.svelte.js";
     import PageLayout from "$lib/components/shell/PageLayout.svelte";
     import ContentState from "./ContentState.svelte";
-    import { encode, locateContent, questionHref, urlId } from "./data";
+    import { encode, getContent, locateContent, ownedContentHref, questionHref, urlId } from "./data";
     let { id, kind }: { id: string; kind: "answer" | "comment" } = $props();
-    const result = resource(async signal => locateContent(id, kind, signal));
+    const result = resource(async signal => {
+        const content = await getContent(id, signal);
+        if (content.status !== "deleted" && !content.isPublic) return { href: ownedContentHref(id) };
+        const location = await locateContent(id, kind, signal);
+        const base = location.root.kind === "question" ? questionHref(location.root.id) : `/materials/${encode(urlId(location.root.id))}`;
+        return { href: `${base}#${kind}-${encode(urlId(id))}` };
+    });
     $effect(() => {
         const location = result.data;
         if (!location) return;
-        const base = location.root.kind === "question" ? questionHref(location.root.id) : `/materials/${encode(urlId(location.root.id))}`;
-        void navigate(`${base}#${kind}-${encode(urlId(id))}`, { replace: true });
+        void navigate(location.href, { replace: true });
     });
 </script>
 

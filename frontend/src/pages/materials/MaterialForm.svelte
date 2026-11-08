@@ -1,6 +1,6 @@
 <script lang="ts">
     import { onDestroy, untrack } from "svelte";
-    import { api } from "$lib/api/client";
+    import { api, ApiError } from "$lib/api/client";
     import { isAborted, userMessage } from "$lib/api/errors";
     import { session } from "$lib/session.svelte";
     import { redirect } from "$lib/router/router.svelte";
@@ -44,6 +44,7 @@
     const dirty = $derived(!saved && (Boolean(file) || JSON.stringify([title, body, tags]) !== initial));
     const canSubmit = $derived(mode === "version" ? Boolean(file) : !titleError && !tagsError && valid && Boolean(body) && (mode === "edit" || Boolean(file)));
     const back = $derived(material ? materialHref(material.id) : courseQuestionsHref(course));
+    let imageEditor = $state<ReturnType<typeof RichTextEditor>>();
     const controller = new AbortController();
     onBeforeLeave(() => !dirty && !busy);
     onDestroy(() => {
@@ -51,7 +52,11 @@
         if (!saved && !uncertain) void request?.cancel().catch(() => {});
     });
     $effect(() => {
-        if (snapshot.status === "done" && snapshot.result && !saved) {
+        if (snapshot.failure?.stage === "preparing" && snapshot.failure.code === "BODY_IMAGE_UNAVAILABLE") {
+            // The server rejected the draft before issuing a file upload ticket.
+            resetUpload();
+            error = "正文图片已失效。再次发布会重新上传本地图片。";
+        } else if (snapshot.status === "done" && snapshot.result && !saved) {
             saved = true;
             toast.success(mode === "version" ? `已发布版本 ${snapshot.result.version}` : "已发布资料");
             redirect(materialHref(snapshot.result.materialId));
@@ -65,36 +70,46 @@
         if (mode === "create" && (!String(title).trim() || title === file?.name)) title = next.name;
         file = next; error = "";
     }
+    function resetUpload() {
+        imageEditor?.resetImageUploads();
+        unsubscribe?.(); upload?.dispose();
+        upload = undefined; request = undefined;
+        snapshot = { status: "idle", file: null, loaded: 0, total: 0 };
+    }
+
     async function clearFile() {
         if (busy || uncertain) return;
         clearing = true; error = "";
         try {
             // Keep the same attempt until the server has acknowledged cancellation.
             await request?.cancel();
-            unsubscribe?.(); upload?.dispose(); upload = undefined; request = undefined;
-            snapshot = { status: "idle", file: null, loaded: 0, total: 0 }; file = null;
+            resetUpload();
+            file = null;
         } catch (cause) { error = userMessage(cause, { UPLOAD_BUSY: "上传正在确认，稍后重试。", UPLOAD_ALREADY_PUBLISHED: "此文件已发布，重试上传可返回发布结果。" }); }
         finally { clearing = false; }
     }
     async function submit() {
         if (busy || locked || !session.user || !canSubmit || invalidInitial) return;
-        if (mode !== "version" && (!body || !validateDoc(body).ok)) return;
+        if (mode !== "version" && (!imageEditor || !body || !validateDoc(body).ok)) return;
         error = "";
-        const draft = { title: String(title).trim(), body, tags };
-        if (mode === "edit" && material) {
-            saving = true;
-            try {
+        saving = true;
+        try {
+            const draft = { title: String(title).trim(), body: mode !== "version" && body && imageEditor ? await imageEditor.prepareImages(body, controller.signal) : null, tags };
+            if (mode === "edit" && material) {
                 await api.patch(materialPath(material.id), draft, { signal: controller.signal });
                 saved = true; saving = false; toast.success("已保存资料"); redirect(back);
-            } catch (cause) { if (!isAborted(cause)) error = userMessage(cause); }
-            finally { saving = false; }
-            return;
-        }
-        if (!file || !policy) return;
-        request = uploadRequest(mode === "create" ? { mode, courseId: course.id, ...draft } : { mode, materialId: material!.id }, session.user.id);
-        upload = createUploadController({ backend: request, maxBytes: policy.maxBytes });
-        unsubscribe = upload.subscribe(value => { snapshot = value; });
-        await upload.start(file);
+                return;
+            }
+            if (!file || !policy) return;
+            request = uploadRequest(mode === "create" ? { mode, courseId: course.id, ...draft } : { mode, materialId: material!.id }, session.user.id);
+            upload = createUploadController({ backend: request, maxBytes: policy.maxBytes });
+            unsubscribe = upload.subscribe(value => { snapshot = value; });
+            saving = false;
+            await upload.start(file);
+        } catch (cause) {
+            if (cause instanceof ApiError && cause.code === "BODY_IMAGE_UNAVAILABLE") imageEditor?.resetImageUploads();
+            if (!isAborted(cause)) error = userMessage(cause);
+        } finally { saving = false; }
     }
 </script>
 
@@ -118,7 +133,7 @@
                 {#snippet children({ id, invalid })}<TextInput {id} {invalid} bind:value={title} disabled={locked} placeholder="例如：微积分讲义.pdf" />{/snippet}
             </Field>
             <Field label="资料介绍" help="介绍内容、适用范围或使用方法。">
-                {#snippet children(control)}<RichTextEditor {...control} bind:value={body} disabled={locked} onstatechange={state => { valid = state.valid; }} onsubmit={() => { void submit(); }} />{/snippet}
+                {#snippet children(control)}<RichTextEditor {...control} bind:this={imageEditor} bind:value={body} disabled={locked} onstatechange={state => { valid = state.valid; }} onsubmit={() => { void submit(); }} />{/snippet}
             </Field>
             <Field label="标签" error={tagsError}>{#snippet children(control)}<TagInput {...control} bind:value={tags} disabled={locked} />{/snippet}</Field>
         {/if}

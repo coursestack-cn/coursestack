@@ -45,10 +45,10 @@ test('all content writes accept semantic limits above the old JSON and HTTP caps
     assert.equal(course.status, 413, 'non-content request limits remain unchanged');
 });
 
-test('unsafe links, external images and excess attributes are rejected through the API', async () => {
+test('unsafe links, unsafe image schemes and excess attributes are rejected through the API', async () => {
     const q = await h.postQuestion(), answer = await h.postAnswer(q);
     const bad = [linkDoc('链接', 'javascript:alert(1)'),
-        { type: 'doc', content: [{ type: 'image', attrs: { src: 'https://example.com/image.png', alt: null } }] },
+        { type: 'doc', content: [{ type: 'image', attrs: { src: 'file:///image.png', alt: null } }] },
         { ...doc('正文'), attrs: { language: 'zh' } }];
     for (const body of bad) {
         for (const [method, path, payload] of [
@@ -135,6 +135,9 @@ test('deletion clears only title, body and tags while preserving relationships, 
     const answer = await h.postAnswer(q);
     const before = await h.database.prepare('SELECT * FROM contents WHERE id=?').bind(q).first();
     await assert.rejects(h.database.prepare("UPDATE contents SET status='deleted' WHERE id=?").bind(q).run(), /contents_deleted_payload/);
+    // Owners can delete a question only after its answers are gone.
+    assert.equal((await h.api('DELETE', `/contents/${q}`, 'student-a', { })).status, 409);
+    assert.equal((await h.api('DELETE', `/contents/${answer}`, 'student-b', { })).status, 200);
     assert.equal((await h.api('DELETE', `/contents/${q}`, 'student-a', { })).status, 200);
     const after = await h.database.prepare('SELECT * FROM contents WHERE id=?').bind(q).first();
     for (const field of ['title', 'body', 'tags']) assert.equal(after[field], null, field);
