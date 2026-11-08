@@ -20,6 +20,7 @@
     import { toast } from "$lib/components/ui/toast.svelte.js";
     import ManageNav from "./ManageNav.svelte";
     import BonusPolicyDialog from "./BonusPolicyDialog.svelte";
+    import StudentEnrollmentDialog from "./StudentEnrollmentDialog.svelte";
     import { classUrl, courseClassesHref, pageCount, pageNumber, teacherLabel, type Page, type TeachingClass } from "./course";
 
     type Student = { studentId: string; nickname: string | null; schoolNumber: string | null; name: string | null;
@@ -73,6 +74,8 @@
 
     let pending = $state(false);
     let addOpen = $state(false), adjustOpen = $state(false), policyOpen = $state(false);
+    let enrollment = $state.raw<{ student: Student; action: "remove" | "transfer" } | null>(null);
+    let enrollmentOpen = $state(false);
     let schoolNumbers = $state("");
     let importResult = $state.raw<ImportResult | null>(null);
     const inputNumbers = $derived(schoolNumbers.split(/\r\n?|\n/).map(number => number.trim()).filter(Boolean));
@@ -121,6 +124,14 @@
             details.reload();
             students.reload();
         } finally { if (alive && viewer === session.user?.id) pending = false; }
+    }
+
+    function openEnrollment(student: Student, action: "remove" | "transfer") {
+        enrollment = { student, action }; enrollmentOpen = true;
+    }
+
+    function refreshRoster() {
+        details.reload(); students.reload(); ledger.reload();
     }
 
     function openAdjustment(student: Student) {
@@ -188,7 +199,11 @@
                                                                 <td>{student.schoolNumber ?? "—"}</td><td>{student.status === "deleted" ? "已删除" : student.name ?? "—"}</td>
                                                                 <td>{student.nickname ?? "未设置昵称"}</td><td>{student.department ?? "—"}</td><td>{student.major ?? "—"}</td><td>{student.grade ?? "—"}</td>
                                                                 <td class="points">{student.totalPoints}</td>
-                                                                <td><Button size="sm" disabled={pending || students.refreshing || student.status === "deleted"} onclick={() => openAdjustment(student)}>调整积分</Button></td>
+                                                                <td><div class="row-actions">
+                                                                    <Button size="sm" disabled={pending || students.refreshing || student.status === "deleted"} onclick={() => openAdjustment(student)}>调整积分</Button>
+                                                                    {#if session.hasRole("admin")}<Button size="sm" disabled={pending || students.refreshing} onclick={() => openEnrollment(student, "transfer")}>转班</Button>{/if}
+                                                                    <Button size="sm" disabled={pending || students.refreshing} onclick={() => openEnrollment(student, "remove")}>移除学生</Button>
+                                                                </div></td>
                                                             </tr>
                                                         {/each}
                                                     </tbody>
@@ -273,6 +288,10 @@
                 <Button type="submit" variant="primary" loading={pending}>提交调整</Button></div>
         </form>
     </Dialog>
+    {#if enrollment}
+        <StudentEnrollmentDialog bind:open={enrollmentOpen} bind:pending course={current} student={enrollment.student} action={enrollment.action}
+            onrefresh={refreshRoster} onclose={() => { enrollment = null; }} />
+    {/if}
     <BonusPolicyDialog bind:open={policyOpen} course={current} onsaved={details.reload} onfailed={details.reload} />
 {/if}
 
@@ -284,6 +303,7 @@
     th { color: var(--color-text-secondary); font-size: var(--font-size-sm); font-weight: var(--font-weight-medium); }
     tr:last-child td { border-bottom: 0; }
     .points { text-align: right; font-variant-numeric: tabular-nums; }
+    .row-actions { display: flex; gap: var(--space-2); }
     .reason { min-width: 10rem; max-width: 28rem; white-space: normal; overflow-wrap: anywhere; }
     .actions { display: flex; flex-wrap: wrap; justify-content: flex-end; gap: var(--space-3); }
     .error { color: var(--color-danger); overflow-wrap: anywhere; }

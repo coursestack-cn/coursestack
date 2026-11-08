@@ -29,7 +29,7 @@
             const url = `/api/courses/${encodeURIComponent(course.id)}/terms/${encodeURIComponent(id)}`;
             if (remove) await api.delete(url); else await api.put(url);
             termId = ""; result.reload(); onsaved();
-        } catch (cause) { error = userMessage(cause, { REFERENCE_CONFLICT: "已有教师加入的开课安排不能撤销。" }); }
+        } catch (cause) { error = userMessage(cause, { REFERENCE_CONFLICT: "请先在教学班列表中删除该学期的所有教学班，再撤销开课。" }); }
         finally { pending = false; }
     }
 </script>

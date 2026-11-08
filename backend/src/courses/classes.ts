@@ -79,7 +79,7 @@ classRoutes.put('/courses/:id/terms/:termId', async c => {
 });
 classRoutes.delete('/courses/:id/terms/:termId', async c => {
     const a = await requireAdministrator(c), courseId = c.req.param('id'), termId = c.req.param('termId');
-    // Once a teacher joins, the offering anchors class history and cannot be cancelled here.
+    // The offering's foreign key requires its teaching classes to be removed first.
     await createDatabase(c.env.DB).run(sql`DELETE FROM course_terms WHERE course_id=${courseId} AND term_id=${termId} AND ${administration(a)}`);
     await requireAdministrator(c);
     return respond(c, { courseId, termId });
@@ -107,6 +107,13 @@ classRoutes.get('/teaching-classes', async c => {
 classRoutes.get(classPath, async c => {
     const { courseId, termId, teacherId } = await requireClass(c);
     return respond(c, await classDetail(c, courseId, termId, teacherId));
+});
+classRoutes.delete(classPath, async c => {
+    const a = await requireAdministrator(c), { courseId, termId, teacherId } = classKey(c);
+    await createDatabase(c.env.DB).run(sql`DELETE FROM teaching_classes
+        WHERE course_id=${courseId} AND term_id=${termId} AND teacher_id=${teacherId} AND ${administration(a)}`);
+    await requireAdministrator(c);
+    return respond(c, { courseId, termId, teacherId });
 });
 classRoutes.put(`${classPath}/bonus-policy`, async c => {
     const { a, courseId, termId, teacherId } = await requireClass(c);
@@ -143,6 +150,34 @@ classRoutes.post(`${classPath}/students`, async c => {
         AND ${classManagement(a, sql`s.course_id`, sql`s.term_id`, sql`s.teacher_id`)}`);
     if (!assigned) throw new HttpError(409, 'STUDENT_ASSIGNMENT_CONFLICT', '学生已在本课程其他教师班中，或当前学期及操作权限已变化');
     return respond(c, { studentId: student.id });
+});
+const studentPath = `${classPath}/students/:studentId`;
+classRoutes.delete(studentPath, async c => {
+    const { a, courseId, termId, teacherId } = await requireClass(c), studentId = c.req.param('studentId');
+    const removed = await createDatabase(c.env.DB).run(sql`DELETE FROM class_students
+        WHERE course_id=${courseId} AND term_id=${termId} AND teacher_id=${teacherId} AND student_id=${studentId}
+        AND ${classManagement(a, sql`class_students.course_id`, sql`class_students.term_id`, sql`class_students.teacher_id`)}`);
+    if (!removed.meta.changes) await requireClass(c);
+    return respond(c, { studentId });
+});
+classRoutes.put(`${studentPath}/transfer`, async c => {
+    const a = await requireAdministrator(c), { courseId, termId, teacherId } = classKey(c), studentId = c.req.param('studentId');
+    const { targetTeacherId } = await input(c, z.object({ targetTeacherId: idSchema }).strict());
+    const targetExists = sql`EXISTS(SELECT 1 FROM teaching_classes tc JOIN accounts t ON t.id=tc.teacher_id AND t.status<>'deleted'
+        WHERE tc.course_id=${courseId} AND tc.term_id=${termId} AND tc.teacher_id=${targetTeacherId})`;
+    const [, state] = await c.env.DB.batch<{ targetExists: number; assigned: string | null }>([
+        sql`UPDATE class_students SET teacher_id=${targetTeacherId} WHERE course_id=${courseId} AND term_id=${termId}
+            AND student_id=${studentId} AND teacher_id=${teacherId} AND teacher_id<>${targetTeacherId}
+            AND ${targetExists} AND ${administration(a)}`,
+        sql`SELECT ${targetExists} AS targetExists,(SELECT teacher_id FROM class_students WHERE course_id=${courseId}
+            AND term_id=${termId} AND student_id=${studentId}) AS assigned WHERE ${administration(a)}`,
+    ].map(statement => prepareStatement(c.env.DB, statement)));
+    const result = state.results[0];
+    if (!result) throw new HttpError(403, 'ADMIN_REQUIRED', '需要管理员权限');
+    if (!result.targetExists) throw new HttpError(404, 'TARGET_CLASS_NOT_FOUND', '该课程学期没有这个目标教学班');
+    if (result.assigned == null) throw new HttpError(404, 'ENROLLMENT_NOT_FOUND', '学生已不在该课程学期的名单中');
+    if (result.assigned !== targetTeacherId) throw new HttpError(409, 'STUDENT_ASSIGNMENT_CONFLICT', '学生已转到其他教学班，请刷新名单');
+    return respond(c, { studentId, teacherId: targetTeacherId });
 });
 classRoutes.post(`${classPath}/students/import`, async c => {
     const { a, courseId, termId, teacherId } = await requireClass(c);

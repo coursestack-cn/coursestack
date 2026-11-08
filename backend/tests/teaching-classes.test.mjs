@@ -112,26 +112,77 @@ test('all six rewards use the student class, including acceptance by another tea
     await assert.rejects(db.prepare("INSERT INTO bonus_ledger(course_id,term_id,teacher_id,student_id,delta_points,source_kind,source_id,operator_id,request_hash) VALUES('COURSE','current','teacher-a','student-b',1,'manual','bad-class','teacher-a','hash')").run(), /invalid_bonus_class/);
 });
 
-test('reversals preserve original attribution; restoration recalculates in the content term after roster and rule changes', async () => {
+test('transfers preserve the award and restoration recalculates in the new class in the original term', async () => {
     const db = await database(); await seed(db);
     await content(db, 'question', 'question', 'student-a');
     const first = await db.prepare('SELECT * FROM bonus_ledger').first();
-    await batch(db, `DELETE FROM class_students WHERE student_id='student-a';
-        INSERT INTO class_students VALUES('COURSE','current','student-a','teacher-b');
+    await batch(db, `UPDATE class_students SET teacher_id='teacher-b' WHERE student_id='student-a';
         UPDATE class_bonus_rules SET points_question=999;
         UPDATE terms SET current=0; UPDATE terms SET current=1 WHERE id='next';
         UPDATE contents SET status='hidden',updated_by='admin' WHERE id='question';
         UPDATE contents SET status='visible',updated_by='admin' WHERE id='question';`);
     const ledger = await rows(db, 'SELECT * FROM bonus_ledger ORDER BY id');
     assert.deepEqual(ledger.map(row => [row.teacher_id, row.term_id, row.delta_points, row.reverses_id]), [
-        ['teacher-a', 'current', 3, null], ['teacher-a', 'current', -3, first.id], ['teacher-b', 'current', 999, ledger[1].id],
+        ['teacher-b', 'current', 3, null], ['teacher-b', 'current', -3, first.id], ['teacher-b', 'current', 999, ledger[1].id],
     ]);
     await assert.rejects(db.prepare('DELETE FROM bonus_ledger').run(), /immutable_ledger/);
     await assert.rejects(db.prepare('UPDATE bonus_ledger SET delta_points=9').run(), /immutable_ledger/);
+    await assert.rejects(db.prepare('UPDATE bonus_ledger SET rowid=rowid+1000').run(), /immutable_ledger/);
+    await assert.rejects(db.prepare("UPDATE bonus_ledger SET teacher_id='teacher-a'").run(), /immutable_ledger/);
+    await assert.rejects(db.prepare('UPDATE bonus_ledger SET reverses_id=NULL WHERE reverses_id IS NOT NULL').run(), /immutable_ledger/);
     await assert.rejects(db.prepare(`INSERT INTO bonus_ledger(course_id,term_id,teacher_id,student_id,delta_points,source_kind,source_id,operator_id,reverses_id)
         VALUES('COURSE','current','teacher-b','student-a',-3,'question','question','admin',?)`).bind(ledger[2].id).run(), /invalid_bonus_reversal/);
-    await db.prepare("DELETE FROM class_bonus_rules WHERE teacher_id='teacher-a'").run();
-    await assert.rejects(db.prepare("DELETE FROM teaching_classes WHERE teacher_id='teacher-a'").run(), /FOREIGN KEY/);
+    await db.prepare("DELETE FROM teaching_classes WHERE teacher_id='teacher-a'").run();
+    assert.deepEqual(await rows(db, 'SELECT * FROM bonus_ledger ORDER BY id'), ledger);
+    assert.deepEqual(await rows(db, "SELECT * FROM class_bonus_rules WHERE teacher_id='teacher-a'"), []);
+    assert.deepEqual(await rows(db, 'PRAGMA foreign_key_check'), []);
+});
+
+test('removing an enrollment preserves a restored award in another term and its subsequent reversals', async () => {
+    const db = await database(); await seed(db);
+    await batch(db, `UPDATE class_bonus_rules SET points_answer=0;
+        INSERT INTO contents(id,kind,course_id,term_id,author_id,title,updated_by,request_key,request_hash)
+          VALUES('question','question','COURSE','current','teacher-a','题目','teacher-a','q','q');
+        INSERT INTO contents(id,kind,course_id,term_id,author_id,target_id,updated_by,request_key,request_hash)
+          VALUES('answer','answer','COURSE','current','student-b','question','student-b','a','a');
+        UPDATE terms SET current=0; UPDATE terms SET current=1 WHERE id='next';
+        INSERT INTO course_terms VALUES('COURSE','next');
+        INSERT INTO teaching_classes VALUES('COURSE','next','teacher-a');
+        INSERT INTO class_students VALUES('COURSE','next','student-b','teacher-a');
+        UPDATE class_bonus_rules SET points_acceptance=19 WHERE term_id='next';
+        INSERT INTO acceptances VALUES('question','answer','teacher-a',100);
+        UPDATE contents SET status='hidden',updated_by='admin' WHERE id='answer';
+        UPDATE contents SET status='visible',updated_by='admin' WHERE id='answer';`);
+    const history = await rows(db, 'SELECT * FROM bonus_ledger ORDER BY id');
+    assert.deepEqual(history.map(r => [r.term_id,r.delta_points]), [['next',19],['next',-19],['current',70]]);
+    await db.prepare("DELETE FROM class_students WHERE term_id='next' AND student_id='student-b'").run();
+    assert.deepEqual(await rows(db, 'SELECT * FROM bonus_ledger'), [{ ...history[2], reverses_id: null }]);
+    await db.prepare("UPDATE contents SET status='hidden',updated_by='admin' WHERE id='answer'").run();
+    const last = await db.prepare('SELECT * FROM bonus_ledger ORDER BY id DESC LIMIT 1').first();
+    assert.deepEqual([last.term_id,last.delta_points,last.reverses_id], ['current',-70,history[2].id]);
+    assert.deepEqual(await rows(db, 'PRAGMA foreign_key_check'), []);
+});
+
+test('0012 preserves existing rows and class removal reconciles old detached ledgers atomically', async () => {
+    const db = await runtime.getD1Database(`DB${nextDatabase++}`);
+    await apply(db, migrations.filter(m => m.name < '0012_'));
+    await seed(db);
+    await content(db, 'moved', 'question', 'student-a');
+    await batch(db, `DELETE FROM class_students WHERE student_id='student-a';
+        INSERT INTO class_students VALUES('COURSE','current','student-a','teacher-b');
+        INSERT INTO class_students VALUES('COURSE','current','visitor','teacher-a');`);
+    await content(db, 'unassigned', 'question', 'visitor');
+    await db.prepare("DELETE FROM class_students WHERE student_id='visitor'").run();
+    const oldLedger = await rows(db, 'SELECT * FROM bonus_ledger ORDER BY id');
+    await apply(db, migrations.filter(m => m.name.startsWith('0012_')));
+    assert.deepEqual(await rows(db, 'SELECT * FROM bonus_ledger ORDER BY id'), oldLedger);
+    await db.prepare("CREATE TRIGGER test_abort BEFORE DELETE ON class_bonus_rules BEGIN SELECT RAISE(ABORT,'test_rollback'); END").run();
+    const remove = db.prepare("DELETE FROM teaching_classes WHERE teacher_id='teacher-a'");
+    await assert.rejects(remove.run(), /test_rollback/);
+    assert.deepEqual(await rows(db, 'SELECT * FROM bonus_ledger ORDER BY id'), oldLedger);
+    await db.prepare('DROP TRIGGER test_abort').run();
+    await remove.run();
+    assert.deepEqual(await rows(db, 'SELECT * FROM bonus_ledger ORDER BY id'), [{ ...oldLedger[0],teacher_id: 'teacher-b' }]);
     assert.deepEqual(await rows(db, 'PRAGMA foreign_key_check'), []);
 });
 

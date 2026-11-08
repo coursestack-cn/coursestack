@@ -109,14 +109,60 @@ CREATE TRIGGER class_student_insert_guard BEFORE INSERT ON class_students BEGIN
 END;
 --> statement-breakpoint
 CREATE TRIGGER class_student_identity_immutable BEFORE UPDATE ON class_students
-WHEN NEW.course_id<>OLD.course_id OR NEW.term_id<>OLD.term_id OR NEW.student_id<>OLD.student_id OR NEW.teacher_id<>OLD.teacher_id
+WHEN NEW.course_id<>OLD.course_id OR NEW.term_id<>OLD.term_id OR NEW.student_id<>OLD.student_id
 BEGIN SELECT RAISE(ABORT,'class_student_identity_immutable'); END;
 --> statement-breakpoint
+CREATE TRIGGER class_student_transferred AFTER UPDATE OF teacher_id ON class_students
+WHEN NEW.teacher_id<>OLD.teacher_id BEGIN
+  UPDATE bonus_ledger SET teacher_id=NEW.teacher_id
+  WHERE course_id=NEW.course_id AND term_id=NEW.term_id AND student_id=NEW.student_id AND teacher_id<>NEW.teacher_id;
+END;
+--> statement-breakpoint
+-- A restored award can belong to a different term from its original award. When one
+-- enrollment is erased, reconnect surviving entries for that source in ledger order.
+CREATE VIEW detached_bonus_links AS
+SELECT l.id,l.course_id,l.student_id,(SELECT MAX(p.id) FROM bonus_ledger p WHERE p.source_kind=l.source_kind
+    AND p.source_id=l.source_id AND p.id<l.id) AS previous_id
+FROM bonus_ledger l WHERE l.reverses_id IS NOT NULL AND NOT EXISTS(SELECT 1 FROM bonus_ledger p WHERE p.id=l.reverses_id);
+--> statement-breakpoint
+CREATE TRIGGER class_student_removed AFTER DELETE ON class_students BEGIN
+  DELETE FROM bonus_ledger WHERE course_id=OLD.course_id AND term_id=OLD.term_id AND student_id=OLD.student_id;
+  UPDATE bonus_ledger SET reverses_id=(SELECT previous_id FROM detached_bonus_links WHERE id=bonus_ledger.id)
+    WHERE id IN (SELECT id FROM detached_bonus_links WHERE course_id=OLD.course_id AND student_id=OLD.student_id);
+END;
+--> statement-breakpoint
+CREATE TRIGGER teaching_class_removed BEFORE DELETE ON teaching_classes BEGIN
+  -- Older rosters could change without moving existing ledger entries. Keep those
+  -- students' scores with their surviving enrollment before cleaning up this class.
+  UPDATE bonus_ledger SET teacher_id=(SELECT e.teacher_id FROM class_students e WHERE e.course_id=OLD.course_id
+      AND e.term_id=OLD.term_id AND e.student_id=bonus_ledger.student_id)
+    WHERE course_id=OLD.course_id AND term_id=OLD.term_id AND teacher_id=OLD.teacher_id
+      AND EXISTS(SELECT 1 FROM class_students e WHERE e.course_id=OLD.course_id AND e.term_id=OLD.term_id
+        AND e.student_id=bonus_ledger.student_id AND e.teacher_id<>OLD.teacher_id);
+  DELETE FROM class_students WHERE course_id=OLD.course_id AND term_id=OLD.term_id AND teacher_id=OLD.teacher_id;
+  DELETE FROM bonus_ledger WHERE course_id=OLD.course_id AND term_id=OLD.term_id AND teacher_id=OLD.teacher_id;
+  UPDATE bonus_ledger SET reverses_id=(SELECT previous_id FROM detached_bonus_links WHERE id=bonus_ledger.id)
+    WHERE id IN (SELECT id FROM detached_bonus_links WHERE course_id=OLD.course_id);
+  DELETE FROM class_bonus_rules WHERE course_id=OLD.course_id AND term_id=OLD.term_id AND teacher_id=OLD.teacher_id;
+END;
+--> statement-breakpoint
 CREATE TRIGGER ledger_no_delete BEFORE DELETE ON bonus_ledger
+WHEN EXISTS(SELECT 1 FROM class_students WHERE course_id=OLD.course_id AND term_id=OLD.term_id AND student_id=OLD.student_id)
 BEGIN SELECT RAISE(ABORT,'immutable_ledger'); END;
 --> statement-breakpoint
-CREATE TRIGGER ledger_no_update BEFORE UPDATE ON bonus_ledger
-BEGIN SELECT RAISE(ABORT,'immutable_ledger'); END;
+CREATE TRIGGER ledger_no_update BEFORE UPDATE ON bonus_ledger BEGIN
+  SELECT RAISE(ABORT,'immutable_ledger') WHERE
+    (NEW.id,NEW.course_id,NEW.term_id,NEW.student_id,NEW.delta_points,NEW.source_kind,NEW.source_id,NEW.operator_id,NEW.reason,NEW.request_hash,NEW.created_at)
+    IS NOT (OLD.id,OLD.course_id,OLD.term_id,OLD.student_id,OLD.delta_points,OLD.source_kind,OLD.source_id,OLD.operator_id,OLD.reason,OLD.request_hash,OLD.created_at);
+  SELECT RAISE(ABORT,'immutable_ledger') WHERE NEW.teacher_id<>OLD.teacher_id AND NOT EXISTS(
+    SELECT 1 FROM class_students WHERE course_id=OLD.course_id AND term_id=OLD.term_id AND student_id=OLD.student_id AND teacher_id=NEW.teacher_id);
+  SELECT RAISE(ABORT,'immutable_ledger') WHERE NEW.reverses_id IS NOT OLD.reverses_id AND NOT EXISTS(
+    SELECT 1 FROM detached_bonus_links WHERE id=OLD.id AND previous_id IS NEW.reverses_id);
+END;
+--> statement-breakpoint
+CREATE TRIGGER ledger_notification_removed AFTER DELETE ON bonus_ledger BEGIN
+  DELETE FROM notifications WHERE account_id=OLD.student_id AND kind='bonus' AND source_id=CAST(OLD.id AS TEXT);
+END;
 --> statement-breakpoint
 CREATE TRIGGER content_created_bonus AFTER INSERT ON contents
 WHEN NEW.kind IN ('question','answer','comment') BEGIN

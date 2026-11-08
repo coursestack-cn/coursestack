@@ -260,7 +260,7 @@ export const bonusLedger = sqliteTable('bonus_ledger', {
     createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
 }, (t) => [
     foreignKey({ columns: [t.reversesId], foreignColumns: [t.id] }),
-    // Keep the historical class even if the student's current membership changes.
+    // The enrollment's transfer and removal triggers keep ledger attribution in sync.
     foreignKey({ columns: [t.courseId, t.termId, t.teacherId], foreignColumns: [teachingClasses.courseId, teachingClasses.termId, teachingClasses.teacherId] }).onDelete('restrict'),
     check('bonus_ledger_source_kind', sql`${t.sourceKind} IN ('question', 'answer', 'acceptance', 'comment', 'material', 'manual')`),
     check('bonus_ledger_delta', sql`${t.deltaPoints} <> 0 AND abs(${t.deltaPoints}) <= 9007199254740991`),
@@ -269,6 +269,7 @@ export const bonusLedger = sqliteTable('bonus_ledger', {
             AND (${t.reversesId} IS NOT NULL OR ${t.deltaPoints} > 0))`),
     uniqueIndex('bonus_original_award').on(t.sourceKind, t.sourceId).where(sql`${t.sourceKind} <> 'manual' AND ${t.reversesId} IS NULL`),
     uniqueIndex('bonus_reversal_once').on(t.reversesId),
+    index('bonus_student_reversals').on(t.courseId, t.studentId).where(sql`${t.reversesId} IS NOT NULL`),
     uniqueIndex('bonus_manual_request').on(t.operatorId, t.sourceId).where(sql`${t.sourceKind} = 'manual'`),
     index('bonus_course_term_student').on(t.courseId, t.termId, t.studentId),
     index('bonus_class_student').on(t.courseId, t.termId, t.teacherId, t.studentId),

@@ -102,6 +102,73 @@ test('teachers co-manage content but only their own roster, rules and manual awa
     assert.equal(JSON.stringify(question).includes('schoolNumber'), false);
 });
 
+test('admin transfers an enrollment with its scores, deletes the old class, then withdraws the offering', async () => {
+    const offering = '/courses/course-a/terms/term-active';
+    const transfer = `${ownClass}/students/student-a/transfer`, target = { targetTeacherId: 'teacher-b' };
+    const manual = (path, studentId, deltaPoints) => h.api('POST', `${path}/bonus-adjustments`, 'admin', { studentId, deltaPoints, reason: '课堂练习' });
+    const ledger = async (id) => (await h.database.prepare("SELECT * FROM bonus_ledger WHERE student_id=? ORDER BY id").bind(id).all()).results;
+    const notices = async (id) => (await h.database.prepare("SELECT * FROM notifications WHERE account_id=? AND kind='bonus' ORDER BY id").bind(id).all()).results;
+    const question = await h.postQuestion();
+    await h.policy({ pointsQuestion: 3 });
+    const scoredQuestion = await h.postQuestion();
+    assert.equal((await h.api('PUT', `/contents/${scoredQuestion}/moderation`, 'teacher-a', { action: 'hide' })).status, 200);
+    assert.equal((await manual(ownClass, 'student-a', 7)).status, 201);
+    assert.equal((await manual(ownClass, 'student-b', 4)).status, 201);
+    const otherCourse = '/courses/course-b/terms/term-active/teachers/teacher-b';
+    assert.equal((await manual(otherCourse, 'student-b', 11)).status, 201);
+    assert.equal((await h.api('PUT', transfer, 'admin', target)).status, 404);
+    await h.api('PUT', `${offering}/teachers/me`, 'teacher-b');
+    const before = await ledger('student-a'), originalNotices = await notices('student-a');
+    assert.deepEqual(before.map(row => row.delta_points), [3,-3,7]);
+    assert.equal(before[1].reverses_id, before[0].id);
+    assert.equal(originalNotices.length, 2);
+    for (const who of ['teacher-a','teacher-b','student-a']) {
+        assert.equal((await h.api('PUT', transfer, who, target)).status, 403);
+        assert.equal((await h.api('DELETE', ownClass, who)).status, 403);
+    }
+    // Historical classes remain editable by the administrator.
+    await setCurrentTerm(h.database, 'term-old');
+    assert.equal((await h.api('DELETE', `${ownClass}/students/student-a`, 'teacher-a')).status, 403);
+    for (let attempt = 0; attempt < 2; attempt++) assert.equal((await h.api('PUT', transfer, 'admin', target)).status, 200);
+    const moved = before.map(row => ({ ...row, teacher_id: 'teacher-b' }));
+    assert.deepEqual(await ledger('student-a'), moved);
+    assert.deepEqual(await notices('student-a'), originalNotices);
+    assert.deepEqual((await h.api('GET', `${otherClass}/students`, 'admin')).data.items.map(s => [s.studentId,s.totalPoints]), [['student-a',7]]);
+    assert.equal((await h.api('PUT', `${ownClass}/students/student-a/transfer`, 'admin', { targetTeacherId: 'teacher-a' })).status, 409);
+    assert.equal((await h.api('DELETE', `${ownClass}/students/student-a`, 'admin')).status, 200);
+    assert.equal((await h.api('DELETE', offering, 'admin')).status, 409);
+    assert.equal((await h.api('DELETE', ownClass, 'admin')).status, 200);
+    assert.equal((await h.api('DELETE', ownClass, 'admin')).status, 200);
+    assert.deepEqual(await ledger('student-a'), moved);
+    assert.deepEqual(await notices('student-a'), originalNotices);
+    const remaining = await ledger('student-b');
+    assert.deepEqual(remaining.map(row => [row.course_id,row.delta_points]), [['course-b',11]]);
+    assert.deepEqual((await notices('student-b')).map(row => row.source_id), [String(remaining[0].id)]);
+    assert.equal((await h.api('GET', ownClass, 'admin')).status, 404);
+    assert.equal((await h.api('GET', `/questions/${question}`)).status, 200);
+    assert.equal((await h.api('PUT', transfer, 'admin', target)).status, 200);
+    assert.equal((await h.api('DELETE', otherClass, 'admin')).status, 200);
+    assert.deepEqual(await ledger('student-a'), []);
+    assert.equal((await h.api('DELETE', offering, 'admin')).status, 200);
+    assert.deepEqual((await h.api('GET', '/courses/course-a/terms')).data.map(t => t.id), ['term-old']);
+    assert.deepEqual((await h.database.prepare('PRAGMA foreign_key_check').all()).results, []);
+});
+
+test('teachers may remove only their own current students and adding never transfers a student', async () => {
+    await h.api('PUT', '/courses/course-a/terms/term-active/teachers/me', 'teacher-b');
+    const member = `${ownClass}/students/student-a`;
+    await h.policy({ pointsQuestion: 3 });
+    const q = await h.postQuestion();
+    assert.equal((await h.api('POST', `${otherClass}/students`, 'teacher-b', { schoolNumber: 'student-a' })).status, 409);
+    for (const who of ['teacher-b', 'student-a']) assert.equal((await h.api('DELETE', member, who)).status, 403);
+    assert.equal((await h.api('DELETE', member, 'teacher-a')).status, 200);
+    assert.equal((await h.api('DELETE', member, 'teacher-a')).status, 200);
+    assert.equal((await h.api('GET', '/me/bonus-ledger', 'student-a')).data.total, 0);
+    assert.equal((await h.api('GET', `/questions/${q}`)).status, 200);
+    assert.equal((await h.api('POST', `${otherClass}/students`, 'teacher-b', { schoolNumber: 'student-a' })).status, 200);
+    assert.equal((await h.api('GET', `${otherClass}/students`, 'teacher-b')).data.items[0].totalPoints, 0);
+});
+
 test('tags are nullable and only questions/materials may store a JSON array', async () => {
     const q = await h.postQuestion('student-a', { tags: ['标签'] }), a = await h.postAnswer(q);
     const comment = await h.api('POST', '/comments', 'student-b', { targetKind: 'question', targetId: q, body: doc('评论') });

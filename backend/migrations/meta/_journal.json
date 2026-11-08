@@ -85,6 +85,13 @@
       "when": 1793998735434,
       "tag": "0011_global_search",
       "breakpoints": true
+    },
+    {
+      "idx": 12,
+      "version": "6",
+      "when": 1794059366551,
+      "tag": "0012_class_roster_management",
+      "breakpoints": true
     }
   ]
 }

@@ -1,5 +1,8 @@
 <script lang="ts">
     import { api } from "$lib/api/client";
+    import { userMessage } from "$lib/api/errors";
+    import ConfirmDialog from "$lib/components/ui/ConfirmDialog.svelte";
+    import { toast } from "$lib/components/ui/toast.svelte.js";
     import { resource } from "$lib/api/resource.svelte.js";
     import { router, setTitle, updateQuery } from "$lib/router/router.svelte.js";
     import type { PageProps } from "$lib/router/types";
@@ -12,7 +15,7 @@
     import Pagination from "$lib/components/ui/Pagination.svelte";
     import StateBlock from "$lib/components/ui/StateBlock.svelte";
     import ManageNav from "./ManageNav.svelte";
-    import { classStudentsHref, pageCount, pageNumber, teacherLabel, type Course, type Page, type TeachingClass, type Term } from "./course";
+    import { classUrl, classStudentsHref, pageCount, pageNumber, teacherLabel, type Course, type Page, type TeachingClass, type Term } from "./course";
 
     let { params }: PageProps = $props();
     const isAdmin = $derived(session.hasRole("admin"));
@@ -43,6 +46,20 @@
         const data = await api.get<Page<TeachingClass>>(`/api/teaching-classes?${query}`, { signal });
         return { ...data, viewer, termId: selectedTerm };
     });
+
+    let removing = $state.raw<TeachingClass | null>(null);
+    let removeOpen = $state(false), removeError = $state("");
+
+    function confirmRemoval(value: TeachingClass) {
+        removing = value; removeError = ""; removeOpen = true;
+    }
+
+    async function removeClass() {
+        if (!removing) return;
+        await api.delete(classUrl(removing));
+        toast.success("教学班已删除");
+        classes.reload();
+    }
 
     $effect(() => { if (course) setTitle(`${course.name} · 教学班列表`); });
     $effect(() => {
@@ -87,7 +104,10 @@
                                                 <td>{value.term.name}{value.term.current ? "（当前学期）" : ""}</td>
                                                 <td>{teacherLabel(value.teacher)}</td>
                                                 <td>{value.studentCount}</td>
-                                                <td><Button size="sm" href={classStudentsHref(value)}>学生名单</Button></td>
+                                                <td><div class="row-actions">
+                                                    <Button size="sm" href={classStudentsHref(value)}>学生名单</Button>
+                                                    {#if isAdmin}<Button size="sm" disabled={classes.refreshing} onclick={() => confirmRemoval(value)}>删除教学班</Button>{/if}
+                                                </div></td>
                                             </tr>
                                         {/each}
                                     </tbody>
@@ -109,7 +129,18 @@
     {/if}
 </PageLayout>
 
+{#if isAdmin && removing}
+    <ConfirmDialog bind:open={removeOpen} danger title="删除教学班？"
+        description={`${removing.course.name} · ${removing.term.name} · ${teacherLabel(removing.teacher)}。仍在本班的学生将失去此次修读记录和全部积分。需要保留的学生请先转班。`}
+        confirmLabel="删除教学班" onconfirm={removeClass} onclose={() => { removing = null; }}
+        onerror={cause => { removeError = userMessage(cause); classes.reload(); }}>
+        {#if removeError}<p role="alert">{removeError}</p>{/if}
+    </ConfirmDialog>
+{/if}
+
 <style>
+    .row-actions { display: flex; gap: var(--space-2); }
+    [role="alert"] { color: var(--color-danger); }
     .filter { width: min(100%, 20rem); }
     .hint { color: var(--color-text-secondary); font-size: var(--font-size-sm); }
     .table-scroll { overflow-x: auto; border: 1px solid var(--color-border); border-radius: var(--radius-md); }
