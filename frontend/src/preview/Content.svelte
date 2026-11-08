@@ -398,7 +398,7 @@
     </section>
     <section id="file-upload" aria-labelledby="files-title">
         <div class="section-heading"><div><p class="eyebrow">03 · 文件与版本</p><h2 id="files-title">上传过程看得见</h2></div></div>
-        <p class="intro">示例上限 20 MB，仅用于验证。上传字节由本地开发服务器读完后丢弃；确认由预览回调模拟。</p>
+        <p class="intro">示例上限 20 MiB，仅用于验证。上传字节由本地开发服务器读完后丢弃；确认由预览回调模拟。</p>
         <div class="upload-settings">
             <Field label="模拟上传场景">{#snippet children(control)}<Select id={control.id} bind:value={uploadMode} onchange={() => { expiryIssued = false; }} options={[
                 { value: "success", label: "正常上传" }, { value: "prepare-failure", label: "申请地址失败" }, { value: "upload-failure", label: "上传返回 500" },
