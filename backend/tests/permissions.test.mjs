@@ -9,7 +9,7 @@ import { createDatabase } from '../src/db/index.ts';
 import { accounts } from '../src/db/schema.ts';
 import { administration, classManagement, editPermission, getPublicProfile, management } from '../src/permissions.ts';
 import worker from '../src/index.ts';
-import { initializeAdministrator } from '../src/auth/service.ts';
+import { initializeAdministrator, signIn } from '../src/auth/service.ts';
 import { digest, passwordField } from '../src/auth/crypto.ts';
 
 let runtime;
@@ -308,6 +308,35 @@ test('login attempts are limited atomically, including nonexistent members', asy
     assert.equal((await call('/api/auth/login', { schoolNumber: 'MISSING', password: testPassword })).status, 429);
     await binding.prepare('UPDATE login_attempts SET expires_at = unixepoch() - 1').run();
     assert.equal((await call('/api/auth/login', { schoolNumber: 'MISSING', password: testPassword })).status, 401);
+});
+
+test('sign-in failures from one address cannot lock out other addresses, and successes reset the count', async () => {
+    await initializeAdministrator(binding, testPassword);
+    const from = (ip, password) => worker.fetch(new Request('https://local/api/auth/admin/login', { method: 'POST',
+        headers: { 'Content-Type': 'application/json', Origin: 'https://local', 'CF-Connecting-IP': ip }, body: JSON.stringify({ password }) }),
+        { DB: binding, APP_ENV: 'production' });
+    for (let i = 0; i < 10; i++) assert.equal((await from('203.0.113.7', nextPassword)).status, 401);
+    assert.equal((await from('203.0.113.7', testPassword)).status, 429);
+    assert.equal((await from('198.51.100.2', testPassword)).status, 200);
+    assert.equal((await from('203.0.113.7', testPassword)).status, 429);
+    for (let round = 0; round < 2; round++) {
+        for (let i = 0; i < 9; i++) assert.equal((await from('198.51.100.2', nextPassword)).status, 401);
+        assert.equal((await from('198.51.100.2', testPassword)).status, 200);
+    }
+});
+
+test('a failed throttle reset rolls back session issuance and last login together', async () => {
+    await initializeAdministrator(binding, testPassword);
+    const ip = '203.0.113.9';
+    await assert.rejects(signIn(binding, nextPassword, null, ip), { code: 'INVALID_CREDENTIALS' });
+    const key = (await digest('admin-login')) + ':' + (await digest(ip));
+    await binding.prepare("CREATE TRIGGER reject_throttle_reset BEFORE DELETE ON login_attempts BEGIN SELECT RAISE(ABORT,'test_reset_failure'); END").run();
+    try {
+        await assert.rejects(signIn(binding, testPassword, null, ip), /test_reset_failure/);
+        assert.equal(await binding.prepare("SELECT COUNT(*) AS n FROM sessions WHERE account_id='admin'").first('n'), 0);
+        assert.equal((await binding.prepare("SELECT last_login_at FROM accounts WHERE id='admin'").first()).last_login_at, null);
+        assert.equal(await binding.prepare('SELECT attempts FROM login_attempts WHERE key=?').bind(key).first('attempts'), 1);
+    } finally { await binding.prepare('DROP TRIGGER reject_throttle_reset').run(); }
 });
 
 test('concurrent first initialization creates exactly one administrator without orphan accounts', async () => {

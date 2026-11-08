@@ -4,7 +4,7 @@ import { sessions } from '../db/schema.ts';
 import type { Env } from '../env.ts';
 import { HttpError, json, readJson, requireSameOrigin, stringField } from '../http.ts';
 import { existingPasswordField, newPasswordField } from './crypto.ts';
-import { changePassword, limitAttempts, login, ownProfile, readSession, requireSession, sessionCookie } from './service.ts';
+import { changePassword, limitAttempts, ownProfile, readSession, requireSession, sessionCookie, signIn } from './service.ts';
 import { allowFields } from '../accounts/validation.ts';
 import { createMember } from '../accounts/creation.ts';
 
@@ -44,7 +44,6 @@ export async function authRoutes(request: Request, env: Env): Promise<Response |
     const password = existingPasswordField(body.password);
     const ip = env.APP_ENV === 'local' ? 'local' : request.headers.get('CF-Connecting-IP') ?? 'unknown';
     await limitAttempts(env.DB, `ip:${ip}`, 50);
-    await limitAttempts(env.DB, schoolNumber === null ? 'admin-login' : `member:${schoolNumber}`, 10);
-    const result = await login(env.DB, password, schoolNumber);
+    const result = await signIn(env.DB, password, schoolNumber, ip);
     return json({ data: result.profile }, 200, { 'Set-Cookie': sessionCookie(request, result.token) });
 }

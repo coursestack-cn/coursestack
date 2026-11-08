@@ -45,17 +45,45 @@ export async function ownProfile(binding: D1Database, id: string) {
     if (!row) throw new HttpError(404, 'ACCOUNT_NOT_FOUND', '账号不存在');
     return { ...row, mustChangePassword: Boolean(row.mustChangePassword) };
 }
-export async function limitAttempts(binding: D1Database, key: string, limit: number) {
+const tooManyAttempts = () => new HttpError(429, 'TOO_MANY_ATTEMPTS', '尝试次数过多，请 15 分钟后重试');
+async function countAttempt(binding: D1Database, storedKey: string) {
     const now = Math.floor(Date.now() / 1000);
     const result = await createDatabase(binding).get<{ attempts: number }>(sql`
-        INSERT INTO login_attempts (key, attempts, expires_at) VALUES (${await digest(key)}, 1, ${now + 900})
+        INSERT INTO login_attempts (key, attempts, expires_at) VALUES (${storedKey}, 1, ${now + 900})
         ON CONFLICT(key) DO UPDATE SET
             attempts = CASE WHEN expires_at <= ${now} THEN 1 ELSE attempts + 1 END,
             expires_at = CASE WHEN expires_at <= ${now} THEN ${now + 900} ELSE expires_at END
         RETURNING attempts`);
-    if (!result || result.attempts > limit) throw new HttpError(429, 'TOO_MANY_ATTEMPTS', '尝试次数过多，请 15 分钟后重试');
+    return result?.attempts ?? Infinity;
 }
-export async function login(binding: D1Database, password: string, schoolNumber: string | null) {
+export async function limitAttempts(binding: D1Database, key: string, limit: number) {
+    if (await countAttempt(binding, await digest(key)) > limit) throw tooManyAttempts();
+}
+// Sign-in failures are counted per account and client address, so another client cannot lock the account out.
+// The address budget in the login route still bounds every request before password derivation.
+const signInAccount = (schoolNumber: string | null) => schoolNumber === null ? 'admin-login' : `member:${schoolNumber}`;
+const failureKey = async (account: string, ip: string) => `${await digest(account)}:${await digest(ip)}`;
+/**
+ * Matches every client's failure counter of an account, including the legacy per-account counter.
+ * D1 rejects LIKE patterns this long, so callers compare `substr(key, 1, 65)` with `prefix`.
+ */
+export async function signInFailureKeys(schoolNumber: string | null) {
+    const account = await digest(signInAccount(schoolNumber));
+    return { exact: account, prefix: `${account}:` };
+}
+export async function signIn(binding: D1Database, password: string, schoolNumber: string | null, ip: string) {
+    const key = await failureKey(signInAccount(schoolNumber), ip);
+    const failures = await binding.prepare('SELECT attempts FROM login_attempts WHERE key = ? AND expires_at > unixepoch()')
+        .bind(key).first<number>('attempts');
+    if ((failures ?? 0) >= 10) throw tooManyAttempts();
+    try {
+        return await login(binding, password, schoolNumber, key);
+    } catch (error) {
+        if (error instanceof HttpError && error.code === 'INVALID_CREDENTIALS') await countAttempt(binding, key);
+        throw error;
+    }
+}
+export async function login(binding: D1Database, password: string, schoolNumber: string | null, failureKey?: string) {
     const candidate = await binding.prepare(`SELECT id, password, credential_version AS version
         FROM accounts WHERE status = 'active' AND password IS NOT NULL AND ${schoolNumber === null
             ? "role = 'admin' AND school_number IS NULL" : "role IN ('student','teacher') AND school_number = ?"}`)
@@ -74,7 +102,8 @@ export async function login(binding: D1Database, password: string, schoolNumber:
         binding.prepare('UPDATE accounts SET last_login_at = unixepoch() WHERE id = ? AND EXISTS (SELECT 1 FROM sessions WHERE token_hash = ?)')
             .bind(candidate.id, tokenHash),
         binding.prepare('DELETE FROM sessions WHERE expires_at <= unixepoch()'),
-        binding.prepare('DELETE FROM login_attempts WHERE expires_at <= unixepoch()'),
+        binding.prepare(`DELETE FROM login_attempts WHERE expires_at <= unixepoch()
+            OR (key = ? AND EXISTS (SELECT 1 FROM sessions WHERE token_hash = ?))`).bind(failureKey ?? null, tokenHash),
     ]);
     if (results[0].meta.changes !== 1) throw unauthorized();
     return { token, profile: await ownProfile(binding, candidate.id) };
@@ -120,7 +149,7 @@ export async function initializeAdministrator(binding: D1Database, password: str
 /** External maintenance pins the administrator state explicitly inspected by its operator. */
 export async function resetAdministratorPassword(binding: D1Database, password: string, expected: { id: string; version: number }) {
     if (!expected.id || !Number.isSafeInteger(expected.version) || expected.version < 1) throw new HttpError(400, 'INVALID_REVISION', '需要有效的管理员凭据版本');
-    const passwordHash = await hashPassword(password);
+    const passwordHash = await hashPassword(password), admin = await signInFailureKeys(null);
     const gate = "EXISTS (SELECT 1 FROM accounts WHERE id = ? AND password = ? AND credential_version = ?)";
     const result = await binding.batch([
         binding.prepare(`UPDATE accounts SET password = ?, credential_version = credential_version + 1, must_change_password = 0
@@ -128,8 +157,8 @@ export async function resetAdministratorPassword(binding: D1Database, password: 
             .bind(passwordHash, expected.id, expected.version),
         binding.prepare(`DELETE FROM sessions WHERE account_id = ? AND ${gate}`)
             .bind(expected.id, expected.id, passwordHash, expected.version + 1),
-        binding.prepare(`DELETE FROM login_attempts WHERE key IN (?, ?) AND ${gate}`)
-            .bind(await digest('admin-login'), await digest(`password:${expected.id}`), expected.id, passwordHash, expected.version + 1),
+        binding.prepare(`DELETE FROM login_attempts WHERE (key IN (?, ?) OR substr(key, 1, 65) = ?) AND ${gate}`)
+            .bind(admin.exact, await digest(`password:${expected.id}`), admin.prefix, expected.id, passwordHash, expected.version + 1),
     ]);
     if (result[0].meta.changes !== 1) throw new HttpError(409, 'ADMIN_CHANGED', '管理员凭据或状态已变化，请重新检查后操作');
     return { id: expected.id };
