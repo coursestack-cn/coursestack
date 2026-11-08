@@ -90,6 +90,81 @@ test('independent binaries attach and detach atomically with edits, moderation a
     assert.deepEqual((await h.database.prepare('PRAGMA foreign_key_check').all()).results, []);
 });
 
+for (const mode of ['default', 'OFF', 'ON']) for (const hideFirst of [false, true]) {
+    test(`three-level cascade clears search text, releases images and reverses awards once (${mode}, ${hideFirst ? 'hide then delete' : 'direct delete'})`, async () => {
+        const pragma = () => h.database.prepare('PRAGMA recursive_triggers').first('recursive_triggers');
+        if (mode !== 'default') await h.database.prepare('PRAGMA recursive_triggers=' + mode).run();
+        const setting = await pragma();
+        if (mode !== 'default') assert.equal(setting, mode === 'ON' ? 1 : 0);
+        await h.policy({ pointsQuestion: 1, pointsAnswer: 2, pointsComment: 4 });
+        const withImage = (text, src) => ({ type: 'doc', content: [
+            { type: 'paragraph', content: [{ type: 'text', text }] }, image(src),
+        ] });
+        const sources = [await upload(), await upload(), await upload()];
+        const question = await h.postQuestion('student-a', { body: withImage('question', sources[0]) });
+        const answer = await h.postAnswer(question, 'student-a', withImage('answer', sources[1]));
+        const comment = await h.api('POST', '/comments', 'student-a', { targetKind: 'answer', targetId: answer, body: withImage('comment', sources[2]) });
+        assert.equal(comment.status, 201);
+        // Comments normally have no search text. Seed a sentinel to exercise the deletion trigger at this level.
+        await h.database.prepare('UPDATE contents SET body_text=? WHERE id=?').bind('comment', comment.data.id).run();
+        const ids = [question, answer, comment.data.id];
+        const branch = async () => (await h.database.prepare('SELECT id,status,title,body,tags,body_text FROM contents WHERE id IN (?,?,?)')
+            .bind(...ids).all()).results;
+        const ledger = async () => (await h.database.prepare('SELECT id,source_id,delta_points,reverses_id FROM bonus_ledger WHERE source_id IN (?,?,?) ORDER BY id')
+            .bind(...ids).all()).results;
+        const original = await ledger();
+        assert.deepEqual(original.map(row => [row.source_id, row.delta_points, row.reverses_id]),
+            [[question, 1, null], [answer, 2, null], [comment.data.id, 4, null]]);
+        async function assertReversed() {
+            const rows = await ledger();
+            assert.equal(rows.length, 6);
+            for (const award of original) {
+                assert.deepEqual(rows.filter(row => row.source_id === award.source_id).map(row => [row.delta_points, row.reverses_id]),
+                    [[award.delta_points, null], [-award.delta_points, award.id]]);
+            }
+        }
+        const assertAttached = async () => {
+            for (const [index, src] of sources.entries()) {
+                const row = await record(src);
+                assert.equal(row.content_id, ids[index]);
+                assert.equal(row.cleanup_at, null);
+            }
+        };
+        const before = await branch();
+        assert.equal(before.length, 3);
+        assert.ok(before.every(row => row.status === 'visible' && row.body_text.length > 0));
+        await assertAttached();
+        const moderate = action => h.api('PUT', '/contents/' + question + '/moderation', 'teacher-a', { action });
+        if (hideFirst) {
+            assert.equal((await moderate('hide')).status, 200);
+            await assertReversed();
+            await assertAttached();
+            assert.ok((await branch()).every(row => row.body_text.length > 0));
+            assert.equal(await h.database.prepare('SELECT count(*) AS n FROM public_contents WHERE id IN (?,?,?)').bind(...ids).first('n'), 0);
+        }
+        const deleteAt = Math.floor(Date.now() / 1000);
+        assert.equal((await moderate('delete')).status, 200);
+        const after = await branch();
+        assert.equal(after.length, 3);
+        assert.ok(after.every(row => row.status === 'deleted' && row.title === null && row.body === null && row.tags === null && row.body_text === ''));
+        await assertReversed();
+        for (const src of sources) {
+            const row = await record(src);
+            assert.equal(row.content_id, null);
+            assert.equal(row.draft_upload_id, null);
+            assert.ok(row.cleanup_at >= deleteAt && row.cleanup_at <= Math.floor(Date.now() / 1000));
+            assert.equal((await read(src)).status, 404);
+            assert.ok(await object(src));
+        }
+        await cleanupBodyImages(h.env);
+        for (const src of sources) {
+            assert.equal(await object(src), null);
+            assert.equal(await record(src), null);
+        }
+        assert.equal(await pragma(), setting);
+    });
+}
+
 test('a temporary binary can be claimed only by its uploader and only one concurrent publication', async () => {
     const src = await upload(), create = (who,key) => h.api('POST','/courses/course-a/questions',who,{ title:'图', body:body(src) },{key});
     assert.equal((await create('student-b','foreign-image')).status,409);
