@@ -9,49 +9,81 @@ import { hashPassword } from '../src/auth/crypto.ts';
 import { login } from '../src/auth/service.ts';
 import { start, setCurrentTerm } from './discussions-helpers.mjs';
 
-test('demo preparation creates 100 students and a teacher, enrolls the current term and preserves changes on rerun', async () => {
+async function assertDemoRosters(db, currentTerm) {
+    const { results } = await db.prepare(`SELECT ct.course_id AS course, ct.term_id AS term,
+        teacher.school_number AS teacher, student.school_number AS student FROM course_terms ct
+        LEFT JOIN teaching_classes tc USING(course_id,term_id) LEFT JOIN accounts teacher ON teacher.id=tc.teacher_id
+        LEFT JOIN class_students cs USING(course_id,term_id,teacher_id) LEFT JOIN accounts student ON student.id=cs.student_id
+        WHERE ct.course_id IN ('304208040','304064030','101103020') ORDER BY student.school_number`).all();
+    const classes = [
+        ['304208040', currentTerm, 'T0001', 1, 50],
+        ['304064030', currentTerm, 'T0001', 26, 50], ['304064030', currentTerm, 'T0002', 51, 75],
+        ['101103020', currentTerm, 'T0003', 76, 84], ['101103020', currentTerm, 'T0004', 85, 92],
+        ['101103020', currentTerm, 'T0005', 93, 100],
+        ['101103020', '25-2', 'T0003', 51, 75], ['101103020', '25-2', 'T0004', 76, 100],
+    ];
+    assert.equal(results.length, 175);
+    for (const [course, term, teacher, first, last] of classes) {
+        const actual = results.filter(row => row.course === course && row.term === term && row.teacher === teacher);
+        const expected = Array.from({ length: last - first + 1 }, (_, i) => 'S' + String(first + i).padStart(4, '0'));
+        assert.deepEqual(actual.map(row => row.student), expected, `${course} / ${term} / ${teacher}`);
+    }
+}
+
+test('demo preparation seeds both terms and preserves course and account edits on rerun', async () => {
     const app = await start();
     const db = app.database;
     try {
         const preview = await prepareDemoData(db, { dryRun: true });
-        assert.equal(preview.createdAccounts, 101);
+        assert.equal(preview.createdAccounts, 105);
         assert.equal(preview.termId, 'term-active');
         assert.equal(await db.prepare('SELECT count(*) AS n FROM accounts').first('n'), 6);
         const result = await prepareDemoData(db);
         assert.equal(result.courseName, '数据库系统原理');
-        assert.equal(result.createdAccounts, 101);
-        assert.equal(await db.prepare("SELECT count(*) AS n FROM class_students WHERE course_id = ? AND term_id = ?").bind(result.courseId, result.termId).first('n'), 100);
-        assert.equal(await db.prepare("SELECT count(*) AS n FROM teaching_classes WHERE course_id = ? AND term_id = ?").bind(result.courseId, result.termId).first('n'), 1);
+        assert.equal(result.createdAccounts, 105);
+        assert.match(await db.prepare('SELECT introduction FROM courses WHERE id=?').bind(result.courseId).first('introduction'), /关系模型.*SQL/);
+        await assertDemoRosters(db, result.termId);
+        assert.equal(await db.prepare('SELECT id FROM terms WHERE current=1').first('id'), result.termId);
+        assert.deepEqual(await db.prepare("SELECT name,current FROM terms WHERE id='25-2'").first(), { name: '2026春', current: 0 });
         assert.deepEqual((await db.prepare(`SELECT role, department, major, grade, count(*) AS n FROM accounts
             WHERE school_number GLOB '[ST]0[0-9][0-9][0-9]' GROUP BY role, department, major, grade ORDER BY role`).all()).results, [
             { role: 'student', department: '计算机学院', major: '计算机科学与技术', grade: '2024 级', n: 100 },
-            { role: 'teacher', department: '计算机学院', major: '计算机科学与技术', grade: null, n: 1 },
+            { role: 'teacher', department: '计算机学院', major: '计算机科学与技术', grade: null, n: 5 },
         ]);
-        for (const number of ['S0001', 'S0100', 'T0001']) {
+        for (const number of ['S0001', 'S0100', 'T0001', 'T0002', 'T0003', 'T0004', 'T0005']) {
             const authenticated = await login(db, number, number);
             assert.equal(authenticated.profile.mustChangePassword, false);
             assert.equal(authenticated.profile.role, number[0] === 'T' ? 'teacher' : 'student');
+            if (number[0] === 'T') assert.equal(authenticated.profile.nickname, `演示教师 ${number.slice(-3)}`);
         }
+        await db.prepare("UPDATE courses SET introduction='自定义课程简介' WHERE id=?").bind(result.courseId).run();
         const changedHash = await hashPassword('changed-demo-password');
         await db.prepare("UPDATE accounts SET password = ?, must_change_password = 1 WHERE school_number = 'S0001'").bind(changedHash).run();
         await db.prepare("UPDATE accounts SET nickname = '用户改过名称', status = 'disabled' WHERE school_number = 'S0001'").run();
         const repeat = await prepareDemoData(db);
         assert.equal(repeat.createdAccounts, 0);
-        assert.equal(repeat.existingAccounts, 101);
+        assert.equal(repeat.existingAccounts, 105);
+        await assertDemoRosters(db, result.termId);
+        assert.equal(await db.prepare('SELECT introduction FROM courses WHERE id=?').bind(result.courseId).first('introduction'), '自定义课程简介');
         const preserved = await db.prepare("SELECT password, must_change_password, nickname, status FROM accounts WHERE school_number = 'S0001'").first();
         assert.deepEqual(preserved, { password: changedHash, must_change_password: 1, nickname: '用户改过名称', status: 'disabled' });
+        let preparingWrites = false;
         const switchingTerm = {
-            prepare: db.prepare.bind(db),
+            prepare(sql) {
+                if (/^\s*(INSERT|UPDATE|DELETE)\b/i.test(sql)) preparingWrites = true;
+                return db.prepare(sql);
+            },
             async batch(statements) {
-                if (statements.length > 3) await setCurrentTerm(db, 'term-old');
+                if (preparingWrites) await setCurrentTerm(db, 'term-old');
                 return db.batch(statements);
             },
         };
         await assert.rejects(prepareDemoData(switchingTerm), { code: 'DEMO_CONFLICT' });
-        assert.equal(await db.prepare('SELECT count(*) AS n FROM class_students WHERE course_id = ?').bind(result.courseId).first('n'), 100);
+        assert.equal(await db.prepare('SELECT id FROM terms WHERE current=1').first('id'), 'term-old');
+        await assertDemoRosters(db, result.termId);
         await setCurrentTerm(db, null);
         await assert.rejects(prepareDemoData(db), { code: 'DEMO_CONFLICT' });
-        assert.equal(await db.prepare('SELECT count(*) AS n FROM class_students WHERE course_id=?').bind(result.courseId).first('n'), 100);
+        await assertDemoRosters(db, result.termId);
     } finally { await app.dispose(); }
 });
 
@@ -117,20 +149,25 @@ test('demo reset rebuilds the database with the demo set and keeps only the admi
             async seed() {
                 steps.push('seed');
                 assert.equal(await db.prepare("SELECT id FROM accounts WHERE role = 'admin'").first('id'), 'admin');
-                await db.prepare("INSERT INTO terms (id, name, current) VALUES ('demo-current', '演示当前学期', 1)").run();
+                await db.prepare(`INSERT INTO terms (id, name, current)
+                    VALUES ('26-1', '2026秋', 1), ('25-2', '2026春', 0)`).run();
             },
         });
         assert.deepEqual(steps, ['files', 'migrate', 'seed']);
         assert.equal(result.deletedFiles, 2);
         assert.equal(result.administratorId, 'admin');
-        assert.equal(result.createdAccounts, 101);
+        assert.equal(result.createdAccounts, 105);
         assert.deepEqual(await db.prepare("SELECT nickname, password, credential_version FROM accounts WHERE role = 'admin'").first(),
             { nickname: '值班管理员', password, credential_version: 1 });
-        assert.equal(await db.prepare('SELECT count(*) AS n FROM accounts').first('n'), 102);
+        assert.equal(await db.prepare('SELECT count(*) AS n FROM accounts').first('n'), 106);
         assert.equal(await db.prepare('SELECT count(*) AS n FROM sessions').first('n'), 0);
         assert.equal(await db.prepare('SELECT count(*) AS n FROM bonus_ledger').first('n'), 0);
-        assert.deepEqual((await db.prepare('SELECT name, id FROM courses').all()).results, [{ name: '数据库系统原理', id: '304208040' }]);
-        assert.equal(await db.prepare('SELECT id FROM terms WHERE current = 1').first('id'), 'demo-current');
+        assert.deepEqual((await db.prepare('SELECT name, id FROM courses ORDER BY id').all()).results, [
+            { name: '大学美育·音乐鉴赏', id: '101103020' }, { name: '现代软件工程（双语）', id: '304064030' },
+            { name: '数据库系统原理', id: '304208040' },
+        ]);
+        await assertDemoRosters(db, '26-1');
+        assert.equal(await db.prepare('SELECT id FROM terms WHERE current = 1').first('id'), '26-1');
     } finally { await app.dispose(); }
 });
 

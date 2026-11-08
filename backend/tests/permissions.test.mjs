@@ -156,7 +156,7 @@ test('local seeds are repeatable and preserve term selection', async () => {
     await apply();
     await apply();
     assert.equal(await binding.prepare('SELECT id FROM terms WHERE current=1').first('id'), 'current');
-    assert.equal(await binding.prepare("SELECT COUNT(*) AS n FROM terms WHERE id LIKE 'demo-%'").first('n'), 2);
+    assert.equal(await binding.prepare("SELECT COUNT(*) AS n FROM terms WHERE id IN ('26-1','25-2')").first('n'), 2);
 });
 
 test('HTTP handles health, unknown routes, methods and database errors', async () => {
