@@ -2,7 +2,7 @@
 
 当前提供 Workers / TypeScript / Hono / Drizzle / D1 后端，以及本地模拟 R2 绑定。账号、会话、受控资料与头像接口见[账号与权限](../docs/账号与权限.md)；课程、问答、采纳加分、审查及内部供数接口见[课程与讨论](../docs/课程与讨论.md)；统一内容列表、单文件上传、版本管理和预览下载见[资料与文件](../docs/资料与文件.md)。
 
-教学班模型目前完成数据层与增量迁移，课程路由、演示数据脚本、部分业务测试夹具及前端仍使用旧模型；须完成[接续适配](../docs/课程与讨论.md#数据层实现与接续范围)后再将 0004 与应用一起发布。本轮验证使用隔离临时库，未改动开发或远程数据库。
+课程路由、演示数据脚本、业务测试和前端均已采用教学班模型，模型说明见[课程学期与教学班](../docs/课程与讨论.md#课程学期与教学班目标设计)。
 
 ## 启动
 
@@ -75,7 +75,7 @@ pnpm demo --local
 pnpm demo --remote .local/remote.json
 ```
 
-每次执行都会重建演示数据，不需要 `--confirm` 或交互确认。已初始化管理员的 ID、昵称和密码散列保留，其余账号、会话、头像和业务内容全部删除；管理员不存在时不会自动创建，可随后执行 `admin:init` 并指定同一目标。
+每次执行都会重建演示数据，不需要 `--confirm` 或交互确认。已初始化管理员的 ID、昵称和密码散列保留，其余账号、会话、头像和业务内容全部删除；重置前没有已初始化的管理员时，会创建一个没有登录密码的管理员占位，随后执行 `admin:init` 并指定同一目标设置密码。
 
 学生账号为 **S0001–S0100**，教师账号为 **T0001–T0005**。教师显示为“演示教师 001”至“演示教师 005”。初始密码与各自的账号相同，首次登录可直接使用。这些课堂体验账号使用公开初始密码和虚构姓名。学生为计算机学院、计算机科学与技术专业、2024 级，教师为同学院同专业，年级留空。
 
@@ -88,7 +88,7 @@ pnpm demo --remote .local/remote.json
 
 远程配置必须包含 `accountId`、`databaseId`、`bucketName`。Token 需要 D1 写权限和账号级 Workers R2 Storage Write（桶级 Bucket Item Write 不能调用脚本使用的 R2 REST 接口）。命令只操作所选目标，不部署网站；部署工作流在开启数据重置时调用同一命令，见[演示数据重置](../docs/部署与运维.md#演示数据重置)。
 
-脚本先清理 R2，失败时不改动 D1，再删除 D1 的全部表和视图（含 `d1_migrations`）并重新应用迁移。管理员在迁移完成后立即恢复，再初始化演示学期、账号和课程。删除 D1 后若迁移失败，库为空且管理员丢失，可用 D1 Time Travel 恢复到重置前，或修复后重新运行再执行 `admin:init`。
+脚本先清理 R2，失败时不改动 D1，再删除 D1 的全部表和视图（含 `d1_migrations`）并重新应用迁移。管理员在迁移完成后立即恢复，再初始化演示学期、账号和课程。Wrangler 逐个迁移文件提交，删除 D1 后若某个迁移失败，库会停在此前迁移已完成的状态，管理员也尚未恢复；修复原因后重新运行本命令，再执行 `admin:init`。
 
 ## 目录结构
 
@@ -97,21 +97,25 @@ pnpm demo --remote .local/remote.json
 | `src/index.ts` | Worker 入口和错误响应 |
 | `src/auth/` | 密码、会话、账号接口 |
 | `src/accounts/` | 账号查询维护、资料与头像 |
-| `src/courses/` | 课程创建、维护、统计与动态 |
+| `src/courses/` | 课程创建、维护、统计与动态，学期、开课安排、教学班与学生名单 |
+| `src/teachers/` | 教师公开主页与公开内容 |
+| `src/search/` | 全站搜索与正文检索文字提取 |
+| `src/body-images.ts` | 正文图片上传、读取与到期清理 |
 | `src/discussions/` | 问答、评论、投票、采纳与加分流水 |
 | `src/materials/` | 统一内容列表、上传会话、文件版本、受控预览下载及清理 |
 | `src/moderation/` | 举报队列、下架恢复、审查记录 |
 | `src/integration/` | 本人动态、内部可见文档及内容详情 |
 | `src/favorites/` | 统一收藏、批量状态与首页课程动态 |
 | `src/notifications/` | 通用通知、游标分页、状态同步与已读 |
-| `src/openapi.ts`、`src/materials/openapi.ts` | 课程、讨论与资料 API 的 OpenAPI 规范 |
-| `src/permissions.ts` | 管理员、当前授课教师权限与公开资料查询 |
+| `src/openapi.ts`、`src/*/openapi.ts` | OpenAPI 规范，由 `src/openapi.ts` 组合各模块定义 |
+| `src/manual-routes.ts` | 账号、头像与登录接口的手动分发清单，入口分发与 OpenAPI 检查共用 |
+| `src/permissions.ts` | 管理员、当前授课教师与教学班权限的 SQL 判断，公开资料查询 |
 | `src/db/schema.ts` | 共享 Drizzle 表定义 |
 | `src/db/rules.sql` | 当前视图、约束与积分事务触发器 |
 | `drizzle.config.ts` | Drizzle Lab 读取 schema 的配置 |
 | `migrations/*.sql`、`migrations/meta/` | 按编号追加的 SQL、Drizzle 快照与规则快照，由 Wrangler 按执行记录应用 |
 | `seed/local.sql` | `demo` 内部使用的演示学期数据 |
-| `tests/` | 长期保留的账号、隐私、会话、管理员运维和 R2 回归测试 |
+| `tests/` | 长期保留的回归测试，覆盖账号、权限、会话、课程与教学班、讨论、积分、资料、正文图片、搜索、通知、迁移与运维脚本 |
 | `scripts/demo.mjs` | 重置目标并初始化全部课堂演示数据 |
 | `scripts/admin.mjs`、`scripts/lib/` | 独立管理员运维命令、终端输入和 D1 访问 |
 
@@ -191,7 +195,7 @@ pnpm openapi:export
 pnpm openapi:check
 ```
 
-前者将规范导出到仓库根目录的 `openapi/openapi.json`（前后端共用的接口契约），后者检查业务方法与实际路由及静态规范一致。修改 `src/openapi.ts`、`src/materials/openapi.ts` 或 `src/notifications/openapi.ts` 后依次执行。`GET /api/openapi.json` 返回标准 OpenAPI 3.1 文档，不加 data 包装；它描述课程、讨论、资料和通知模块，账号接口见[账号与权限](../docs/账号与权限.md)。仅本地开放的资料 PUT 传输接口见[资料与文件](../docs/资料与文件.md#本地与云端)。
+前者将规范导出到仓库根目录的 `openapi/openapi.json`（前后端共用的接口契约），后者检查业务方法与规范及静态导出一致，范围包括 Hono 注册的路由和 `src/manual-routes.ts` 中手动分发的账号、头像与登录接口，共 107 个方法。修改 `src/openapi.ts` 或任一 `src/*/openapi.ts` 后依次执行。`GET /api/openapi.json` 返回标准 OpenAPI 3.1 文档，不加 data 包装；它描述全部业务接口，账号相关的业务规则见[账号与权限](../docs/账号与权限.md)。仅本地开放的资料 PUT 传输接口见[资料与文件](../docs/资料与文件.md#本地与云端)。
 
 参考：[Drizzle D1](https://orm.drizzle.team/docs/get-started/d1-new)、[D1 外键](https://developers.cloudflare.com/d1/sql-api/foreign-keys/)、[Wrangler 配置](https://developers.cloudflare.com/workers/wrangler/configuration/)、[Workers CPU 限制](https://developers.cloudflare.com/workers/platform/limits/#cpu-time)。
 
