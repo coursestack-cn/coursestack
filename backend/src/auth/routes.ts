@@ -2,21 +2,14 @@ import { eq } from 'drizzle-orm';
 import { createDatabase } from '../db/index.ts';
 import { sessions } from '../db/schema.ts';
 import type { Env } from '../env.ts';
-import { HttpError, json, readJson, requireSameOrigin, stringField } from '../http.ts';
+import { HttpError, json, readJson, stringField } from '../http.ts';
+import type { ManualTarget } from '../manual-routes.ts';
 import { existingPasswordField, newPasswordField } from './crypto.ts';
 import { changePassword, limitAttempts, ownProfile, readSession, requireSession, sessionCookie, signIn } from './service.ts';
 import { allowFields } from '../accounts/validation.ts';
 import { createMember } from '../accounts/creation.ts';
 
-const methods: Record<string, string> = {
-    '/api/auth/login': 'POST', '/api/auth/admin/login': 'POST', '/api/auth/logout': 'POST',
-    '/api/auth/me': 'GET', '/api/auth/password': 'POST', '/api/admin/accounts': 'POST',
-};
-export async function authRoutes(request: Request, env: Env): Promise<Response | null> {
-    const path = new URL(request.url).pathname, method = methods[path];
-    if (!method) return null;
-    if (request.method !== method) return json({ error: { code: 'METHOD_NOT_ALLOWED', message: '请求方法不支持' } }, 405, { Allow: method });
-    if (method !== 'GET') requireSameOrigin(request);
+export async function authRoutes(request: Request, env: Env, { path }: ManualTarget): Promise<Response> {
     if (path === '/api/auth/me') {
         const session = await requireSession(env.DB, request, { allowPasswordChange: true });
         return json({ data: await ownProfile(env.DB, session.id) });

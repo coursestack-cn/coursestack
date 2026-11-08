@@ -1,5 +1,6 @@
 import type { Env } from '../env.ts';
-import { HttpError, json, requireSameOrigin } from '../http.ts';
+import { HttpError, json } from '../http.ts';
+import type { ManualTarget } from '../manual-routes.ts';
 import { requireSession } from '../auth/service.ts';
 import { mutateAccount } from './mutations.ts';
 import { accountDetail } from './service.ts';
@@ -42,14 +43,9 @@ async function imageBody(request: Request) {
     return bytes;
 }
 
-export async function avatarRoutes(request: Request, env: Env, waitUntil?: (work: Promise<unknown>) => void): Promise<Response | null> {
-    const path = new URL(request.url).pathname;
-    const publicAvatar = path.match(/^\/api\/profiles\/([^/]+)\/avatar$/);
-    if (!publicAvatar && path !== '/api/me/avatar') return null;
-    const allowed = publicAvatar ? ['GET'] : ['PUT', 'DELETE'];
-    if (!allowed.includes(request.method)) return json({ error: { code: 'METHOD_NOT_ALLOWED', message: '请求方法不支持' } }, 405, { Allow: allowed.join(', ') });
-    if (publicAvatar) {
-        const row = await env.DB.prepare("SELECT avatar_key FROM accounts WHERE id = ? AND status = 'active'").bind(decodeURIComponent(publicAvatar[1])).first<{ avatar_key: string | null }>();
+export async function avatarRoutes(request: Request, env: Env, { encodedId, waitUntil }: ManualTarget): Promise<Response> {
+    if (encodedId !== undefined) {
+        const row = await env.DB.prepare("SELECT avatar_key FROM accounts WHERE id = ? AND status = 'active'").bind(decodeURIComponent(encodedId)).first<{ avatar_key: string | null }>();
         const object = row?.avatar_key ? await env.FILES.get(row.avatar_key) : null;
         if (!object) throw new HttpError(404, 'AVATAR_NOT_FOUND', '头像不存在');
         return new Response(object.body, { headers: {
@@ -58,7 +54,6 @@ export async function avatarRoutes(request: Request, env: Env, waitUntil?: (work
             'Cache-Control': 'no-store',
         } });
     }
-    requireSameOrigin(request);
     const session = await requireSession(env.DB, request);
     const work = (async () => {
         let key: string | null = null;
@@ -83,6 +78,6 @@ export async function avatarRoutes(request: Request, env: Env, waitUntil?: (work
         }
         return json({ data: await accountDetail(env.DB, session.id) });
     })();
-    waitUntil?.(work.then(() => undefined, () => undefined));
+    waitUntil(work.then(() => undefined, () => undefined));
     return work;
 }

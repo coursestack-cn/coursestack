@@ -2,6 +2,7 @@ import { favoriteDefinitions, favoriteSchemas } from './favorites/openapi.ts';
 import { BODY_IMAGE_MIMES } from '../../shared/rich-text/images.ts';
 import { richTextSchemas } from '../../shared/rich-text/schema.ts';
 import { accountColumns } from '../../shared/accounts/import.ts';
+import { accountDefinitions, accountSchemas } from './accounts/openapi.ts';
 import { materialDefinitions, materialSchemas } from './materials/openapi.ts';
 import { searchDefinitions, searchSchemas } from './search/openapi.ts';
 import { teacherDefinitions, teacherSchemas } from './teachers/openapi.ts';
@@ -33,7 +34,8 @@ const pagination = [q('page', { type: 'integer', minimum: 1, maximum: 10000, def
     q('pageSize', { type: 'integer', minimum: 1, maximum: 50, default: 20 })];
 const paged = (item: Schema): Schema => object({ items: { type: 'array', items: item }, page: positiveInteger, pageSize: positiveInteger, total: { type: 'integer', minimum: 0 } });
 export type Definition = { method: string; path: string; summary: string; auth?: 'optional' | 'session' | 'internal';
-    request?: Schema; requestRequired?: boolean; create?: boolean; parameters?: unknown[]; response?: Schema; binary?: boolean; requestMimes?: readonly string[]; responseMimes?: readonly string[] };
+    request?: Schema; requestRequired?: boolean; create?: boolean; idempotencyKeyRequired?: boolean; sessionCookie?: 'set' | 'clear'; rateLimited?: boolean;
+    parameters?: unknown[]; response?: Schema; binary?: boolean; requestMimes?: readonly string[]; responseMimes?: readonly string[] };
 const defs: Definition[] = [
     ...favoriteDefinitions,
     ...materialDefinitions,
@@ -108,6 +110,7 @@ const defs: Definition[] = [
     { method: 'get', path: '/moderation/actions', summary: '内容上下架、删除及版本删除审查记录', auth: 'session', parameters: [...pagination, q('courseId', courseId)] },
     { method: 'get', path: '/internal/documents', summary: '分页读取当前可见课程、资料、问题和回答；不提供跨页快照或增量重放', auth: 'internal', parameters: [q('after'), q('limit', { type: 'integer', minimum: 1, maximum: 100 })] },
     { method: 'get', path: '/internal/contents/{id}', summary: '按当前可见性获取内容；不可用只返回 available=false', auth: 'internal' },
+    ...accountDefinitions,
 ];
 
 const timestamp: Schema = { type: 'integer', description: 'Unix 秒' };
@@ -155,11 +158,12 @@ function responseFor(path: string): Schema {
 }
 
 const paths: Record<string, Record<string, unknown>> = {};
+const methodNotAllowed = { description: '路径存在，请求方法不支持', headers: { Allow: { required: true, schema: { type: 'string' } } } };
 for (const d of defs) {
     const path = `/api${d.path}`;
     const parameters = [...Array.from(path.matchAll(/\{(\w+)\}/g), m => ({ name: m[1], in: 'path', required: true, schema: m[1] === 'type' && d.path.startsWith('/me/favorites/') ? enumeration('course','material','question') : m[1] === 'targetId' ? { anyOf: [courseId, id] } : m[1] === 'version' ? positiveInteger : m[1] === 'id' && d.path.startsWith('/courses/') ? courseId : id })), ...(d.parameters ?? [])];
     if (d.auth !== 'internal' && !['get', 'head', 'options'].includes(d.method)) parameters.push({ name: 'Origin', in: 'header', required: true, schema: { type: 'string', format: 'uri' } });
-    if (d.create) parameters.push({ name: 'Idempotency-Key', in: 'header', required: true, schema: { type: 'string', minLength: 8, maxLength: 100, pattern: '^[A-Za-z0-9_-]+$' } });
+    if (d.create) parameters.push({ name: 'Idempotency-Key', in: 'header', required: d.idempotencyKeyRequired ?? true, schema: { type: 'string', minLength: 8, maxLength: 100, pattern: '^[A-Za-z0-9_-]+$' } });
     const security = d.auth === 'internal' ? [{ internalBearer: [] }] : d.auth === 'session'
         ? [{ sessionCookie: [] }] : [{}, { sessionCookie: [] }];
     paths[path] ??= {};
@@ -171,7 +175,11 @@ for (const d of defs) {
                 '200': { description: '文件响应；HEAD 仅返回响应头', ...(d.method === 'head' ? {} : { content: { '*/*': { schema: { type: 'string', format: 'binary' } } } }) },
                 ...(d.method === 'head' ? {} : { '206': { description: '单一字节范围', content: { '*/*': { schema: { type: 'string', format: 'binary' } } } }, '416': { description: '无效范围，Content-Range 为 bytes */总大小' } }),
                 '304': { description: '文件未变化，仍校验登录及当前可见性' },
-            } : { [d.create ? '201' : '200']: { description: '成功', content: { 'application/json': { schema: object({ data: d.response ?? (d.create ? object({ id }) : responseFor(d.path)) }) } } } }),
+            } : { [d.create ? '201' : '200']: { description: '成功',
+                ...(d.sessionCookie ? { headers: { 'Set-Cookie': { description: d.sessionCookie === 'set' ? '设置会话 Cookie' : '清除会话 Cookie', schema: { type: 'string' } } } } : {}),
+                content: { 'application/json': { schema: object({ data: d.response ?? (d.create ? object({ id }) : responseFor(d.path)) }) } } } }),
+            '405': d.method === 'head' ? methodNotAllowed : { $ref: '#/components/responses/MethodNotAllowed' },
+            ...(d.rateLimited ? { '429': { description: '尝试次数过多', content: { 'application/json': { schema: ref('Error') } } } } : {}),
             ...Object.fromEntries([400, 401, 403, 404, 409, 410, 413, 415, 500, 503].map(status => [String(status),
                 { description: ({ 400: '参数错误', 401: '登录失效', 403: '权限不足', 404: '内容不可用', 409: '状态冲突或重复操作', 410: '上传过期', 413: '请求或文件过大', 415: '请求或文件类型不支持', 500: '服务错误', 503: '服务尚未配置' } as Record<number, string>)[status],
                     ...(d.method === 'head' ? {} : { content: { 'application/json': { schema: ref('Error') } } }) }]))
@@ -179,16 +187,19 @@ for (const d of defs) {
     };
 }
 export const openapi = {
-    openapi: '3.1.0', info: { title: 'CourseStack 课程、讨论与资料 API', version: '6.1.0',
-        description: '正文使用 Tiptap / ProseMirror JSON 对象，由前端按编辑器扩展配置安全渲染。公开数据不包含学工号、姓名、院系、专业或年级。写入需登录，创建需幂等键，课程和内容编辑按最终写入顺序生效，局部更新仅覆盖提交字段；课程号即课程 ID，课程与开课安排分离；积分和学生名单按课程、学期、教师的教学班管理。Cookie 写请求需可信 Origin。' },
+    openapi: '3.1.0', info: { title: 'CourseStack API', version: '6.1.0',
+        description: '正文使用 Tiptap / ProseMirror JSON 对象，由前端按编辑器扩展配置安全渲染。公开资料不含学工号、姓名、院系、专业或年级。各接口标明会话和幂等键要求。课程和内容编辑按最终写入顺序生效，局部更新仅覆盖提交字段。课程号即课程 ID，课程与开课安排分离。积分和学生名单按课程、学期、教师的教学班管理。Cookie 写请求需可信 Origin。' },
     servers: [{ url: 'http://127.0.0.1:8787', description: '本地开发' }], paths,
     components: {
+        responses: { MethodNotAllowed: { ...methodNotAllowed,
+            content: { 'application/json': { schema: ref('Error') } } } },
         securitySchemes: {
             sessionCookie: { type: 'apiKey', in: 'cookie', name: 'coursestack_session', description: '所有环境均使用同名的 HttpOnly、SameSite=Strict Cookie，HTTPS 下加 Secure。写请求可带 X-Expected-Account 声明页面显示的账号 ID，与 Cookie 对应的账号不一致时返回 409 ACCOUNT_CHANGED' },
             internalBearer: { type: 'http', scheme: 'bearer', description: '内部服务专用凭据，不得放入前端' },
         },
         schemas: {
             Error: object({ error: object({ code: str(80), message: { type: 'string' } }) }),
+            ...accountSchemas,
             ...favoriteSchemas,
             ...richTextSchemas,
             ...materialSchemas,

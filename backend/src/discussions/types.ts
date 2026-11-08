@@ -4,7 +4,7 @@ import type { Env } from '../env.ts';
 export type Actor = { id: string; nickname: string | null; role: 'student' | 'teacher' | 'admin'; tokenHash: string; version: number };
 export type AppEnv = {
     Bindings: Env;
-    Variables: { actor: Actor | null; requestId: string };
+    Variables: { actor: Actor | null; requestId: string; routePattern: string };
 };
 export type Ctx = Context<AppEnv>;
 export type ContentRow = {

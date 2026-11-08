@@ -18,6 +18,10 @@ export function json(body: unknown, status = 200, headers: Record<string, string
     return Response.json(body, { status, headers: { 'Cache-Control': 'no-store', ...headers } });
 }
 
+export function methodNotAllowed(methods: string[]) {
+    return json({ error: { code: 'METHOD_NOT_ALLOWED', message: '请求方法不支持' } }, 405, { Allow: methods.join(', ') });
+}
+
 export async function readJson(request: Request, maxBytes = 8192): Promise<Record<string, unknown>> {
     if (request.headers.get('content-type')?.split(';')[0].trim() !== 'application/json') {
         throw new HttpError(415, 'JSON_REQUIRED', '请求必须使用 JSON');
