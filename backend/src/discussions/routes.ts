@@ -8,7 +8,7 @@ import { activeUser, editPermission } from '../permissions.ts';
 import { actor } from '../auth/middleware.ts';
 import type { AppEnv, Ctx, ContentRow, PublicRow } from '../discussions/types.ts';
 import { accessibleContent, contentDto, editContent, publicDetail, publicSelect, rawContent, readableContent, readableDetail, requireEditor, tombstone, tombstoneDto, visibleContent } from '../discussions/service.ts';
-import { bodySchema, type ProseMirrorDocument } from './body.ts';
+import { normalizeBodyImages, bodySchema, type ProseMirrorDocument } from './body.ts';
 import { ownerDeletionAllowed, cleanupDeletedFiles } from './deletion.ts';
 import { createDatabase, prepareStatement } from '../db/index.ts';
 const now = () => Math.floor(Date.now() / 1000);
@@ -20,6 +20,7 @@ const questionInput = z.object({ title: z.string().trim().min(1).max(200), body:
 type NewContent = { kind: ContentRow['kind']; courseId: string; body: ProseMirrorDocument; title?: string;
     tags?: string[] | null; targetId?: string; replyToId?: string };
 async function insertContent(c: Ctx, data: NewContent) {
+    normalizeBodyImages(data.body, new URL(c.req.url).origin);
     const a = actor(c), identity = await requestIdentity(c, data);
     const old = await createDatabase(c.env.DB).get<{ id: string; request_hash: string }>(sql`SELECT id,request_hash FROM contents WHERE author_id=${a.id} AND request_key=${identity.key}`);
     if (old) {

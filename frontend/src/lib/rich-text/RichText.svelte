@@ -48,7 +48,7 @@
     {:else if node.type === "codeBlock"}
         {#if node.content.some((child) => child.type === "invalid")}<span class="rich-content-unavailable">此处内容无法显示</span>{:else}<CodePreview code={node.content.map((child) => child.text ?? "").join("")} language={typeof node.attrs?.language === "string" ? node.attrs.language : null} />{/if}
     {:else if node.type === "horizontalRule"}<hr />
-    {:else if node.type === "image"}<img src={String(node.attrs?.src ?? "")} alt={typeof node.attrs?.alt === "string" ? node.attrs.alt : ""} loading="lazy" />
+    {:else if node.type === "image"}<img src={String(node.attrs?.src ?? "")} alt={typeof node.attrs?.alt === "string" ? node.attrs.alt : ""} loading="lazy" referrerpolicy="no-referrer" />
     {:else if node.type === "blockMath"}<MathPreview latex={String(node.attrs?.latex ?? "")} display />
     {:else if ["text", "hardBreak", "inlineMath"].includes(node.type)}{@render marked(node)}
     {:else}<span class="rich-content-unavailable">此处内容无法显示</span>{/if}

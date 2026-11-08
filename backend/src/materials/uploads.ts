@@ -1,4 +1,5 @@
 import { bodySearchText } from '../search/text.ts';
+import { normalizeBodyImages } from '../discussions/body.ts';
 import { Hono } from 'hono';
 import { sql } from 'drizzle-orm';
 import { CONTENT_REQUEST_MAX_BYTES } from '../../../shared/rich-text/index.ts';
@@ -42,6 +43,7 @@ materialUploadRoutes.post('/material-uploads', async c => {
     const a = actor(c), data = await input(c, uploadInput, CONTENT_REQUEST_MAX_BYTES);
     if (data.file.size > maxBytes(c.env)) throw new HttpError(413, 'FILE_TOO_LARGE', '文件超过上传大小限制');
     requireStorage(c.env);
+    if (data.mode === 'create') normalizeBodyImages(data.body, new URL(c.req.url).origin);
     const identity = await requestIdentity(c, data), db = createDatabase(c.env.DB);
     let row = await db.get<UploadRow>(sql`SELECT * FROM material_upload_sessions WHERE owner_id=${a.id} AND request_key=${identity.key}`);
     if (!row) {

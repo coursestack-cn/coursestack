@@ -45,10 +45,10 @@ test('all content writes accept semantic limits above the old JSON and HTTP caps
     assert.equal(course.status, 413, 'non-content request limits remain unchanged');
 });
 
-test('unsafe links, external images and excess attributes are rejected through the API', async () => {
+test('unsafe links, unsafe image schemes and excess attributes are rejected through the API', async () => {
     const q = await h.postQuestion(), answer = await h.postAnswer(q);
     const bad = [linkDoc('链接', 'javascript:alert(1)'),
-        { type: 'doc', content: [{ type: 'image', attrs: { src: 'https://example.com/image.png', alt: null } }] },
+        { type: 'doc', content: [{ type: 'image', attrs: { src: 'file:///image.png', alt: null } }] },
         { ...doc('正文'), attrs: { language: 'zh' } }];
     for (const body of bad) {
         for (const [method, path, payload] of [

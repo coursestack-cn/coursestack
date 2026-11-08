@@ -163,7 +163,7 @@ export function validateNodeShallow(input: unknown, options: { ignoreMarks?: boo
             return failure('attrs.language', 'invalid-attribute');
         }
         if (type === 'image') {
-            if (typeof attrs.src !== 'string' || !isInternalPath(attrs.src)) return failure('attrs.src', 'invalid-image-src');
+            if (typeof attrs.src !== 'string' || attrs.src.trim() !== attrs.src || !normalizeHref(attrs.src)) return failure('attrs.src', 'invalid-image-src');
             if (attrs.alt !== null && (typeof attrs.alt !== 'string' || codePoints(attrs.alt) > RICH_TEXT_LIMITS.maxImageAltChars)) {
                 return failure('attrs.alt', 'invalid-attribute');
             }

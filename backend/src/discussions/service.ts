@@ -1,5 +1,5 @@
 import { bodySearchText } from '../search/text.ts';
-import { parseBody, bodySchema, jsonChanged, type ProseMirrorDocument } from './body.ts';
+import { normalizeBodyImages, parseBody, bodySchema, jsonChanged, type ProseMirrorDocument } from './body.ts';
 import { CONTENT_REQUEST_MAX_BYTES } from '../../../shared/rich-text/index.ts';
 import { z } from 'zod';
 import { sql, type SQL } from 'drizzle-orm';
@@ -119,6 +119,7 @@ export async function editContent(c: Ctx, id: string, kind?: ContentRow['kind'])
         ? z.object({ title: z.string().trim().min(1).max(200).optional(), body: bodySchema.optional(), tags: tagsSchema.nullable().optional() }).strict()
         : z.object({ body: bodySchema }).strict();
     const data = await input(c, schema, CONTENT_REQUEST_MAX_BYTES) as { title?: string; body?: ProseMirrorDocument; tags?: string[] | null };
+    if (data.body) normalizeBodyImages(data.body, new URL(c.req.url).origin);
     const body = data.body === undefined ? undefined : JSON.stringify(data.body);
     const tags = data.tags === undefined ? undefined : data.tags?.length ? JSON.stringify(data.tags) : null;
     const bodyChanged = body === undefined ? sql`0` : jsonChanged(sql`body`, body);

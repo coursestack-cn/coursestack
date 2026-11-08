@@ -92,6 +92,13 @@
       "when": 1794059366551,
       "tag": "0012_class_roster_management",
       "breakpoints": true
+    },
+    {
+      "idx": 13,
+      "version": "6",
+      "when": 1794060483561,
+      "tag": "0013_content_images",
+      "breakpoints": true
     }
   ]
 }

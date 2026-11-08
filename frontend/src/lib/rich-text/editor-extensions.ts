@@ -1,13 +1,16 @@
-import { Extension, Node, textblockTypeInputRule, wrappingInputRule } from "@tiptap/core";
+import { Extension, InputRule, Node, PasteRule, textblockTypeInputRule, wrappingInputRule, type NodeViewRenderer } from "@tiptap/core";
 import StarterKit from "@tiptap/starter-kit";
 import Link from "@tiptap/extension-link";
 import Image from "@tiptap/extension-image";
 import OrderedList from "@tiptap/extension-ordered-list";
 import CodeBlock from "@tiptap/extension-code-block";
 import Placeholder from "@tiptap/extension-placeholder";
-import { Plugin, PluginKey } from "@tiptap/pm/state";
+import { closeHistory, isHistoryTransaction } from "@tiptap/pm/history";
+import { NodeSelection, Plugin, PluginKey, TextSelection, type Transaction } from "@tiptap/pm/state";
+import { ReplaceStep } from "@tiptap/pm/transform";
 import { Decoration, DecorationSet } from "@tiptap/pm/view";
 import type { Node as ProseMirrorNode } from "@tiptap/pm/model";
+import { Trash2 } from "@lucide/svelte";
 import { mount, unmount } from "svelte";
 import MathPreview from "./MathPreview.svelte";
 import { CODE_LANGUAGES, RICH_TEXT_LIMITS, normalizeHref, validateDocStructure } from "./index";
@@ -16,11 +19,11 @@ import { highlightCode, type HighlightNode } from "./lazy-renderers";
 export type EditorExtensionOptions = {
     placeholder: string;
     onError?: (message: string) => void;
+    imagePreview?: (src: string) => string | Promise<string>;
 };
 
 function imageSource(input: string | null): string | null {
-    const normalized = input === null ? null : normalizeHref(input);
-    return normalized?.startsWith("/") ? normalized : null;
+    return input === null ? null : normalizeHref(input);
 }
 
 function language(input: unknown): string | null {
@@ -49,11 +52,82 @@ const SafeLink = Link.extend({
     openOnClick: false,
     autolink: true,
     linkOnPaste: true,
-    markdownLinks: false,
+    markdownLinks: true,
     isAllowedUri: (href) => normalizeHref(href) !== null,
     shouldAutoLink: (href) => normalizeHref(href) !== null,
     HTMLAttributes: {}
 });
+
+// Destinations may be angle-bracketed or contain escaped / balanced parentheses.
+const markdownImage = /!\[((?:\\.|[^\]\\\r\n])*)\]\(\s*(?:<([^<>\r\n]+)>|((?:\\.|[^()\s\\]|\((?:\\.|[^()\s\\])*\))+))(?:[ \t]+(?:"[^"\r\n]*"|'[^'\r\n]*'))?[ \t]*\)/g;
+
+function markdownImages(text: string) {
+    const matches = [];
+    for (const match of text.matchAll(markdownImage)) {
+        if (/(?:^|[^\\])(?:\\\\)*\\$/.test(text.slice(0, match.index))) continue;
+        const unescape = (value: string) => value.replace(/\\([\\()[\]<>])/g, "$1");
+        const src = imageSource(unescape(match[2] ?? match[3])), alt = unescape(match[1]);
+        if (src && [...alt].length <= RICH_TEXT_LIMITS.maxImageAltChars) {
+            matches.push({ index: match.index, text: match[0], data: { src, alt } });
+        }
+    }
+    return matches;
+}
+
+// A document ending in a block image needs a text cursor for the next keystroke.
+export function cursorAfterImage(tr: Transaction) {
+    if (!(tr.selection instanceof NodeSelection) || tr.selection.node.type.name !== "image") return;
+    const end = tr.selection.to, next = tr.doc.resolve(end).nodeAfter;
+    if (!next?.isTextblock) tr.insert(end, tr.doc.type.schema.nodes.paragraph.create());
+    tr.setSelection(TextSelection.create(tr.doc, end + 1));
+}
+
+function editorImageView(preview: EditorExtensionOptions["imagePreview"]): NodeViewRenderer {
+    return ({ node, view, getPos }) => {
+        const dom = document.createElement("div");
+        dom.className = "editor-image";
+        const frame = document.createElement("div");
+        frame.className = "editor-image-preview";
+        const image = document.createElement("img");
+        image.alt = node.attrs.alt ?? "";
+        image.referrerPolicy = "no-referrer";
+        image.draggable = false;
+        const remove = document.createElement("button");
+        remove.type = "button";
+        remove.className = "editor-image-remove";
+        remove.title = "删除图片";
+        remove.setAttribute("aria-label", image.alt ? `删除图片“${image.alt}”` : remove.title);
+        const icon = mount(Trash2, { target: remove, props: { size: 16, "aria-hidden": true } });
+        frame.append(image);
+        dom.append(frame, remove);
+
+        const source = preview?.(node.attrs.src) ?? node.attrs.src;
+        let live = true;
+        if (typeof source === "string") image.src = source;
+        else void source.then((url: string) => { if (live) image.src = url; });
+
+        remove.onmousedown = event => event.preventDefault();
+        dom.onclick = event => {
+            if (!view.editable || event.button !== 0 || event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return;
+            const pos = getPos();
+            if (pos === undefined) return;
+            // The gap cursor can land before a lone image. Target this node for both selection and removal.
+            const tr = view.state.tr.setSelection(NodeSelection.create(view.state.doc, pos));
+            if (remove.contains(event.target as HTMLElement)) {
+                view.dispatch(closeHistory(tr).deleteSelection().scrollIntoView());
+                view.dispatch(closeHistory(view.state.tr));
+            } else {
+                view.dispatch(tr);
+            }
+            view.focus();
+        };
+        return {
+            dom,
+            stopEvent: event => remove.contains(event.target as HTMLElement),
+            destroy() { live = false; void unmount(icon); }
+        };
+    };
+}
 
 const SafeImage = Image.extend({
     addAttributes() {
@@ -71,8 +145,44 @@ const SafeImage = Image.extend({
     parseHTML() {
         return [{ tag: "img[src]", getAttrs: (element) => imageSource(element.getAttribute("src")) ? null : false }];
     },
-    // Images enter through the upload callback or safe HTML, never a remote Markdown URL.
-    addInputRules() { return []; }
+    addProseMirrorPlugins() {
+        const imageType = this.type;
+        return [new Plugin({
+            props: {
+                decorations({ doc, selection }) {
+                    if (selection.empty) return null;
+                    const selected: Decoration[] = [];
+                    doc.nodesBetween(selection.from, selection.to, (node, pos) => {
+                        if (node.type === imageType) selected.push(Decoration.node(pos, pos + node.nodeSize, { class: "editor-image-selected" }));
+                        return !node.isTextblock;
+                    });
+                    return DecorationSet.create(doc, selected);
+                }
+            }
+        })];
+    },
+    addInputRules() {
+        return [new InputRule({
+            find: text => {
+                if (!text.endsWith(")")) return null;
+                const last = markdownImages(text).at(-1);
+                return last && last.index + last.text.length === text.length ? last : null;
+            },
+            handler: ({ state, range, match }) => {
+                cursorAfterImage(state.tr.replaceRangeWith(range.from, range.to, this.type.create(match.data)));
+            }
+        })];
+    },
+    addPasteRules() {
+        return [new PasteRule({
+            find: markdownImages,
+            handler: ({ state, range, match }) => {
+                if (!state.doc.resolve(range.from).marks().some(mark => mark.type.spec.code)) {
+                    cursorAfterImage(state.tr.replaceRangeWith(range.from, range.to, this.type.create(match.data)));
+                }
+            }
+        })];
+    }
 }).configure({ inline: false, allowBase64: false, resize: false });
 
 const SafeOrderedList = OrderedList.extend({
@@ -163,6 +273,30 @@ function mathNode(name: "inlineMath" | "blockMath") {
     });
 }
 
+const ClearFormattingOnDelete = Extension.create({
+    name: "clearFormattingOnDelete",
+    addProseMirrorPlugins() {
+        return [new Plugin({
+            appendTransaction(transactions, _previous, state) {
+                const deleted = transactions.some(tr => tr.docChanged && !isHistoryTransaction(tr) && !tr.getMeta("composition")
+                    && tr.steps.every(step => step instanceof ReplaceStep && step.slice.size === 0));
+                if (!deleted) return null;
+
+                // A list or quote can wrap the last empty textblock. Other lines and atoms still count as content.
+                let block = state.doc;
+                while (!block.isTextblock && block.childCount === 1) block = block.child(0);
+                if (!block.isTextblock || block.content.size !== 0) return null;
+
+                const paragraph = state.schema.nodes.paragraph;
+                if (state.doc.firstChild?.type !== paragraph) {
+                    return state.tr.replaceWith(0, state.doc.content.size, paragraph.create());
+                }
+                return state.storedMarks?.length ? state.tr.setStoredMarks(null) : null;
+            }
+        })];
+    }
+});
+
 const highlightKey = new PluginKey<DecorationSet>("courseStackCodeHighlight");
 
 function codeDecorations(nodes: HighlightNode[], from: number): Decoration[] {
@@ -233,7 +367,7 @@ const CodeHighlight = Extension.create({
     }
 });
 
-export function createEditorExtensions({ placeholder, onError }: EditorExtensionOptions) {
+export function createEditorExtensions({ placeholder, onError, imagePreview }: EditorExtensionOptions) {
     const ContractGuard = Extension.create({
         name: "courseStackContractGuard",
         priority: 1000,
@@ -262,13 +396,14 @@ export function createEditorExtensions({ placeholder, onError }: EditorExtension
             dropcursor: false
         }),
         SafeLink,
-        SafeImage,
+        SafeImage.extend({ addNodeView() { return editorImageView(imagePreview); } }),
         SafeOrderedList,
         SafeCodeBlock,
         mathNode("inlineMath"),
         mathNode("blockMath"),
         Placeholder.configure({ placeholder }),
         ContractGuard,
+        ClearFormattingOnDelete,
         CodeHighlight
     ];
 }

@@ -28,6 +28,9 @@ export function userMessage(error: unknown, overrides: MessageOverrides = {}): s
         ?? (Object.hasOwn(overrides, error.status) ? overrides[error.status] : undefined);
     if (typeof override === "string") return override;
     if (error.status === 0 && error.code === "NETWORK_ERROR") return "无法连接服务器，检查网络后重试。";
+    if (error.code === "BODY_IMAGE_TOO_LARGE") return "单张图片最大为 1 MiB。";
+    if (error.code === "BODY_IMAGE_TYPE") return "图片文件格式不符，请选择 PNG、JPEG、GIF 或 WebP 图片。";
+    if (error.code === "BODY_IMAGE_UNAVAILABLE" || error.code === "BODY_IMAGE_DUPLICATE") return "图片已失效或无法复制，请重新选择图片。";
     if (overrides.default !== undefined) return overrides.default;
     if (error.code === "INVALID_RESPONSE") return fallback;
     if (error.status >= 500 && error.status < 600) return "服务暂时不可用，稍后重试。";

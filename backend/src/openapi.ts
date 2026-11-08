@@ -1,4 +1,5 @@
 import { favoriteDefinitions, favoriteSchemas } from './favorites/openapi.ts';
+import { BODY_IMAGE_MIMES } from '../../shared/rich-text/images.ts';
 import { richTextSchemas } from '../../shared/rich-text/schema.ts';
 import { accountColumns } from '../../shared/accounts/import.ts';
 import { materialDefinitions, materialSchemas } from './materials/openapi.ts';
@@ -32,10 +33,13 @@ const pagination = [q('page', { type: 'integer', minimum: 1, maximum: 10000, def
     q('pageSize', { type: 'integer', minimum: 1, maximum: 50, default: 20 })];
 const paged = (item: Schema): Schema => object({ items: { type: 'array', items: item }, page: positiveInteger, pageSize: positiveInteger, total: { type: 'integer', minimum: 0 } });
 export type Definition = { method: string; path: string; summary: string; auth?: 'optional' | 'session' | 'internal';
-    request?: Schema; requestRequired?: boolean; create?: boolean; parameters?: unknown[]; response?: Schema; binary?: boolean };
+    request?: Schema; requestRequired?: boolean; create?: boolean; parameters?: unknown[]; response?: Schema; binary?: boolean; requestMimes?: readonly string[]; responseMimes?: readonly string[] };
 const defs: Definition[] = [
     ...favoriteDefinitions,
     ...materialDefinitions,
+    { method: 'post', path: '/body-images', auth: 'session', summary: '上传一个独立的正文图片对象，每张最多 1 MiB，临时图片 24 小时内可绑定',
+        request: { type: 'string', format: 'binary' }, requestMimes: BODY_IMAGE_MIMES, response: object({ src: { type: 'string', pattern: '^/api/body-images/[0-9a-f]{32}$' } }) },
+    { method: 'get', path: '/body-images/{id}', summary: '读取可见正文中的图片，临时图片仅上传者可读', responseMimes: BODY_IMAGE_MIMES },
     ...teacherDefinitions,
     ...searchDefinitions,
     ...notificationDefinitions,
@@ -161,9 +165,9 @@ for (const d of defs) {
     paths[path] ??= {};
     paths[path][d.method] = {
         summary: d.summary, operationId: `${d.method}_${path.replace(/[^a-zA-Z0-9]+/g, '_')}`, security, parameters,
-        ...(d.request ? { requestBody: { required: d.requestRequired ?? true, content: { 'application/json': { schema: d.request } } } } : {}),
+        ...(d.request ? { requestBody: { required: d.requestRequired ?? true, content: Object.fromEntries((d.requestMimes ?? ['application/json']).map(mime => [mime, { schema: d.request }])) } } : {}),
         responses: {
-            ...(d.binary ? {
+            ...(d.responseMimes ? { '200': { description: '图片文件', content: Object.fromEntries(d.responseMimes.map(mime => [mime, { schema: { type: 'string', format: 'binary' } }])) } } : d.binary ? {
                 '200': { description: '文件响应；HEAD 仅返回响应头', ...(d.method === 'head' ? {} : { content: { '*/*': { schema: { type: 'string', format: 'binary' } } } }) },
                 ...(d.method === 'head' ? {} : { '206': { description: '单一字节范围', content: { '*/*': { schema: { type: 'string', format: 'binary' } } } }, '416': { description: '无效范围，Content-Range 为 bytes */总大小' } }),
                 '304': { description: '文件未变化，仍校验登录及当前可见性' },

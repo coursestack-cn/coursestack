@@ -10,6 +10,50 @@ SELECT c.* FROM contents c JOIN reachable r ON r.id=c.id;
 --> statement-breakpoint
 CREATE VIEW public_contents AS SELECT * FROM accessible_contents WHERE status='visible';
 --> statement-breakpoint
+-- All body writes claim each managed key under the same ownership and expiry rules.
+CREATE VIEW content_image_attachments AS SELECT id,uploaded_by,content_id,draft_upload_id FROM content_images;
+--> statement-breakpoint
+CREATE TRIGGER content_image_attach INSTEAD OF INSERT ON content_image_attachments BEGIN
+  UPDATE content_images SET content_id=NEW.content_id,draft_upload_id=NEW.draft_upload_id,cleanup_at=NULL
+    WHERE id=NEW.id AND (content_id=NEW.content_id OR (uploaded_by=NEW.uploaded_by AND content_id IS NULL AND
+      (cleanup_at>unixepoch() OR EXISTS(SELECT 1 FROM material_upload_sessions u WHERE u.id=content_images.draft_upload_id
+        AND u.material_id=NEW.content_id AND u.owner_id=NEW.uploaded_by AND u.status='confirming'))));
+  SELECT RAISE(ABORT,'body_image_unavailable') WHERE changes()<>1;
+END;
+--> statement-breakpoint
+CREATE TRIGGER content_images_insert AFTER INSERT ON contents WHEN NEW.body IS NOT NULL BEGIN
+  INSERT INTO content_image_attachments(id,uploaded_by,content_id)
+    SELECT substr(atom,length('/api/body-images/')+1),NEW.updated_by,NEW.id FROM json_tree(NEW.body)
+    WHERE key='src' AND atom GLOB '/api/body-images/*';
+END;
+--> statement-breakpoint
+CREATE TRIGGER content_images_edit AFTER UPDATE OF body ON contents WHEN NEW.body IS NOT OLD.body BEGIN
+  UPDATE content_images SET content_id=NULL,cleanup_at=unixepoch() WHERE content_id=NEW.id
+    AND '/api/body-images/'||id NOT IN (SELECT atom FROM json_tree(NEW.body) WHERE key='src' AND type='text');
+  INSERT INTO content_image_attachments(id,uploaded_by,content_id)
+    SELECT substr(atom,length('/api/body-images/')+1),NEW.updated_by,NEW.id FROM json_tree(NEW.body)
+    WHERE key='src' AND atom GLOB '/api/body-images/*';
+END;
+--> statement-breakpoint
+CREATE TRIGGER content_images_delete AFTER DELETE ON contents BEGIN
+  UPDATE content_images SET content_id=NULL,cleanup_at=unixepoch() WHERE content_id=OLD.id;
+END;
+--> statement-breakpoint
+CREATE TRIGGER content_images_hold_draft AFTER INSERT ON material_upload_sessions WHEN NEW.creation_draft IS NOT NULL BEGIN
+  INSERT INTO content_image_attachments(id,uploaded_by,draft_upload_id)
+    SELECT substr(atom,length('/api/body-images/')+1),NEW.owner_id,NEW.id FROM json_tree(NEW.creation_draft,'$.body')
+    WHERE key='src' AND atom GLOB '/api/body-images/*';
+END;
+--> statement-breakpoint
+CREATE TRIGGER content_images_release_draft AFTER UPDATE OF creation_draft ON material_upload_sessions
+WHEN OLD.creation_draft IS NOT NULL AND NEW.creation_draft IS NULL BEGIN
+  UPDATE content_images SET draft_upload_id=NULL,cleanup_at=unixepoch() WHERE draft_upload_id=NEW.id;
+END;
+--> statement-breakpoint
+CREATE TRIGGER content_images_delete_draft AFTER DELETE ON material_upload_sessions BEGIN
+  UPDATE content_images SET draft_upload_id=NULL,cleanup_at=unixepoch() WHERE draft_upload_id=OLD.id;
+END;
+--> statement-breakpoint
 CREATE TRIGGER content_search_deleted AFTER UPDATE OF status ON contents
 WHEN NEW.status='deleted' AND NEW.body_text<>'' BEGIN
     UPDATE contents SET body_text='' WHERE id=NEW.id;

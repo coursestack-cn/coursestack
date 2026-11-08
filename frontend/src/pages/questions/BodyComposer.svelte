@@ -1,6 +1,6 @@
 <script lang="ts">
     import { onDestroy, untrack } from "svelte";
-    import { api } from "$lib/api/client";
+    import { api, ApiError } from "$lib/api/client";
     import { isAborted, userMessage } from "$lib/api/errors";
     import { session } from "$lib/session.svelte.js";
     import { onBeforeLeave } from "$lib/router/leave.svelte.js";
@@ -27,24 +27,27 @@
     let cancelling = $state(false);
     const dirty = $derived(!saved && (body === null || (editing ? JSON.stringify(body) !== original : !isEmptyDoc(body))));
     const request = publisher();
+    let imageEditor = $state<ReturnType<typeof RichTextEditor>>();
     const controller = new AbortController();
     onDestroy(() => controller.abort());
     onBeforeLeave(() => !dirty && !pending, { samePage: untrack(() => guardSamePage) });
     $effect(() => { const state = { dirty, pending }; untrack(() => onstatechange?.(state)); });
 
     async function submit() {
-        if (pending || !session.user || !valid || !body || !validateDoc(body).ok || isEmptyDoc(body)) return;
+        if (pending || !imageEditor || !session.user || !valid || !body || !validateDoc(body).ok || isEmptyDoc(body)) return;
         pending = true;
         error = "";
         try {
-            const result = editing ? await api.patch<{ id: string }>(path, { body }, { signal: controller.signal })
-                : await request.post<{ id: string }>(path, { ...context, body }, session.user.id, controller.signal);
+            const ready = await imageEditor.prepareImages(body, controller.signal);
+            const result = editing ? await api.patch<{ id: string }>(path, { body: ready }, { signal: controller.signal })
+                : await request.post<{ id: string }>(path, { ...context, body: ready }, session.user.id, controller.signal);
             if (controller.signal.aborted) return;
             saved = true;
             pending = false;
             if (!editing) { body = emptyDoc(); request.reset(); editorKey++; saved = false; }
             oncomplete(result.id);
         } catch (cause) {
+            if (cause instanceof ApiError && cause.code === "BODY_IMAGE_UNAVAILABLE") imageEditor?.resetImageUploads();
             if (!isAborted(cause)) error = userMessage(cause, { CONTENT_UNAVAILABLE: "内容已不可用，刷新页面后重试。" });
         } finally { pending = false; }
     }
@@ -64,7 +67,7 @@
 <form class="composer" onsubmit={(event) => { event.preventDefault(); void submit(); }} aria-busy={pending || undefined}>
     <Field {label} error={error || undefined}>
         {#snippet children(control)}
-            {#key editorKey}<RichTextEditor {...control} bind:value={body} toolbar={compact ? "compact" : "full"}
+            {#key editorKey}<RichTextEditor {...control} bind:this={imageEditor} bind:value={body} toolbar={compact ? "compact" : "full"}
                 disabled={pending} onstatechange={(state) => { valid = state.valid; }} onsubmit={() => { void submit(); }} />{/key}
         {/snippet}
     </Field>

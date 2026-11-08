@@ -224,6 +224,20 @@ export const contents = sqliteTable('contents', {
     index('contents_author').on(t.authorId, t.kind, t.createdAt, t.id),
 ]);
 
+// Each insertion owns its own R2 object at body-images/<id>.
+export const contentImages = sqliteTable('content_images', {
+    id: text('id').primaryKey().notNull(),
+    uploadedBy: text('uploaded_by').notNull().references(() => accounts.id),
+    contentId: text('content_id').references(() => contents.id),
+    draftUploadId: text('draft_upload_id').references(() => materialUploadSessions.id),
+    cleanupAt: integer('cleanup_at'),
+}, t => [
+    check('content_images_owner', sql`(${t.contentId} IS NOT NULL) + (${t.draftUploadId} IS NOT NULL) + (${t.cleanupAt} IS NOT NULL) = 1`),
+    index('content_images_content').on(t.contentId).where(sql`${t.contentId} IS NOT NULL`),
+    index('content_images_draft').on(t.draftUploadId).where(sql`${t.draftUploadId} IS NOT NULL`),
+    index('content_images_cleanup').on(t.cleanupAt).where(sql`${t.cleanupAt} IS NOT NULL`),
+]);
+
 // One current acceptance per question. Rewards live exclusively in bonus_ledger.
 export const acceptances = sqliteTable('acceptances', {
     questionId: text('question_id').primaryKey().notNull().references(() => contents.id),

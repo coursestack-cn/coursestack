@@ -22,6 +22,7 @@ import { notificationRoutes } from './notifications/routes.ts';
 import { openapi } from './openapi.ts';
 import { materialRoutes } from './materials/routes.ts';
 import { materialUploadRoutes } from './materials/uploads.ts';
+import { bodyImageRoutes, cleanupBodyImages } from './body-images.ts';
 import { cleanupMaterialUploads } from './materials/cleanup.ts';
 import { type Env } from './env.ts';
 
@@ -73,6 +74,7 @@ api.route('/', moderationRoutes);
 api.route('/', personalRoutes);
 api.route('/', notificationRoutes);
 api.route('/', favoriteRoutes);
+api.route('/', bodyImageRoutes);
 api.route('/', materialRoutes);
 api.route('/', materialUploadRoutes);
 app.route('/api', api);
@@ -88,6 +90,7 @@ app.onError((error, c) => {
     }
     const detail = causes.join(' ');
     if (/material_last_version/.test(detail)) return failure(409, 'MATERIAL_LAST_VERSION', '资料至少保留一个版本；如需移除最后一个版本，请删除整份资料');
+    if (/body_image_unavailable/.test(detail)) return failure(409, 'BODY_IMAGE_UNAVAILABLE', '图片已过期或属于其他正文，请重新插入');
     if (/deleted_content/.test(detail)) return failure(409, 'DELETED_CONTENT', '已删除内容不能恢复');
     if (/invalid_(content_target|comment_reply|acceptance|enrollment_identity)/.test(detail)) {
         return failure(409, 'INVALID_TARGET', '关联对象不可用、跨课程或状态已改变');
@@ -101,6 +104,6 @@ app.onError((error, c) => {
 export default {
     fetch: app.fetch,
     scheduled(_event: ScheduledController, env: Env, context: ExecutionContext) {
-        context.waitUntil(cleanupMaterialUploads(env));
+        context.waitUntil(Promise.all([cleanupMaterialUploads(env), cleanupBodyImages(env)]));
     },
 };
