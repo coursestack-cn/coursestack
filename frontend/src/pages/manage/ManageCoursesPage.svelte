@@ -20,7 +20,7 @@
     import JoinCourseDialog from "./JoinCourseDialog.svelte";
     import CourseTermsDialog from "./CourseTermsDialog.svelte";
     import CourseFormDialog from "./CourseFormDialog.svelte";
-    import { courseClassesHref, type Course } from "./course";
+    import { courseManageHref, type Course } from "./course";
 
     type CourseList = { items: Course[]; page: number; pageSize: number; total: number };
     type MyCourseList = Omit<CourseList, "items"> & { items: { course: Course }[] };
@@ -141,7 +141,7 @@
                                                 <Button size="sm" onclick={() => { selected = course; formOpen = true; }}>编辑</Button>
                                                 <Button size="sm" onclick={() => { selected = course; termsOpen = true; }}>开设学期</Button>
                                             {/if}
-                                            <Button size="sm" href={courseClassesHref(course.id)}>教学班</Button>
+                                            <Button size="sm" href={courseManageHref(course, session.user)}>教学班</Button>
                                         </div></td>
                                     </tr>
                                 {/each}

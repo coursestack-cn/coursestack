@@ -42,6 +42,11 @@
     });
     const current = $derived(details.data?.viewer === session.user?.id ? details.data?.value : undefined);
     const classLabel = $derived(current ? `${current.term.name} · ${teacherLabel(current.teacher)}` : undefined);
+    // A teacher reaches only their own current-term class, so the course alone names it and no class list sits above it.
+    const isAdmin = $derived(session.hasRole("admin"));
+    const courseName = $derived(current?.course.name ?? params.courseCode);
+    const breadcrumbs = $derived(isAdmin ? [{ label: "课程管理", href: "/manage/courses" }, { label: courseName, href: listHref }, { label: classLabel ?? "学生名单" }]
+        : [{ label: "课程管理", href: "/manage/courses" }, { label: courseName }]);
     const students = resource(async signal => {
         const viewer = session.user?.id, currentPage = page;
         if (!current) return null;
@@ -167,8 +172,8 @@
     const sourceLabel: Record<string, string> = { question: "提问", answer: "回答", acceptance: "回答被采纳", comment: "评论", material: "资料版本", manual: "手动调整" };
 </script>
 
-<PageLayout title={classLabel ?? "学生名单"} loading={canManage && details.status === "loading"}
-    breadcrumbs={[{ label: "课程管理", href: "/manage/courses" }, { label: current?.course.name ?? params.courseCode, href: listHref }, { label: classLabel ?? "学生名单" }]}>
+<PageLayout title={(isAdmin ? classLabel : current?.course.name) ?? "学生名单"} subtitle={isAdmin ? undefined : current?.term.name}
+    loading={canManage && details.status === "loading"} {breadcrumbs}>
     {#snippet actions()}
         {#if current}
             <Button disabled={pending || details.refreshing} onclick={() => { policyOpen = true; }}>加分规则</Button>

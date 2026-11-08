@@ -2,7 +2,7 @@ import { Hono } from 'hono';
 import { sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { HttpError, respond, assertChanged, idSchema, input, listResult, page, requestIdentity, queryPage, parsedEnum } from '../http.ts';
-import { administration, management, requireAdministrator } from '../permissions.ts';
+import { administration, coursePublication, management, requireAdministrator } from '../permissions.ts';
 import { actor } from '../auth/middleware.ts';
 import { type AppEnv, type Ctx } from '../discussions/types.ts';
 import { createDatabase } from '../db/index.ts';
@@ -100,13 +100,15 @@ courseRoutes.get('/courses/:id/entry', async c => {
         SELECT a.id,CASE WHEN a.status='deleted' THEN '已删除' ELSE a.nickname END AS nickname,a.status='deleted' AS isDeleted
         FROM teaching_classes tc JOIN accounts a ON a.id=tc.teacher_id WHERE tc.course_id=${id} AND tc.term_id=${term.id} ORDER BY a.id`))
         .map(teacher => ({ ...teacher, isDeleted: Boolean(teacher.isDeleted) })) : JSON.parse(course.teachers);
-    const canManageContent = viewer ? Boolean(await createDatabase(c.env.DB).get(sql`SELECT 1 WHERE ${management(viewer, sql`${id}`)}`)) : false;
+    const access = viewer ? await db.get<{ manage: number; publish: number }>(sql`SELECT
+        ${management(viewer, sql`${id}`)} AS manage, ${coursePublication(viewer, sql`${id}`)} AS publish`) : null;
     const summary = await createDatabase(c.env.DB).get<{ questions: number; unresolved: number; answers: number }>(sql`SELECT
         COUNT(CASE WHEN kind='question' THEN 1 END) AS questions,
         COUNT(CASE WHEN kind='question' AND NOT EXISTS(SELECT 1 FROM public_acceptances a WHERE a.question_id=public_contents.id) THEN 1 END) AS unresolved,
         COUNT(CASE WHEN kind='answer' THEN 1 END) AS answers FROM public_contents WHERE course_id=${id}`);
     const path = `/api/courses/${encodeURIComponent(id)}`;
-    return respond(c, { course: courseDto(course), term: term ?? null, terms, myTerms, teachers, summary, permissions: { canManageContent, canManageCourse: viewer?.role === 'admin' },
+    return respond(c, { course: courseDto(course), term: term ?? null, terms, myTerms, teachers, summary,
+        permissions: { canPublishContent: Boolean(access?.publish), canManageContent: Boolean(access?.manage), canManageCourse: viewer?.role === 'admin' },
         links: { questions: `${path}/questions`, activity: `${path}/activity`, materials: `${path}/contents?kind=material`, contents: `${path}/contents` } });
 });
 courseRoutes.get('/courses/:id/activity', async c => {

@@ -132,7 +132,9 @@
     }
 </script>
 
-<Dialog bind:open title="CSV批量创建账号" description="上传学生或教师账号名单，预检后创建有效账号。" style="width: min(72rem, calc(100% - var(--space-8))); max-width: none;" dismissible={!busy && !unsavedCredentials && !unfinished} onclose={() => clear()}>
+<Dialog bind:open title="CSV批量创建账号" description="上传学生或教师账号名单，预检后创建有效账号。"
+    style={rows.length ? "width: calc(100% - var(--space-8))" : undefined}
+    dismissible={!busy && !unsavedCredentials && !unfinished} onclose={() => clear()}>
     <div class="import-form">
         {#if !started}
             <label class="file-field">CSV文件

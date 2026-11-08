@@ -236,8 +236,8 @@ test('replyTo distinguishes deleted content from deleted authors and reads curre
         const list = await h.api('GET', `/comments?targetKind=${(await detail(parent)).kind}&targetId=${parent}`);
         assert.deepEqual(list.data.items.find(row => row.id === reply).replyTo, expected);
     }
-    const owned = await h.postQuestion('visitor'), reply = await comment(owned);
-    await h.database.prepare("UPDATE accounts SET status='deleted' WHERE id='visitor'").run();
+    const owned = await h.postQuestion('teacher-b', {}, 'course-b'), reply = await comment(owned);
+    await h.database.prepare("UPDATE accounts SET status='deleted' WHERE id='teacher-b'").run();
     assert.deepEqual((await detail(reply)).replyTo, { id: owned, author: { nickname: '已删除', isDeleted: true }, isDeleted: false });
     // A deleted owner's content remains manageable, but managers may only hide it.
     for (const parent of [a, 'material-a', q]) {

@@ -8,7 +8,7 @@ import { createDatabase, prepareStatement } from '../db/index.ts';
 import { requireEditor } from '../discussions/service.ts';
 import { type AppEnv, type Ctx } from '../discussions/types.ts';
 import { HttpError, input, requestIdentity, respond } from '../http.ts';
-import { activeUser, editPermission } from '../permissions.ts';
+import { activeUser, courseMembershipRequired, coursePublication, editPermission } from '../permissions.ts';
 import { courseIdentity, materialContent } from './service.ts';
 import { objectKeys, receiveFile, requireStorage, sealFile, uploadTicket } from './storage.ts';
 import { materialId, maxBytes, newId, now, uploadInput } from './validation.ts';
@@ -36,7 +36,9 @@ function requirePending(row: UploadRow) {
 }
 async function checkTarget(c: Ctx, row: UploadRow) {
     if (row.mode === 'version') await requireEditor(c, await materialContent(c, row.material_id));
-    else await courseIdentity(c, row.course_id);
+    else if (!await createDatabase(c.env.DB).get(sql`SELECT 1 WHERE ${coursePublication(actor(c), sql`${row.course_id}`)}`)) {
+        throw courseMembershipRequired();
+    }
 }
 export const materialUploadRoutes = new Hono<AppEnv>();
 materialUploadRoutes.post('/material-uploads', async c => {
@@ -45,6 +47,7 @@ materialUploadRoutes.post('/material-uploads', async c => {
     requireStorage(c.env);
     if (data.mode === 'create') normalizeBodyImages(data.body, new URL(c.req.url).origin);
     const identity = await requestIdentity(c, data), db = createDatabase(c.env.DB);
+    const permission = data.mode === 'create' ? coursePublication(a, sql`${data.courseId}`) : activeUser(a);
     let row = await db.get<UploadRow>(sql`SELECT * FROM material_upload_sessions WHERE owner_id=${a.id} AND request_key=${identity.key}`);
     if (!row) {
         let courseId: string, id: string;
@@ -57,18 +60,21 @@ materialUploadRoutes.post('/material-uploads', async c => {
         await db.run(sql`INSERT INTO material_upload_sessions(id,owner_id,course_id,material_id,mode,creation_draft,expected_size,mime,
             put_expires_at,expires_at,created_at,request_key,request_hash)
             SELECT ${uploadId},${a.id},${courseId},${id},${data.mode},${creationDraft},${data.file.size},${data.file.type},
-                ${at + 600},${at + 86400},${at},${identity.key},${identity.fingerprint} WHERE ${activeUser(a)}
+                ${at + 600},${at + 86400},${at},${identity.key},${identity.fingerprint} WHERE ${permission}
             ON CONFLICT(owner_id,request_key) DO NOTHING`);
         row = await db.get<UploadRow>(sql`SELECT * FROM material_upload_sessions WHERE owner_id=${a.id} AND request_key=${identity.key}`);
         if (row && row.id !== uploadId) c.header('Idempotency-Replayed', 'true');
     } else c.header('Idempotency-Replayed', 'true');
-    if (!row) throw new HttpError(409, 'STATE_CONFLICT', '上传条件已改变');
+    if (!row) {
+        if (data.mode === 'create' && await db.get(sql`SELECT 1 WHERE ${activeUser(a)}`)) throw courseMembershipRequired();
+        throw new HttpError(409, 'STATE_CONFLICT', '上传条件已改变');
+    }
     if (row.request_hash !== identity.fingerprint) throw new HttpError(409, 'IDEMPOTENCY_CONFLICT', '幂等键已用于其他请求');
     if (row.status === 'published') return respond(c, uploadStatus(row), 201);
     requirePending(row); await checkTarget(c, row);
     const at = now(), expiresAt = Math.min(at + 600, row.expires_at);
     const changed = await db.run(sql`UPDATE material_upload_sessions SET put_expires_at=MAX(put_expires_at,${expiresAt})
-        WHERE id=${row.id} AND status='pending' AND expires_at>${at} AND ${activeUser(a)}`);
+        WHERE id=${row.id} AND status='pending' AND expires_at>${at} AND ${permission}`);
     if (!changed.meta.changes) throw new HttpError(409, 'UPLOAD_STATE_CONFLICT', '上传状态已改变');
     return respond(c, { ...await uploadTicket(c.env, new URL(c.req.url).origin, row.id, row.expected_size, row.mime, expiresAt, at), status: 'pending' as const }, 201);
 });
@@ -115,8 +121,9 @@ materialUploadRoutes.post('/material-uploads/:id/confirm', async c => {
     }
     try {
         const key = await sealFile(c.env, row.id, row.expected_size, row.mime), finishedAt = now();
+        const permission = row.mode === 'create' ? coursePublication(a, sql`u.course_id`) : activeUser(a);
         const gate = sql`u.id=${row.id} AND u.owner_id=${a.id} AND u.status='confirming' AND u.lease_token=${lease}
-            AND u.lease_until>=${finishedAt} AND u.expires_at>${finishedAt} AND ${activeUser(a)}`;
+            AND u.lease_until>=${finishedAt} AND u.expires_at>${finishedAt} AND ${permission}`;
         await c.env.DB.batch([
             sql`INSERT INTO contents(id,kind,course_id,term_id,author_id,title,body,body_text,tags,updated_by,created_at,updated_at,request_key,request_hash)
                 SELECT u.material_id,'material',u.course_id,(SELECT id FROM terms WHERE current=1),u.owner_id,json_extract(u.creation_draft,'$.title'),json_extract(u.creation_draft,'$.body'),

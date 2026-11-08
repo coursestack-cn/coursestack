@@ -23,6 +23,7 @@ test('publisher filtering uses root authors and combines with filters before tot
     const answer = await h.postAnswer(own, 'student-b');
     await h.accept(own, answer);
     await setCurrentTerm(h.database, 'term-old');
+    await h.database.prepare("INSERT INTO class_students VALUES('course-a','term-old','student-a','teacher-b')").run();
     const historical = await h.postQuestion('student-a', { title: '积分练习', tags: ['练习'] });
     await setCurrentTerm(h.database, 'term-active');
     const filtered = await contents('authorId=student-a&pageSize=1&page=2&sort=newest');

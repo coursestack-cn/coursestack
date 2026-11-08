@@ -78,7 +78,7 @@ const defs: Definition[] = [
     { method: 'get', path: '/courses/{id}/activity', summary: '当前可见内容按更新时间排列，每项内容只出现一次', parameters: pagination },
     { method: 'get', path: '/courses/{id}/questions', summary: '问题分页、未解决、活跃和标签筛选', response: ref('ContentPage'), parameters: [...pagination,
         q('state', enumeration('all', 'unresolved', 'solved')), q('sort', enumeration('newest', 'active', 'score')), q('tag'), q('termId', id)] },
-    { method: 'post', path: '/courses/{id}/questions', summary: '发布问题，资料引用使用 ProseMirror JSON 正文中的链接', auth: 'session', create: true, request: object(qFields, ['title', 'body']) },
+    { method: 'post', path: '/courses/{id}/questions', summary: '本学期修读或教授该课程的师生及管理员可提问，资料引用使用 ProseMirror JSON 正文中的链接', auth: 'session', create: true, request: object(qFields, ['title', 'body']) },
     { method: 'get', path: '/questions/{id}', summary: '问题详情；已删除或下架的问题返回 404', response: ref('Content') },
     { method: 'get', path: '/questions/{id}/answers', summary: '采纳置顶，其余净赞数降序，时间及ID稳定排序', response: ref('ContentPage'), parameters: pagination },
     { method: 'post', path: '/questions/{id}/answers', summary: '发布回答', auth: 'session', create: true, request: object({ body }) },
@@ -137,7 +137,8 @@ function responseFor(path: string): Schema {
         case '/courses/{id}/entry': return object({ course: ref('Course'), term: { anyOf: [ref('Term'), { type: 'null' }] },
             terms: { type: 'array', items: ref('Term') }, myTerms: { type: 'array', items: ref('Term') },
             teachers: { type: 'array', items: object({ id, nickname, isDeleted: bool }) }, summary: object({ questions: integer, unresolved: integer, answers: integer }),
-            permissions: object({ canManageContent: bool, canManageCourse: bool }), links: object({ questions: str(300), activity: str(300), materials: str(300), contents: str(300) }) });
+            permissions: object({ canPublishContent: { ...bool, description: '能否在当前学期提出问题或首次上传资料' }, canManageContent: bool, canManageCourse: bool }),
+            links: object({ questions: str(300), activity: str(300), materials: str(300), contents: str(300) }) });
         case '/courses/{id}/activity': return paged(object({ contentId: id, kind: str(), title: { type: ['string','null'] }, createdAt: timestamp, updatedAt: timestamp }));
         case `${classPath}/bonus-ledger`: return paged(ledger);
         case `${classPath}/bonus-summary`: return paged(object({ studentId: id, nickname, termId: id, teacherId: id, totalPoints: integer }));

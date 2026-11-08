@@ -88,6 +88,14 @@ test('credential changes during publication allow the admitted content write', a
     assert.equal(await h.database.prepare("SELECT COUNT(*) AS n FROM contents WHERE kind='question'").first('n'), 1);
 });
 
+test('a term switch before the question insert revokes publication for a former teacher', async () => {
+    const check = beforeWrite(/INSERT INTO contents/, () => setCurrentTerm(h.database, 'term-old'));
+    const result = await h.api('POST', '/courses/course-a/questions', 'teacher-a', { title: '学期切换', body: doc('问题') });
+    check();
+    assert.equal(result.status, 403);
+    assert.equal(await h.database.prepare("SELECT COUNT(*) AS n FROM contents WHERE kind='question'").first('n'), 0);
+});
+
 test('logout during voting allows the admitted vote', async () => {
     const q = await h.postQuestion();
     const check = beforeWrite(/INSERT INTO votes/, () => h.database.prepare("DELETE FROM sessions WHERE account_id='student-b'").run());

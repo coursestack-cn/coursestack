@@ -1,5 +1,6 @@
 <script lang="ts">
     import { onDestroy } from "svelte";
+    import { Plus } from "@lucide/svelte";
     import type { PageProps } from "$lib/router/types";
     import { api, toApiError, type ApiError } from "$lib/api/client";
     import { userMessage, isAborted } from "$lib/api/errors";
@@ -17,6 +18,7 @@
     import Menu from "$lib/components/ui/Menu.svelte";
     import { toast } from "$lib/components/ui/toast.svelte.js";
     import Pagination from "$lib/components/ui/Pagination.svelte";
+    import AccountCreateDialog from "./AccountCreateDialog.svelte";
     import AccountEditDialog, { type Account } from "./AccountEditDialog.svelte";
     import AccountImportDialog from "./AccountImportDialog.svelte";
     import { accountTemplate } from "../../../../shared/accounts/import";
@@ -48,6 +50,7 @@
     let copyError = $state("");
     let editOpen = $state(false);
     let editing = $state.raw<Account | null>(null);
+    let createOpen = $state(false);
     let importOpen = $state(false);
     let identityAction = $state<{ account: Account; role: "teacher" | "student" | null } | null>(null);
     let identityOpen = $state(false);
@@ -151,7 +154,11 @@
     {#snippet actions()}
         {#if session.hasRole("admin")}
             <Button onclick={() => downloadCsv("账号导入模板.csv", accountTemplate())}>下载CSV模板</Button>
-            <Button variant="primary" onclick={() => { importOpen = true; }}>CSV导入</Button>
+            <Button onclick={() => { importOpen = true; }}>CSV导入</Button>
+            <Button variant="primary" onclick={() => { createOpen = true; }}>
+                {#snippet icon()}<Plus size="1em" />{/snippet}
+                新建账号
+            </Button>
         {/if}
     {/snippet}
     {#if !session.hasRole("admin")}
@@ -252,7 +259,10 @@
     if (result) result = { ...result, items: result.items.map((item) => item.id === saved.id ? saved : item) };
 }} />
 
-{#if session.hasRole("admin")}<AccountImportDialog bind:open={importOpen} onsaved={() => { reload++; }} />{/if}
+{#if session.hasRole("admin")}
+    <AccountImportDialog bind:open={importOpen} onsaved={() => { reload++; }} />
+    {#if createOpen}<AccountCreateDialog bind:open={createOpen} onsaved={() => { reload++; }} />{/if}
+{/if}
 
 <style>
     .search { display: flex; align-items: center; flex-wrap: wrap; gap: var(--space-4); }

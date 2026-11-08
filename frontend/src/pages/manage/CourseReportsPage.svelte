@@ -17,7 +17,7 @@
     import { pageCount, pageNumber, type Content, type Page } from "../questions/data";
     import ContentReview from "./ContentReview.svelte";
     import ManageNav from "./ManageNav.svelte";
-    import { courseClassesHref, type Course } from "./course";
+    import { courseManageHref, type Course } from "./course";
 
     type Item = { id: string; contentId?: string; kind?: Content["kind"]; title?: string | null; body?: Content["body"]; reason?: string; status: string; createdAt: number; resolution?: string | null };
     let { params }: PageProps = $props();
@@ -46,7 +46,7 @@
         return (await api.get<{ course: Course }>(`/api/courses/${encodeURIComponent(code)}/entry`, { signal })).course;
     });
     const breadcrumbs = $derived(params.courseCode ? [{ label: "课程管理", href: "/manage/courses" },
-        { label: course.data?.name ?? params.courseCode, href: courseClassesHref(params.courseCode) }, { label: "内容审查" }] : []);
+        { label: course.data?.name ?? params.courseCode, href: course.data ? courseManageHref(course.data, session.user) : undefined }, { label: "内容审查" }] : []);
     function complete() {
         result.reload();
         if (reportId) void updateQuery({ report: null, content: null });

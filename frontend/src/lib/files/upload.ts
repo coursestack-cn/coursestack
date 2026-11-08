@@ -96,6 +96,7 @@ function failureFrom(error: unknown, stage: UploadStage): UploadFailure {
     const status = typeof detail?.status === "number" && Number.isInteger(detail.status) ? detail.status : undefined;
     const code = typeof detail?.code === "string" && /^[A-Z0-9_]{1,64}$/u.test(detail.code) ? detail.code : "UPLOAD_FAILED";
     const messages: Record<string, string> = {
+        COURSE_MEMBERSHIP_REQUIRED: "本学期修读或教授这门课程的师生可以上传新资料。",
         UPLOAD_INCOMPLETE: "文件没有完整上传，请移除后重新选择文件。",
         UPLOAD_SIZE_MISMATCH: "收到的文件大小不一致，请移除后重新上传。",
         UPLOAD_TYPE_MISMATCH: "文件内容与声明的类型不一致，请选择正确的文件。",

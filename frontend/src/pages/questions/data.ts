@@ -6,7 +6,8 @@ export { urlId } from "$lib/router/ids";
 
 export type Page<T> = { items: T[]; page: number; pageSize: number; total: number };
 export type Course = { id: string; name: string };
-export type CourseEntry = { course: Course; permissions: { canManageContent: boolean; canManageCourse: boolean } };
+export type CoursePermissions = { canPublishContent: boolean; canManageContent: boolean; canManageCourse: boolean };
+export type CourseEntry = { course: Course; permissions: CoursePermissions };
 type Parent = { id: string; author: { nickname: string | null; isDeleted: boolean }; isDeleted: boolean };
 export type Content = {
     id: string; kind: "question" | "answer" | "comment" | "material"; courseId: string;

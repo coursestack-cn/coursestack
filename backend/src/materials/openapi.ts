@@ -54,7 +54,7 @@ export const materialDefinitions: Definition[] = [
         summary: action === 'preview' ? '登录后读取 PDF/图片；不支持预览的类型返回415' : '登录后下载指定版本，文件名来自资料标题', auth: 'session' as const, binary: true,
         parameters: [{ name: 'Range', in: 'header', required: false, schema: { type: 'string', description: 'GET 支持单一字节区间；无效范围返回416' } },
             ...['If-Range', 'If-None-Match'].map(name => ({ name, in: 'header', required: false, schema: { type: 'string' } }))] }))),
-    { method: 'post', path: '/material-uploads', summary: '申请单文件上传；相同幂等键重试可刷新未完成票据，已发布则返回结果，无查重', auth: 'session', create: true,
+    { method: 'post', path: '/material-uploads', summary: '本学期修读或任教者及管理员可申请上传新资料，已有资料的作者可跨学期上传新版本。幂等重试可刷新票据或返回已发布结果', auth: 'session', create: true,
         request: { oneOf: [object({ mode: { const: 'create' }, courseId: ref('CourseId'), ...metadata, file }, ['mode', 'courseId', 'title', 'body', 'file']),
             object({ mode: { const: 'version' }, materialId: id, file }, ['mode', 'materialId', 'file'])] },
         response: { oneOf: [ref('MaterialUploadTicket'), { allOf: [ref('MaterialUploadStatus'), { type: 'object', properties: { status: { const: 'published' }, result } }] }] } },

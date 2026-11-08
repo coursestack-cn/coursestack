@@ -3203,7 +3203,7 @@
     },
     "/api/material-uploads": {
       "post": {
-        "summary": "申请单文件上传；相同幂等键重试可刷新未完成票据，已发布则返回结果，无查重",
+        "summary": "本学期修读或任教者及管理员可申请上传新资料，已有资料的作者可跨学期上传新版本。幂等重试可刷新票据或返回已发布结果",
         "operationId": "post__api_material_uploads",
         "security": [
           {
@@ -11071,6 +11071,10 @@
                         "permissions": {
                           "type": "object",
                           "properties": {
+                            "canPublishContent": {
+                              "type": "boolean",
+                              "description": "能否在当前学期提出问题或首次上传资料"
+                            },
                             "canManageContent": {
                               "type": "boolean"
                             },
@@ -11079,6 +11083,7 @@
                             }
                           },
                           "required": [
+                            "canPublishContent",
                             "canManageContent",
                             "canManageCourse"
                           ],
@@ -11707,7 +11712,7 @@
         }
       },
       "post": {
-        "summary": "发布问题，资料引用使用 ProseMirror JSON 正文中的链接",
+        "summary": "本学期修读或教授该课程的师生及管理员可提问，资料引用使用 ProseMirror JSON 正文中的链接",
         "operationId": "post__api_courses_id_questions",
         "security": [
           {

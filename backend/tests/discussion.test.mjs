@@ -39,7 +39,7 @@ test('管理员建课与安排开设，教师加入后共同管理内容，课�
     assert.equal((await h.api('PATCH', '/courses/CS201', 'admin', { department: '计算机学院' })).status, 400);
     assert.equal((await h.api('PUT', '/courses/CS201/terms/term-active', 'admin')).status, 200);
     assert.equal((await h.api('PUT', '/courses/CS201/terms/term-active/teachers/me', 'teacher-a')).status, 200);
-    assert.deepEqual((await h.api('GET', '/courses/CS201/entry', 'teacher-a')).data.permissions, { canManageContent: true, canManageCourse: false });
+    assert.deepEqual((await h.api('GET', '/courses/CS201/entry', 'teacher-a')).data.permissions, { canPublishContent: true, canManageContent: true, canManageCourse: false });
     assert.equal((await h.api('GET', '/courses/CS201/entry', 'student-a')).data.permissions.canManageContent, false);
     const repeated = await h.api('POST', '/courses', 'admin', payload, { key: 'create-course-01' });
     assert.equal(repeated.data.id, created.data.id);
