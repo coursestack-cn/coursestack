@@ -15,7 +15,7 @@
 | `blockquote` | 一个或多个块 | 无 |
 | `codeBlock` | 零个或多个无标记 `text` | `language`：下方语言列表中的值或 `null` |
 | `horizontalRule` | 叶节点，不接受 `content` | 无 |
-| `image` | 块级叶节点，不接受 `content` | `src`：站内路径；`alt`：字符串或 `null` |
+| `image` | 块级叶节点，不接受 `content` | `src`：HTTP(S) 地址或安全站内路径；`alt`：字符串或 `null` |
 | `inlineMath` | 内联叶节点，不接受 `content` | `latex`：字符串 |
 | `blockMath` | 块级叶节点，不接受 `content` | `latex`：字符串 |
 | `hardBreak` | 内联叶节点，不接受 `content` | 无 |
@@ -43,7 +43,7 @@
 - URL 不允许原始空白、控制字符或反斜杠；反斜杠会在浏览器 URL 解析中被当作斜杠，因此必须拒绝。站内路径可以包含查询和片段，不改变已有资料或版本链接。
 - `normalizeHref` 用于表单输入：先去除首尾空白，再验证；站内路径保持原样，绝对地址经标准 `URL` 规范化（如协议、域名大小写、默认端口和转义）。返回 `null` 表示非法。规范化前后都不得超过 `2048` 个 Unicode 码点。
 - `validateDoc` 不修复或改写输入，要求保存的 `href` 没有首尾空白，且可通过上述链接规则。安全但非规范形式的 HTTP(S) 地址可以校验通过，渲染时规范化。
-- `image.src` 只能是上述站内路径，最多 `2048` 个码点。外部地址、`data:`、`blob:` 均无效；路径合法不代表服务端授予访问权或文件存在。
+- `image.src` 使用与链接相同的 URL 规则，最多 `2048` 个码点。`data:` 与 `blob:` 不可写入正文。上传图片使用 `/api/body-images/<id>`，ID 为 32 位无连字符的小写十六进制 UUID，服务端校验其归属。外部 HTTP(S) 图片由浏览器直接加载。
 - `image.alt` 为 `null` 或最多 `300` 个码点的字符串；空字符串允许，用于装饰性图片。
 - `latex` 为最多 `4000` 个码点的字符串；空字符串允许。KaTeX 语法错误不会使 JSON 无效，公式显示错误由渲染器处理。
 - 语言固定为 `c`、`cpp`、`java`、`python`、`javascript`、`typescript`、`sql`、`bash`、`json`、`xml`、`css`、`go`、`rust`、`csharp`、`matlab`。HTML 使用 `xml`；不保存 `html`、`js` 等别名。未知或不指定语言时使用 `null`。
@@ -98,7 +98,7 @@
 
 `RichText.svelte` 接收 `doc: unknown`，逐节点生成 Svelte 元素。非法节点在当前位置显示“此处内容无法显示”，非法标记被忽略，其他内容保留。不能把容错显示当作请求校验成功。代码高亮与 KaTeX 按需加载，只有 KaTeX 的受限输出可以使用 HTML 插入；只读组件不依赖编辑器代码。
 
-`RichTextEditor.svelte` 使用同一白名单和正文样式，`value` 可绑定为 `RichTextDoc | null`，支持 `placeholder`、`toolbar`、`maxChars`、`uploadImage`、`disabled`、`invalid`、`id`、`describedBy`、`onsubmit`。`uploadImage(file, signal)` 返回 `{ src, alt? }`，真实上传由调用者注入。
+`RichTextEditor.svelte` 使用同一白名单和正文样式，`value` 可绑定为 `RichTextDoc | null`，支持 `placeholder`、`toolbar`、`maxChars`、`uploadImage`、`disabled`、`invalid`、`id`、`describedBy`、`onsubmit`。默认支持输入或粘贴 `![说明](URL)`，也可从工具栏插入 URL，或选择、粘贴、拖入本地图片。页面提交前调用组件的 `prepareImages(body, signal)`，将正文中仍在使用的本地预览替换为已上传的地址，再提交返回的 JSON。可选 `uploadImage(file, signal)` 供自定义上传适配器使用，返回 `{ src, alt? }`。
 
 编辑器的绑定值始终通过 `validateDoc`，但仍允许继续输入超限文本：当前内容不符合完整契约时，编辑器保留输入并将绑定值置为 `null`，不暴露旧的合法正文。`onstatechange({ chars, valid, reason, uploading })` 供页面判断提交状态：结构及合同上限通过、未超过页面 `maxChars` 且无正在上传图片时才为有效。页面 `maxChars` 比合同上限更小时，正文仍可保持合法绑定值，但状态为无效。页面应同时检查状态与绑定值，并自行决定是否提交；不要把 `null` 当作一次有效的空正文提交。
 
