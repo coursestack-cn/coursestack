@@ -28,6 +28,13 @@ export function management(a: Actor, course: SQL): SQL {
         JOIN terms term ON term.id=assignment.term_id AND term.current=1
         WHERE assignment.teacher_id=${a.id} AND assignment.course_id=${course}))))`;
 }
+export function coursePublication(a: Actor, course: SQL): SQL {
+    if (a.role !== 'student') return management(a, course);
+    return sql`(${activeUser(a)} AND EXISTS(SELECT 1 FROM class_students enrollment
+        JOIN terms term ON term.id=enrollment.term_id AND term.current=1
+        WHERE enrollment.course_id=${course} AND enrollment.student_id=${a.id}))`;
+}
+export const courseMembershipRequired = () => new HttpError(403, 'COURSE_MEMBERSHIP_REQUIRED', '提问和上传新资料需要在本学期修读或教授这门课程');
 export function classManagement(a: Actor, course: SQL, term: SQL, teacher: SQL): SQL {
     return sql`(${activeUser(a)} AND (${a.role}='admin' OR (${a.role}='teacher' AND ${teacher}=${a.id} AND EXISTS(
         SELECT 1 FROM teaching_classes assignment JOIN terms semester ON semester.id=assignment.term_id AND semester.current=1

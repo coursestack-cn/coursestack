@@ -157,13 +157,13 @@ test('upload permissions, single-file input and validation are enforced without 
     assert.equal((await h.api('POST', '/material-uploads', 'student-a', { ...data, file: { size: 1, type: 'text/html' } })).status, 400);
     assert.equal((await h.api('POST', '/material-uploads', 'student-a', { ...data, file: { size: 104857601, type: 'application/pdf' } })).status, 413);
     assert.equal((await h.api('POST', '/material-uploads', 'student-a', { ...data, title: 'bad\nname.pdf' })).status, 400);
-    const first = await publish({}, 'visitor');
-    const second = await publish({}, 'visitor');
+    const first = await publish({}, 'student-b');
+    const second = await publish({}, 'student-b');
     assert.notEqual(first.materialId, second.materialId); assert.equal('duplicate' in second.ticket, false);
-    for (const as of ['student-a', 'teacher-a', 'teacher-b', 'admin']) {
+    for (const as of ['student-a', 'visitor', 'teacher-a', 'teacher-b', 'admin']) {
         assert.equal((await h.api('POST', '/material-uploads', as, { mode: 'version', materialId: first.materialId, file: data.file })).status, 403);
     }
-    assert.equal((await prepare({ mode: 'version', materialId: first.materialId }, 'visitor')).status, 'pending');
+    assert.equal((await prepare({ mode: 'version', materialId: first.materialId }, 'student-b')).status, 'pending');
     const ticket = await prepare();
     assert.equal((await put(ticket, pdf, 'student-b')).status, 404);
     assert.equal((await h.api('GET', `/material-uploads/${ticket.uploadId}`, 'student-b')).status, 404);
@@ -474,12 +474,15 @@ test('a confirmation that loses its lease cannot publish or reset the replacemen
     assert.equal((await h.api('POST', `/material-uploads/${ticket.uploadId}/confirm`, 'student-a')).status, 200);
 });
 
-test('identity deletion during sealing prevents the admitted upload from publishing', async () => {
+for (const [change, statement] of [
+    ['identity deletion', "UPDATE accounts SET status='deleted' WHERE id='student-a'"],
+    ['course withdrawal', "DELETE FROM class_students WHERE course_id='course-a' AND term_id='term-active' AND student_id='student-a'"],
+]) test(`${change} during sealing prevents the admitted upload from publishing`, async () => {
     const ticket = await prepare(); await put(ticket);
     const bucket = h.env.FILES;
     h.env.FILES = new Proxy(bucket, { get(target, key) {
         if (key === 'put') return async (...args) => {
-            await h.database.prepare("UPDATE accounts SET status='deleted' WHERE id='student-a'").run();
+            await h.database.prepare(statement).run();
             return target.put(...args);
         };
         const value = Reflect.get(target, key); return typeof value === 'function' ? value.bind(target) : value;
@@ -489,6 +492,7 @@ test('identity deletion during sealing prevents the admitted upload from publish
     const row = await h.database.prepare('SELECT * FROM material_upload_sessions WHERE id=?').bind(ticket.uploadId).first();
     assert.equal(row.status, 'pending');
     assert.equal(await h.database.prepare('SELECT COUNT(*) AS n FROM contents WHERE id=?').bind(row.material_id).first('n'), 0);
+    assert.equal(await h.database.prepare('SELECT COUNT(*) AS n FROM file_versions WHERE material_id=?').bind(row.material_id).first('n'), 0);
 });
 
 test('course URLs preserve Unicode, separators and UUID-like course numbers exactly', async () => {

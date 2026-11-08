@@ -18,7 +18,8 @@
             const entry = await courseEntry(question.courseId, signal);
             return { entry, question, viewer, allowed: question.author.id === viewer };
         }
-        return { entry: await courseByCode(code!, signal), question: undefined, viewer, allowed: Boolean(viewer) };
+        const entry = await courseByCode(code!, signal);
+        return { entry, question: undefined, viewer, allowed: entry.permissions.canPublishContent };
     });
     $effect(() => { if (result.data) setTitle(`${title} · ${result.data.entry.course.name}`); });
 </script>
@@ -29,9 +30,9 @@
     { label: title }
 ] : []}>
     <ContentState status={result.status} error={result.error} refreshing={result.refreshing} reload={result.reload}>
-        {#if result.data}
+        {#if result.data && result.data.viewer === session.user?.id}
             {#if result.data.allowed}{#key result.data.viewer}<QuestionForm course={result.data.entry.course} question={result.data.question} />{/key}
-            {:else}<StateBlock kind="forbidden" />{/if}
+            {:else}<StateBlock kind="forbidden" description={questionId ? undefined : "本学期修读或教授这门课程的师生可以提问。"} />{/if}
         {/if}
     </ContentState>
 </PageLayout>

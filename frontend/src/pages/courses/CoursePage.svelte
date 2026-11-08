@@ -39,6 +39,7 @@
     {@const course = result.data.course}
     {@const term = result.data.term}
     {@const teachers = result.data.teachers}
+    {@const canPublish = result.data.viewer === session.user?.id && result.data.permissions.canPublishContent}
     {@const manageHref = result.data.viewer === session.user?.id && result.data.permissions.canManageContent ? courseManageHref(course, session.user) : undefined}
     <Card padding="lg">
         <dl class="course-info">
@@ -66,7 +67,8 @@
             <p class:muted={!course.introduction.trim()}>{course.introduction.trim() || "暂无课程简介"}</p>
         </section>
     </Card>
-    <CourseContents {course} terms={result.data.terms} defaultTermId={term?.id ?? ""} />
+    <CourseContents {course} terms={result.data.terms} defaultTermId={term?.id ?? ""}
+        showPublishActions={(!term || term.current) && (session.status === "anonymous" || canPublish)} />
     <Dialog bind:open={policyOpen} title="加分规则" description={course.name}>
         {#if policyOpen}{#key session.user?.id}<CourseBonusPolicy courseId={course.id} {manageHref} />{/key}{/if}
     </Dialog>

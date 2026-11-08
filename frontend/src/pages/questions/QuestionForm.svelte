@@ -49,7 +49,10 @@
             redirect(questionHref(result.id));
         } catch (cause) {
             if (cause instanceof ApiError && cause.code === "BODY_IMAGE_UNAVAILABLE") imageEditor?.resetImageUploads();
-            if (!isAborted(cause)) error = publishMessage(cause, sent, { CONTENT_UNAVAILABLE: "问题已不可用，返回课程问答查看。" });
+            if (!isAborted(cause)) error = publishMessage(cause, sent, {
+                CONTENT_UNAVAILABLE: "问题已不可用，返回课程问答查看。",
+                COURSE_MEMBERSHIP_REQUIRED: "本学期修读或教授这门课程的师生可以提问。"
+            });
         } finally { pending = false; }
     }
 </script>

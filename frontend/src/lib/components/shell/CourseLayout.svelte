@@ -3,11 +3,12 @@
     import type { Resource } from "$lib/api/resource.svelte.js";
 
     import type { Term, Teacher } from "../../../pages/manage/course";
+    import type { CoursePermissions } from "../../../pages/questions/data";
 
     type CourseEntry = {
         course: import("../../../pages/manage/course").Course;
         term: Term | null; terms: Term[]; myTerms: Term[]; teachers: Teacher[];
-        permissions: { canManageContent: boolean; canManageCourse: boolean };
+        permissions: CoursePermissions;
         viewer: string | undefined;
     };
 

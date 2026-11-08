@@ -18,7 +18,7 @@
     import type { Term } from "../manage/course";
     import { type CourseContent } from "../materials/data";
 
-    let { course, terms = [], defaultTermId = "" }: { course: Course; terms?: Term[]; defaultTermId?: string } = $props();
+    let { course, terms = [], defaultTermId = "", showPublishActions }: { course: Course; terms?: Term[]; defaultTermId?: string; showPublishActions: boolean } = $props();
     const termId = $derived(router.query.get("termId") ?? defaultTermId);
     const termOptions = $derived([{ value: "", label: "全部学期" }, ...terms.map(term => ({ value: term.id, label: `${term.name}${term.current ? "（本学期）" : ""}` })),
         ...(termId && !terms.some(term => term.id === termId) ? [{ value: termId, label: termId }] : [])]);
@@ -65,7 +65,7 @@
             <h2>资料与问答</h2>
             <SegmentedControl label="内容类型" value={kind} options={[{ value: "all", label: "全部" }, { value: "material", label: "资料" }, { value: "question", label: "问答" }]} onchange={changeKind} />
         </div>
-        <div class="actions"><Button href={creationHref("materials")}>上传资料</Button><Button variant="primary" href={creationHref("questions")}>提出问题</Button></div>
+        {#if showPublishActions}<div class="actions"><Button href={creationHref("materials")}>上传资料</Button><Button variant="primary" href={creationHref("questions")}>提出问题</Button></div>{/if}
     </header>
     <div class="filters">
         <Field label="学期" hideLabel>{#snippet children({ id })}<Select {id} value={termId} options={termOptions}
@@ -75,8 +75,8 @@
         {#if kind === "question"}<Field label="解决状态" hideLabel>{#snippet children({ id })}<Select {id} value={solutionState} options={[{ value: "all", label: "全部状态" }, { value: "unresolved", label: "未解决" }, { value: "solved", label: "已解决" }]} onchange={event => { void updateQuery({ state: event.currentTarget.value === "all" ? null : event.currentTarget.value, page: null }); }} />{/snippet}</Field>{/if}
         <Field label="排序" hideLabel>{#snippet children({ id })}<Select {id} value={sort} options={[{ value: "active", label: "最近活跃" }, { value: "newest", label: "最新发布" }, ...(kind === "question" ? [{ value: "score", label: "净赞数最高" }] : [])]} onchange={event => { void updateQuery({ sort: event.currentTarget.value === "active" ? null : event.currentTarget.value, page: null }); }} />{/snippet}</Field>
         <form class="text-filter" onsubmit={event => { event.preventDefault(); if (!titleError && !tagError) void updateQuery({ title: String(titleInput).trim() || null, tag: String(tagInput).trim() || null, page: null }); }}>
-            <Field label="标题" hideLabel error={titleError}>{#snippet children({ id, invalid, describedBy })}<TextInput {id} {invalid} aria-describedby={describedBy} clearable bind:value={titleInput} placeholder="搜索标题" />{/snippet}</Field>
-            <Field label="标签" hideLabel error={tagError}>{#snippet children({ id, invalid, describedBy })}<TextInput {id} {invalid} aria-describedby={describedBy} clearable bind:value={tagInput} placeholder="搜索标签" />{/snippet}</Field>
+            <Field label="标题" hideLabel error={titleError}>{#snippet children({ id, invalid, describedBy })}<TextInput {id} {invalid} aria-describedby={describedBy} clearable bind:value={titleInput} placeholder="筛选标题" />{/snippet}</Field>
+            <Field label="标签" hideLabel error={tagError}>{#snippet children({ id, invalid, describedBy })}<TextInput {id} {invalid} aria-describedby={describedBy} clearable bind:value={tagInput} placeholder="筛选标签" />{/snippet}</Field>
             <Button type="submit" disabled={Boolean(titleError || tagError)}>筛选</Button>
         </form>
     </div>
@@ -86,7 +86,7 @@
             {#if result.data.items.length}
                 <div class="items">{#each result.data.items as item (item.id)}<CourseContentItem {item} />{/each}</div>
                 {#if pageCount(result.data) > 1}<Pagination page={result.data.page} pageCount={pageCount(result.data)} disabled={result.refreshing} onchange={(next: number) => { void updateQuery({ page: next === 1 ? null : next }); }} />{/if}
-            {:else}<StateBlock kind="empty" title={termId || kind !== "all" || authorId || title || tag || solutionState !== "all" ? "没有符合条件的内容" : "还没有资料或问题"} description="上传一份资料，或提出你的问题。">
+            {:else}<StateBlock kind="empty" title={termId || kind !== "all" || authorId || title || tag || solutionState !== "all" ? "没有符合条件的内容" : "还没有资料或问题"} description={showPublishActions ? "上传一份资料，或提出你的问题。" : undefined}>
                 {#snippet actions()}{#if termId || kind !== "all" || authorId || title || tag || solutionState !== "all"}<Button onclick={() => { void updateQuery({ termId: defaultTermId ? "" : null, kind: null, state: null, sort: null, title: null, tag: null, authorId: null, page: null }); }}>查看全部内容</Button>{/if}{/snippet}
             </StateBlock>{/if}
         {/if}

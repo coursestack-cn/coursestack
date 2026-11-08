@@ -4,7 +4,7 @@ import { Hono } from 'hono';
 import { sql } from 'drizzle-orm';
 import { z } from 'zod';
 import { HttpError, respond, assertChanged, input, listResult, page, requestIdentity, idSchema, tagsSchema, parsedEnum, queryPage } from '../http.ts';
-import { activeUser, editPermission } from '../permissions.ts';
+import { activeUser, courseMembershipRequired, coursePublication, editPermission } from '../permissions.ts';
 import { actor } from '../auth/middleware.ts';
 import type { AppEnv, Ctx, ContentRow, PublicRow } from '../discussions/types.ts';
 import { accessibleContent, contentDto, editContent, hasPublicAcceptance, publicDetail, publicRootPage, publicSelect, rawContent, readableContent, readableDetail, requireEditor, tombstone, tombstoneDto, visibleContent } from '../discussions/service.ts';
@@ -22,20 +22,25 @@ type NewContent = { kind: ContentRow['kind']; courseId: string; body: ProseMirro
 async function insertContent(c: Ctx, data: NewContent) {
     normalizeBodyImages(data.body, new URL(c.req.url).origin);
     const a = actor(c), identity = await requestIdentity(c, data);
-    const old = await createDatabase(c.env.DB).get<{ id: string; request_hash: string }>(sql`SELECT id,request_hash FROM contents WHERE author_id=${a.id} AND request_key=${identity.key}`);
+    const db = createDatabase(c.env.DB);
+    const old = await db.get<{ id: string; request_hash: string }>(sql`SELECT id,request_hash FROM contents WHERE author_id=${a.id} AND request_key=${identity.key}`);
     if (old) {
         if (old.request_hash !== identity.fingerprint) throw new HttpError(409, 'IDEMPOTENCY_CONFLICT', '幂等键已用于其他请求');
         c.header('Idempotency-Replayed', 'true'); return old.id;
     }
     const id = uid(), at = now();
-    await createDatabase(c.env.DB).run(sql`INSERT INTO contents(id,kind,course_id,term_id,author_id,title,body,body_text,tags,target_id,reply_to_id,
+    const permission = data.kind === 'question' ? coursePublication(a, sql`${data.courseId}`) : activeUser(a);
+    await db.run(sql`INSERT INTO contents(id,kind,course_id,term_id,author_id,title,body,body_text,tags,target_id,reply_to_id,
         created_at,updated_at,updated_by,request_key,request_hash)
         SELECT ${id},${data.kind},${data.courseId},(SELECT id FROM terms WHERE current=1),${a.id},${data.title ?? null},${JSON.stringify(data.body)},${data.kind === 'comment' ? '' : bodySearchText(data.body)},${data.tags?.length ? JSON.stringify(data.tags) : null},
         ${data.targetId ?? null},${data.replyToId ?? null},
-        ${at},${at},${a.id},${identity.key},${identity.fingerprint} WHERE ${activeUser(a)}
+        ${at},${at},${a.id},${identity.key},${identity.fingerprint} WHERE ${permission}
         ON CONFLICT(author_id,request_key) DO NOTHING`);
-    const made = await createDatabase(c.env.DB).get<{ id: string; request_hash: string }>(sql`SELECT id,request_hash FROM contents WHERE author_id=${a.id} AND request_key=${identity.key}`);
-    if (!made) throw new HttpError(409, 'STATE_CONFLICT', '发布条件已改变');
+    const made = await db.get<{ id: string; request_hash: string }>(sql`SELECT id,request_hash FROM contents WHERE author_id=${a.id} AND request_key=${identity.key}`);
+    if (!made) {
+        if (data.kind === 'question' && await db.get(sql`SELECT 1 WHERE ${activeUser(a)}`)) throw courseMembershipRequired();
+        throw new HttpError(409, 'STATE_CONFLICT', '发布条件已改变');
+    }
     if (made.request_hash !== identity.fingerprint) throw new HttpError(409, 'IDEMPOTENCY_CONFLICT', '幂等键已用于其他请求');
     if (made.id !== id) c.header('Idempotency-Replayed', 'true');
     return made.id;
