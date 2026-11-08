@@ -18,6 +18,17 @@ export function isAborted(error: unknown): boolean {
         || (error instanceof DOMException && error.name === "AbortError");
 }
 
+/**
+ * Once publication starts, a network error cannot tell us whether the server committed the post.
+ * Retrying the same body in this editor reuses its idempotency key.
+ */
+export function publishMessage(error: unknown, sent: boolean, overrides: MessageOverrides = {}): string {
+    if (sent && error instanceof ApiError && error.code === "NETWORK_ERROR") {
+        return "网络中断，内容可能已经发布。在当前编辑框原样重试不会重复发布。如需修改，先在新标签页确认是否已发布。";
+    }
+    return userMessage(error, overrides);
+}
+
 // Backend diagnostics stay in ApiError.message and the client's console warning.
 // Never interpolate error.message into user-facing text.
 export function userMessage(error: unknown, overrides: MessageOverrides = {}): string {

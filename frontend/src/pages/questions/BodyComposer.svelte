@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onDestroy, untrack } from "svelte";
     import { api, ApiError } from "$lib/api/client";
-    import { isAborted, userMessage } from "$lib/api/errors";
+    import { isAborted, publishMessage } from "$lib/api/errors";
     import { session } from "$lib/session.svelte.js";
     import { onBeforeLeave } from "$lib/router/leave.svelte.js";
     import RichTextEditor from "$lib/rich-text/RichTextEditor.svelte";
@@ -37,8 +37,10 @@
         if (pending || !imageEditor || !session.user || !valid || !body || !validateDoc(body).ok || isEmptyDoc(body)) return;
         pending = true;
         error = "";
+        let sent = false;
         try {
             const ready = await imageEditor.prepareImages(body, controller.signal);
+            sent = !editing;
             const result = editing ? await api.patch<{ id: string }>(path, { body: ready }, { signal: controller.signal })
                 : await request.post<{ id: string }>(path, { ...context, body: ready }, session.user.id, controller.signal);
             if (controller.signal.aborted) return;
@@ -48,7 +50,7 @@
             oncomplete(result.id);
         } catch (cause) {
             if (cause instanceof ApiError && cause.code === "BODY_IMAGE_UNAVAILABLE") imageEditor?.resetImageUploads();
-            if (!isAborted(cause)) error = userMessage(cause, { CONTENT_UNAVAILABLE: "内容已不可用，刷新页面后重试。" });
+            if (!isAborted(cause)) error = publishMessage(cause, sent, { CONTENT_UNAVAILABLE: "内容已不可用，刷新页面后重试。" });
         } finally { pending = false; }
     }
 

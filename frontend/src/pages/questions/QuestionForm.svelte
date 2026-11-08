@@ -1,7 +1,7 @@
 <script lang="ts">
     import { onDestroy, untrack } from "svelte";
     import { api, ApiError } from "$lib/api/client";
-    import { isAborted, userMessage } from "$lib/api/errors";
+    import { isAborted, publishMessage } from "$lib/api/errors";
     import { redirect } from "$lib/router/router.svelte.js";
     import { onBeforeLeave } from "$lib/router/leave.svelte.js";
     import { session } from "$lib/session.svelte.js";
@@ -36,8 +36,10 @@
         if (pending || !imageEditor || !session.user || invalidInitial || titleError || tagsError || !valid || !body || isEmptyDoc(body) || !validateDoc(body).ok) return;
         pending = true;
         error = "";
+        let sent = false;
         try {
             const data = { title: String(title).trim(), body: await imageEditor.prepareImages(body, controller.signal), tags };
+            sent = !question;
             const result = question ? await api.patch<{ id: string }>(`/api/contents/${encode(question.id)}`, data, { signal: controller.signal })
                 : await request.post<{ id: string }>(`/api/courses/${encode(course.id)}/questions`, data, session.user.id, controller.signal);
             if (controller.signal.aborted) return;
@@ -47,7 +49,7 @@
             redirect(questionHref(result.id));
         } catch (cause) {
             if (cause instanceof ApiError && cause.code === "BODY_IMAGE_UNAVAILABLE") imageEditor?.resetImageUploads();
-            if (!isAborted(cause)) error = userMessage(cause, { CONTENT_UNAVAILABLE: "问题已不可用，返回课程问答查看。" });
+            if (!isAborted(cause)) error = publishMessage(cause, sent, { CONTENT_UNAVAILABLE: "问题已不可用，返回课程问答查看。" });
         } finally { pending = false; }
     }
 </script>
