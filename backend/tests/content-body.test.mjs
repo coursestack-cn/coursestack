@@ -135,6 +135,9 @@ test('deletion clears only title, body and tags while preserving relationships, 
     const answer = await h.postAnswer(q);
     const before = await h.database.prepare('SELECT * FROM contents WHERE id=?').bind(q).first();
     await assert.rejects(h.database.prepare("UPDATE contents SET status='deleted' WHERE id=?").bind(q).run(), /contents_deleted_payload/);
+    // Owners can delete a question only after its answers are gone.
+    assert.equal((await h.api('DELETE', `/contents/${q}`, 'student-a', { })).status, 409);
+    assert.equal((await h.api('DELETE', `/contents/${answer}`, 'student-b', { })).status, 200);
     assert.equal((await h.api('DELETE', `/contents/${q}`, 'student-a', { })).status, 200);
     const after = await h.database.prepare('SELECT * FROM contents WHERE id=?').bind(q).first();
     for (const field of ['title', 'body', 'tags']) assert.equal(after[field], null, field);
