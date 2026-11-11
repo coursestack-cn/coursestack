@@ -179,3 +179,17 @@ onBeforeLeave(() => !dirty);
 `CourseReportsPage` 在课程或全部授权课程中列出举报与内容；ContentReview 展示原文、审查文件及管理记录，支持上下架、连带删除及非最后版本的删除。举报 PATCH 以 action=none/hide/delete 原子处理，删除另有明确确认。奖励重算与撤回均由服务端完成。
 
 `NotificationsPage` 展示互动、采纳、内容管理、收藏更新和他人操作产生的积分通知，默认未读，支持已读/全部筛选、每批20条加载更多及固定 ID 上限的全部已读。每次轮询合并第一批和已加载旧条目的当前状态，保留不可查看条目并隐藏标题；新通知超过一批形成空缺时提示查看最新。页头在其他页面只读取总数；通知页与页头共享当前标签页的数字，每个可见标签页独立每60秒轮询，账户切换时取消请求并清空旧状态。积分 toast 只展示 operatorId 等于本人产生的流水，收藏更新文案由 `notification-list.ts` 按事件类型生成；审查通知进入个人内容页，其余按服务端 href 跳转。
+
+## 端到端测试
+
+`frontend/e2e/` 存放 Playwright 端到端用例，配置见 `frontend/playwright.config.ts`，只使用 Chromium。首次运行前在 `backend/` 和 `frontend/` 分别执行 `pnpm install --frozen-lockfile`，再在 `frontend/` 执行 `pnpm exec playwright install chromium` 下载浏览器；Linux 新环境或 CI 缺少系统库时改用 `pnpm exec playwright install --with-deps chromium`（需要 sudo）。之后在 `frontend/` 执行：
+
+```sh
+pnpm test:e2e
+```
+
+每次运行先以 `pnpm demo --local --persist-to <仓库>/.local/e2e-state` 重置隔离状态，再用同一目录在 8787 端口启动 `wrangler dev`，并在 6317 端口启动 Vite，`/api` 代理到该后端。测试不读写 `backend/.wrangler/state`，也不复用已在运行的开发服务；两个端口被占用时直接报错，可用 `E2E_API_PORT`、`E2E_WEB_PORT` 改用其他端口。演示数据重置约需 30 秒，整轮约 1 分钟。用例单 worker 串行执行，发布内容使用带随机后缀的标题，每个角色使用独立的浏览器上下文登录。
+
+当前流程在课程 304208040（T0001 教学班 S0001–S0050）上核对：T0001 通过“添加学生”导入 S0051，并把班级加分规则中的“回答被采纳”设为非零；S0051 上传资料，提问正文用链接引用 `/materials/<id>/versions/1`；S0002 回答；T0001 采纳后问题显示已解决；S0002 收到采纳与积分通知，并从通知进入课程加分历史看到该笔奖励；S0051 收到新回答通知，随后发布版本 2，问题中的版本 1 链接仍打开版本 1。管理员建立账号和切换当前学期暂未覆盖：`admin:init` 只接受交互终端输入，测试无法为隔离状态设置管理员密码。
+
+选择器使用角色、标签和可见文字，修改相关页面的按钮、标签或标题文案时同步更新用例。失败时的截图和 trace 位于 `frontend/test-results/`，HTML 报告位于 `frontend/playwright-report/`，可用 `pnpm exec playwright show-report` 查看，两者均已被 Git 忽略。

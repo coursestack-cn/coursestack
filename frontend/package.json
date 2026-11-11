@@ -12,7 +12,8 @@
         "dev": "vite",
         "check": "svelte-check --tsconfig ./tsconfig.json && tsc --project tsconfig.node.json --noEmit",
         "build": "pnpm check && vite build",
-        "preview": "vite preview --host 127.0.0.1 --port 4173 --strictPort"
+        "preview": "vite preview --host 127.0.0.1 --port 4173 --strictPort",
+        "test:e2e": "playwright test"
     },
     "dependencies": {
         "@lucide/svelte": "1.61.0",
@@ -30,6 +31,7 @@
         "svelte": "5.57.2"
     },
     "devDependencies": {
+        "@playwright/test": "1.65.0",
         "@sveltejs/vite-plugin-svelte": "7.3.1",
         "@types/node": "22.20.5",
         "svelte-check": "4.7.7",
