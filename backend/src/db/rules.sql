@@ -190,6 +190,12 @@ CREATE TRIGGER teaching_class_removed BEFORE DELETE ON teaching_classes BEGIN
   DELETE FROM class_bonus_rules WHERE course_id=OLD.course_id AND term_id=OLD.term_id AND teacher_id=OLD.teacher_id;
 END;
 --> statement-breakpoint
+CREATE TRIGGER class_roster_events_no_update BEFORE UPDATE ON class_roster_events
+BEGIN SELECT RAISE(ABORT,'immutable_roster_event'); END;
+--> statement-breakpoint
+CREATE TRIGGER class_roster_events_no_delete BEFORE DELETE ON class_roster_events
+BEGIN SELECT RAISE(ABORT,'immutable_roster_event'); END;
+--> statement-breakpoint
 CREATE TRIGGER ledger_no_delete BEFORE DELETE ON bonus_ledger
 WHEN EXISTS(SELECT 1 FROM class_students WHERE course_id=OLD.course_id AND term_id=OLD.term_id AND student_id=OLD.student_id)
 BEGIN SELECT RAISE(ABORT,'immutable_ledger'); END;

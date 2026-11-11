@@ -152,6 +152,8 @@ pnpm check
 
 部署正文图片前，先应用 `0013_content_images.sql`。迁移创建图片归属表及与正文、资料上传会话同步的触发器。已有正文无需回填。上传接口与 R2 清理见[正文图片](../docs/资料与文件.md#正文图片)。
 
+`0014_class_roster_events.sql` 新增只增不改的教学班变更记录表及禁止修改、删除的触发器，已有数据无需回填，迁移前的变更不补记录。先迁移再部署新后端，否则名单写入会因缺表失败。接口见[教学班变更记录](../docs/课程与讨论.md#教学班变更记录)。
+
 部署班级管理功能前，先应用 `0012_class_roster_management.sql`。迁移更新视图和触发器，为清理修读时的跨学期撤回关系增加索引，已有数据不需回填。转班、移除学生、删除教学班的积分和通知处理见[课程与讨论](../docs/课程与讨论.md#积分归属)。
 
 课程与教学班采用目标契约，迁移、后端和前端必须一同集成发布；旧的教师建课、code 字段和课程级积分接口不兼容。演示脚本也使用新模型：账号、开课安排、教学班及学生归属在同一批次写入；空库会创建无登录密码的管理员占位，仍需 admin:init 初始化登录。
@@ -194,7 +196,7 @@ pnpm openapi:export
 pnpm openapi:check
 ```
 
-前者将规范导出到仓库根目录的 `openapi/openapi.json`（前后端共用的接口契约），后者检查业务方法与规范及静态导出一致，范围是 Hono 注册的全部业务路由，共 107 个方法。修改 `src/openapi.ts` 或任一 `src/*/openapi.ts` 后依次执行。`GET /api/openapi.json` 返回标准 OpenAPI 3.1 文档，不加 data 包装；它描述全部业务接口，账号相关的业务规则见[账号与权限](../docs/账号与权限.md)。仅本地开放的资料 PUT 传输接口见[资料与文件](../docs/资料与文件.md#本地与云端)。
+前者将规范导出到仓库根目录的 `openapi/openapi.json`（前后端共用的接口契约），后者检查业务方法与规范及静态导出一致，范围是 Hono 注册的全部业务路由，共 108 个方法。修改 `src/openapi.ts` 或任一 `src/*/openapi.ts` 后依次执行。`GET /api/openapi.json` 返回标准 OpenAPI 3.1 文档，不加 data 包装；它描述全部业务接口，账号相关的业务规则见[账号与权限](../docs/账号与权限.md)。仅本地开放的资料 PUT 传输接口见[资料与文件](../docs/资料与文件.md#本地与云端)。
 
 参考：[Drizzle D1](https://orm.drizzle.team/docs/get-started/d1-new)、[D1 外键](https://developers.cloudflare.com/d1/sql-api/foreign-keys/)、[Wrangler 配置](https://developers.cloudflare.com/workers/wrangler/configuration/)、[Workers CPU 限制](https://developers.cloudflare.com/workers/platform/limits/#cpu-time)。
 

@@ -88,9 +88,14 @@ classRoutes.delete('/courses/:id/terms/:termId', async c => {
 classRoutes.put('/courses/:id/terms/:termId/teachers/me', async c => {
     const a = actor(c), courseId = c.req.param('id'), termId = c.req.param('termId'), db = createDatabase(c.env.DB);
     if (a.role !== 'teacher') throw new HttpError(403, 'TEACHER_REQUIRED', '只有教师可以加入教学班');
-    await db.run(sql`INSERT INTO teaching_classes(course_id,term_id,teacher_id)
-        SELECT ct.course_id,ct.term_id,${a.id} FROM course_terms ct JOIN terms t ON t.id=ct.term_id AND t.current=1
-        WHERE ct.course_id=${courseId} AND ct.term_id=${termId} AND ${activeUser(a)} ON CONFLICT DO NOTHING`);
+    const offering = sql`FROM course_terms ct JOIN terms t ON t.id=ct.term_id AND t.current=1
+        WHERE ct.course_id=${courseId} AND ct.term_id=${termId} AND ${activeUser(a)}`;
+    await c.env.DB.batch([
+        sql`INSERT INTO class_roster_events(action,course_id,term_id,teacher_id,operator_id)
+            SELECT 'class_created',ct.course_id,ct.term_id,${a.id},${a.id} ${offering}
+            AND NOT EXISTS(SELECT 1 FROM teaching_classes WHERE course_id=${courseId} AND term_id=${termId} AND teacher_id=${a.id})`,
+        sql`INSERT INTO teaching_classes(course_id,term_id,teacher_id) SELECT ct.course_id,ct.term_id,${a.id} ${offering} ON CONFLICT DO NOTHING`,
+    ].map(statement => prepareStatement(c.env.DB, statement)));
     if (!await db.get(sql`SELECT 1 WHERE ${classManagement(a, sql`${courseId}`, sql`${termId}`, sql`${a.id}`)}`)) {
         throw new HttpError(409, 'OFFERING_UNAVAILABLE', '只能加入管理员已安排开设的本学期课程');
     }
@@ -105,14 +110,47 @@ classRoutes.get('/teaching-classes', async c => {
         ORDER BY t.current DESC,tc.term_id DESC,tc.course_id,tc.teacher_id`);
     return respond(c, listResult(rows.map(classDto), p, total));
 });
+type RosterEventRow = { id: number; action: string; course_id: string; course_name: string; term_id: string; term_name: string;
+    teacher_id: string; teacher_name: string | null; teacher_deleted: number;
+    target_teacher_id: string | null; target_teacher_name: string | null; target_teacher_deleted: number | null;
+    student_id: string | null; student_number: string | null; student_name: string | null; student_deleted: number | null;
+    operator_id: string; operator_role: string; operator_name: string | null; operator_deleted: number; created_at: number };
+const person = (id: string, nickname: string | null, deleted: number | null) => ({ id, nickname: deleted ? '已删除' : nickname, isDeleted: Boolean(deleted) });
+classRoutes.get('/admin/roster-events', async c => {
+    const a = await requireAdministrator(c), p = page(c), { courseId, termId, teacherId, studentId } = c.req.query();
+    const { rows, total } = await queryPage<RosterEventRow>(c, p, sql`SELECT e.id,e.action,e.course_id,c.name AS course_name,e.term_id,t.name AS term_name,
+        e.teacher_id,teacher.nickname AS teacher_name,teacher.status='deleted' AS teacher_deleted,
+        e.target_teacher_id,target.nickname AS target_teacher_name,target.status='deleted' AS target_teacher_deleted,
+        e.student_id,student.school_number AS student_number,student.name AS student_name,student.status='deleted' AS student_deleted,
+        e.operator_id,operator.role AS operator_role,operator.nickname AS operator_name,operator.status='deleted' AS operator_deleted,e.created_at
+        FROM class_roster_events e JOIN courses c ON c.id=e.course_id JOIN terms t ON t.id=e.term_id
+        JOIN accounts teacher ON teacher.id=e.teacher_id LEFT JOIN accounts target ON target.id=e.target_teacher_id
+        LEFT JOIN accounts student ON student.id=e.student_id JOIN accounts operator ON operator.id=e.operator_id
+        WHERE ${administration(a)} ${courseId === undefined ? sql`` : sql`AND e.course_id=${courseId}`}
+        ${termId === undefined ? sql`` : sql`AND e.term_id=${termId}`} ${studentId === undefined ? sql`` : sql`AND e.student_id=${studentId}`}
+        ${teacherId === undefined ? sql`` : sql`AND (e.teacher_id=${teacherId} OR e.target_teacher_id=${teacherId})`}
+        ORDER BY e.id DESC`);
+    return respond(c, listResult(rows.map(r => ({ id: r.id, action: r.action, course: { id: r.course_id, name: r.course_name },
+        term: { id: r.term_id, name: r.term_name }, teacher: person(r.teacher_id, r.teacher_name, r.teacher_deleted),
+        targetTeacher: r.target_teacher_id ? person(r.target_teacher_id, r.target_teacher_name, r.target_teacher_deleted) : null,
+        student: r.student_id ? { id: r.student_id, schoolNumber: r.student_number, name: r.student_name, isDeleted: Boolean(r.student_deleted) } : null,
+        operator: { ...person(r.operator_id, r.operator_name, r.operator_deleted), role: r.operator_role }, createdAt: r.created_at })), p, total));
+});
 classRoutes.get(classPath, async c => {
     const { courseId, termId, teacherId } = await requireClass(c);
     return respond(c, await classDetail(c, courseId, termId, teacherId));
 });
 classRoutes.delete(classPath, async c => {
     const a = await requireAdministrator(c), { courseId, termId, teacherId } = classKey(c);
-    await createDatabase(c.env.DB).run(sql`DELETE FROM teaching_classes
-        WHERE course_id=${courseId} AND term_id=${termId} AND teacher_id=${teacherId} AND ${administration(a)}`);
+    const target = sql`course_id=${courseId} AND term_id=${termId} AND teacher_id=${teacherId} AND ${administration(a)}`;
+    // The deletion trigger removes the roster, so its students are recorded first in the same transaction.
+    await c.env.DB.batch([
+        sql`INSERT INTO class_roster_events(action,course_id,term_id,teacher_id,student_id,operator_id)
+            SELECT 'student_removed',course_id,term_id,teacher_id,student_id,${a.id} FROM class_students WHERE ${target} ORDER BY student_id`,
+        sql`INSERT INTO class_roster_events(action,course_id,term_id,teacher_id,operator_id)
+            SELECT 'class_deleted',course_id,term_id,teacher_id,${a.id} FROM teaching_classes WHERE ${target}`,
+        sql`DELETE FROM teaching_classes WHERE ${target}`,
+    ].map(statement => prepareStatement(c.env.DB, statement)));
     await requireAdministrator(c);
     return respond(c, { courseId, termId, teacherId });
 });
@@ -142,10 +180,16 @@ classRoutes.post(`${classPath}/students`, async c => {
     const data = await input(c, z.object({ schoolNumber: z.string().trim().min(1).max(80) }).strict());
     const student = await db.get<{ id: string }>(sql`SELECT id FROM accounts WHERE school_number=${data.schoolNumber} AND role='student' AND status<>'deleted'`);
     if (!student) throw new HttpError(404, 'STUDENT_NOT_FOUND', '学生账号不存在，请先由管理员建立账号');
-    await db.run(sql`INSERT INTO class_students(course_id,term_id,teacher_id,student_id)
-        SELECT ${courseId},${termId},${teacherId},${student.id} WHERE EXISTS(SELECT 1 FROM terms WHERE id=${termId} AND current=1)
+    const insertable = sql`EXISTS(SELECT 1 FROM terms WHERE id=${termId} AND current=1)
         AND ${classManagement(a, sql`${courseId}`, sql`${termId}`, sql`${teacherId}`)}
-        AND EXISTS(SELECT 1 FROM accounts WHERE id=${student.id} AND role='student' AND status<>'deleted') ON CONFLICT DO NOTHING`);
+        AND EXISTS(SELECT 1 FROM accounts WHERE id=${student.id} AND role='student' AND status<>'deleted')`;
+    await c.env.DB.batch([
+        sql`INSERT INTO class_roster_events(action,course_id,term_id,teacher_id,student_id,operator_id)
+            SELECT 'student_added',${courseId},${termId},${teacherId},${student.id},${a.id} WHERE ${insertable}
+            AND NOT EXISTS(SELECT 1 FROM class_students WHERE course_id=${courseId} AND term_id=${termId} AND student_id=${student.id})`,
+        sql`INSERT INTO class_students(course_id,term_id,teacher_id,student_id)
+            SELECT ${courseId},${termId},${teacherId},${student.id} WHERE ${insertable} ON CONFLICT DO NOTHING`,
+    ].map(statement => prepareStatement(c.env.DB, statement)));
     const assigned = await db.get(sql`SELECT 1 FROM class_students s JOIN terms t ON t.id=s.term_id AND t.current=1
         WHERE s.course_id=${courseId} AND s.term_id=${termId} AND s.teacher_id=${teacherId} AND s.student_id=${student.id}
         AND ${classManagement(a, sql`s.course_id`, sql`s.term_id`, sql`s.teacher_id`)}`);
@@ -155,9 +199,13 @@ classRoutes.post(`${classPath}/students`, async c => {
 const studentPath = `${classPath}/students/:studentId`;
 classRoutes.delete(studentPath, async c => {
     const { a, courseId, termId, teacherId } = await requireClass(c), studentId = c.req.param('studentId');
-    const removed = await createDatabase(c.env.DB).run(sql`DELETE FROM class_students
-        WHERE course_id=${courseId} AND term_id=${termId} AND teacher_id=${teacherId} AND student_id=${studentId}
-        AND ${classManagement(a, sql`class_students.course_id`, sql`class_students.term_id`, sql`class_students.teacher_id`)}`);
+    const enrollment = sql`course_id=${courseId} AND term_id=${termId} AND teacher_id=${teacherId} AND student_id=${studentId}
+        AND ${classManagement(a, sql`class_students.course_id`, sql`class_students.term_id`, sql`class_students.teacher_id`)}`;
+    const [, removed] = await c.env.DB.batch([
+        sql`INSERT INTO class_roster_events(action,course_id,term_id,teacher_id,student_id,operator_id)
+            SELECT 'student_removed',course_id,term_id,teacher_id,student_id,${a.id} FROM class_students WHERE ${enrollment}`,
+        sql`DELETE FROM class_students WHERE ${enrollment}`,
+    ].map(statement => prepareStatement(c.env.DB, statement)));
     if (!removed.meta.changes) await requireClass(c);
     return respond(c, { studentId });
 });
@@ -166,10 +214,12 @@ classRoutes.put(`${studentPath}/transfer`, async c => {
     const { targetTeacherId } = await input(c, z.object({ targetTeacherId: idSchema }).strict());
     const targetExists = sql`EXISTS(SELECT 1 FROM teaching_classes tc JOIN accounts t ON t.id=tc.teacher_id AND t.status<>'deleted'
         WHERE tc.course_id=${courseId} AND tc.term_id=${termId} AND tc.teacher_id=${targetTeacherId})`;
-    const [, state] = await c.env.DB.batch<{ targetExists: number; assigned: string | null }>([
-        sql`UPDATE class_students SET teacher_id=${targetTeacherId} WHERE course_id=${courseId} AND term_id=${termId}
-            AND student_id=${studentId} AND teacher_id=${teacherId} AND teacher_id<>${targetTeacherId}
-            AND ${targetExists} AND ${administration(a)}`,
+    const moved = sql`course_id=${courseId} AND term_id=${termId} AND student_id=${studentId} AND teacher_id=${teacherId}
+        AND teacher_id<>${targetTeacherId} AND ${targetExists} AND ${administration(a)}`;
+    const [, , state] = await c.env.DB.batch<{ targetExists: number; assigned: string | null }>([
+        sql`INSERT INTO class_roster_events(action,course_id,term_id,teacher_id,student_id,target_teacher_id,operator_id)
+            SELECT 'student_transferred',course_id,term_id,teacher_id,student_id,${targetTeacherId},${a.id} FROM class_students WHERE ${moved}`,
+        sql`UPDATE class_students SET teacher_id=${targetTeacherId} WHERE ${moved}`,
         sql`SELECT ${targetExists} AS targetExists,(SELECT teacher_id FROM class_students WHERE course_id=${courseId}
             AND term_id=${termId} AND student_id=${studentId}) AS assigned WHERE ${administration(a)}`,
     ].map(statement => prepareStatement(c.env.DB, statement)));
@@ -191,8 +241,13 @@ classRoutes.post(`${classPath}/students/import`, async c => {
         WHERE tc.course_id=${courseId} AND tc.term_id=${termId} AND tc.teacher_id=${teacherId})
         AND ${classManagement(a, sql`${courseId}`, sql`${termId}`, sql`${teacherId}`)}`;
     // The write and result lookup share a transaction: concurrent imports cannot change the reported outcome.
-    const [permission, inserted, assigned] = await c.env.DB.batch([
+    const [permission, , inserted, assigned] = await c.env.DB.batch([
         sql`SELECT (${allowed}) AS allowed`,
+        sql`INSERT INTO class_roster_events(action,course_id,term_id,teacher_id,student_id,operator_id)
+            SELECT 'student_added',${courseId},${termId},${teacherId},student.id,${a.id} FROM json_each(${payload}) n
+            JOIN accounts student ON student.school_number=n.value AND student.role='student' AND student.status<>'deleted'
+            WHERE ${allowed} AND NOT EXISTS(SELECT 1 FROM class_students s
+                WHERE s.course_id=${courseId} AND s.term_id=${termId} AND s.student_id=student.id)`,
         sql`INSERT INTO class_students(course_id,term_id,teacher_id,student_id)
             SELECT ${courseId},${termId},${teacherId},student.id FROM json_each(${payload}) n
             JOIN accounts student ON student.school_number=n.value AND student.role='student' AND student.status<>'deleted'
@@ -201,7 +256,7 @@ classRoutes.post(`${classPath}/students/import`, async c => {
             LEFT JOIN accounts student ON student.school_number=n.value AND student.role='student' AND student.status<>'deleted'
             LEFT JOIN class_students s ON s.student_id=student.id AND s.course_id=${courseId} AND s.term_id=${termId}
             WHERE ${allowed}`,
-    ].map(statement => prepareStatement(c.env.DB, statement))) as [D1Result<{ allowed: number }>, D1Result<{ studentId: string }>,
+    ].map(statement => prepareStatement(c.env.DB, statement))) as [D1Result<{ allowed: number }>, D1Result, D1Result<{ studentId: string }>,
         D1Result<{ schoolNumber: string; studentId: string | null; teacherId: string | null }>];
     if (!permission.results[0]?.allowed) throw new HttpError(409, 'CLASS_IMPORT_UNAVAILABLE', '当前学期、教学班或操作权限已变化，请刷新后重试');
     const added = new Set(inserted.results.map(row => row.studentId));

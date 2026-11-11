@@ -119,6 +119,28 @@ export const classBonusRules = sqliteTable('class_bonus_rules', {
         check(`class_bonus_rules_${column.name}`, sql`${column} BETWEEN 0 AND 9007199254740991`)),
 ]);
 
+// Append-only history of teaching-class and roster changes, written in the same batch as each change.
+// Rows outlive the class and enrollment they describe, so neither is a foreign key here.
+export const classRosterEvents = sqliteTable('class_roster_events', {
+    id: integer('id').primaryKey({ autoIncrement: true }),
+    action: text('action', { enum: ['class_created', 'class_deleted', 'student_added', 'student_removed', 'student_transferred'] }).notNull(),
+    courseId: text('course_id').notNull().references(() => courses.id),
+    termId: text('term_id').notNull().references(() => terms.id),
+    // The class the change applies to; for a transfer, the class the student left.
+    teacherId: text('teacher_id').notNull().references(() => accounts.id),
+    studentId: text('student_id').references(() => accounts.id),
+    targetTeacherId: text('target_teacher_id').references(() => accounts.id),
+    operatorId: text('operator_id').notNull().references(() => accounts.id),
+    createdAt: integer('created_at').notNull().default(sql`(unixepoch())`),
+}, (t) => [
+    check('class_roster_events_action', sql`${t.action} IN ('class_created', 'class_deleted', 'student_added', 'student_removed', 'student_transferred')`),
+    check('class_roster_events_shape', sql`(${t.action} IN ('class_created', 'class_deleted') AND ${t.studentId} IS NULL AND ${t.targetTeacherId} IS NULL)
+        OR (${t.action} IN ('student_added', 'student_removed') AND ${t.studentId} IS NOT NULL AND ${t.targetTeacherId} IS NULL)
+        OR (${t.action} = 'student_transferred' AND ${t.studentId} IS NOT NULL AND ${t.targetTeacherId} IS NOT NULL AND ${t.targetTeacherId} <> ${t.teacherId})`),
+    index('class_roster_events_course_term').on(t.courseId, t.termId, t.id),
+    index('class_roster_events_student').on(t.studentId, t.id).where(sql`${t.studentId} IS NOT NULL`),
+]);
+
 export const sessions = sqliteTable('sessions', {
     tokenHash: text('token_hash').primaryKey().notNull(),
     accountId: text('account_id').notNull().references(() => accounts.id, { onDelete: 'cascade' }),
