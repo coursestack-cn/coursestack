@@ -12,6 +12,10 @@ on:
         description: Replace production D1 and R2 data with the demo data after deploying
         type: boolean
         default: false
+      search_backfill:
+        description: Fill and check search text for content written before 0011_global_search after deploying
+        type: boolean
+        default: false
 
 permissions:
   contents: read
@@ -54,17 +58,21 @@ jobs:
             exit 1
           fi
 
-      # Ordinary releases always migrate; only an explicit manual input can reset production data.
-      - name: Resolve data reset
+      # Ordinary releases always migrate; only explicit manual inputs reset data or backfill search text.
+      - name: Resolve manual options
         env:
           RESET_DATA: ${{ github.event_name == 'workflow_dispatch' && inputs.reset_data && 'true' || 'false' }}
+          SEARCH_BACKFILL: ${{ github.event_name == 'workflow_dispatch' && inputs.search_backfill && 'true' || 'false' }}
         run: |
-          if [[ "$RESET_DATA" != true && "$RESET_DATA" != false ]]; then
-            echo "::error::RESET_DATA must be true or false."
-            exit 1
-          fi
-          echo "RESET_DATA=$RESET_DATA" >> "$GITHUB_ENV"
+          for name in RESET_DATA SEARCH_BACKFILL; do
+            if [[ "${!name}" != true && "${!name}" != false ]]; then
+              echo "::error::$name must be true or false."
+              exit 1
+            fi
+            echo "$name=${!name}" >> "$GITHUB_ENV"
+          done
           echo "Reset production data after deploying: $RESET_DATA"
+          echo "Backfill search text after deploying: $SEARCH_BACKFILL"
 
       - name: Set up pnpm and Node.js
         uses: pnpm/setup@fa36a5ef7dcdefc3a7cb25655c122e00cf6e636e # v3.1.2
@@ -145,6 +153,17 @@ jobs:
             --retry 5 --retry-all-errors --retry-delay 5 \
             --output /dev/null "$DEPLOY_URL/"
 
+      # Explicit request only. Runs after the new Worker serves, so concurrent writes already keep
+      # body_text in sync; the update guards keep those edits. Repeating it is safe.
+      - name: Backfill search text
+        if: env.SEARCH_BACKFILL == 'true'
+        env:
+          CLOUDFLARE_API_TOKEN: ${{ secrets.CLOUDFLARE_API_TOKEN }}
+          CLOUDFLARE_ACCOUNT_ID: ${{ secrets.CLOUDFLARE_ACCOUNT_ID }}
+        run: |
+          pnpm search:backfill --remote .local/remote.json
+          pnpm search:backfill --remote .local/remote.json --check
+
       - name: Write deployment summary
         run: |
           {
@@ -156,6 +175,9 @@ jobs:
               echo "- Data: D1 and R2 reset to the demo data, admin credential kept"
             else
               echo "- D1: pending migrations applied, no demo reset"
+            fi
+            if [[ "$SEARCH_BACKFILL" == true ]]; then
+              echo "- Search text: backfilled and checked"
             fi
             echo "- Verification: API health and frontend request passed"
           } >> "$GITHUB_STEP_SUMMARY"
