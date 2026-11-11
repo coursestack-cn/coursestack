@@ -108,7 +108,6 @@ pnpm demo --remote .local/remote.json
 | `src/favorites/` | 统一收藏、批量状态与首页课程动态 |
 | `src/notifications/` | 通用通知、游标分页、状态同步与已读 |
 | `src/openapi.ts`、`src/*/openapi.ts` | OpenAPI 规范，由 `src/openapi.ts` 组合各模块定义 |
-| `src/manual-routes.ts` | 账号、头像与登录接口的手动分发清单，入口分发与 OpenAPI 检查共用 |
 | `src/permissions.ts` | 管理员、当前授课教师与教学班权限的 SQL 判断，公开资料查询 |
 | `src/db/schema.ts` | 共享 Drizzle 表定义 |
 | `src/db/rules.sql` | 当前视图、约束与积分事务触发器 |
@@ -195,7 +194,7 @@ pnpm openapi:export
 pnpm openapi:check
 ```
 
-前者将规范导出到仓库根目录的 `openapi/openapi.json`（前后端共用的接口契约），后者检查业务方法与规范及静态导出一致，范围包括 Hono 注册的路由和 `src/manual-routes.ts` 中手动分发的账号、头像与登录接口，共 107 个方法。修改 `src/openapi.ts` 或任一 `src/*/openapi.ts` 后依次执行。`GET /api/openapi.json` 返回标准 OpenAPI 3.1 文档，不加 data 包装；它描述全部业务接口，账号相关的业务规则见[账号与权限](../docs/账号与权限.md)。仅本地开放的资料 PUT 传输接口见[资料与文件](../docs/资料与文件.md#本地与云端)。
+前者将规范导出到仓库根目录的 `openapi/openapi.json`（前后端共用的接口契约），后者检查业务方法与规范及静态导出一致，范围是 Hono 注册的全部业务路由，共 107 个方法。修改 `src/openapi.ts` 或任一 `src/*/openapi.ts` 后依次执行。`GET /api/openapi.json` 返回标准 OpenAPI 3.1 文档，不加 data 包装；它描述全部业务接口，账号相关的业务规则见[账号与权限](../docs/账号与权限.md)。仅本地开放的资料 PUT 传输接口见[资料与文件](../docs/资料与文件.md#本地与云端)。
 
 参考：[Drizzle D1](https://orm.drizzle.team/docs/get-started/d1-new)、[D1 外键](https://developers.cloudflare.com/d1/sql-api/foreign-keys/)、[Wrangler 配置](https://developers.cloudflare.com/workers/wrangler/configuration/)、[Workers CPU 限制](https://developers.cloudflare.com/workers/platform/limits/#cpu-time)。
 

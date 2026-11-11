@@ -1,6 +1,7 @@
+import { Hono } from 'hono';
+import type { AppEnv, Ctx } from '../discussions/types.ts';
 import type { Env } from '../env.ts';
-import { HttpError, json } from '../http.ts';
-import type { ManualTarget } from '../manual-routes.ts';
+import { HttpError, json, keepAlive, sameOrigin } from '../http.ts';
 import { requireSession } from '../auth/service.ts';
 import { mutateAccount } from './mutations.ts';
 import { accountDetail } from './service.ts';
@@ -43,24 +44,29 @@ async function imageBody(request: Request) {
     return bytes;
 }
 
-export async function avatarRoutes(request: Request, env: Env, { encodedId, waitUntil }: ManualTarget): Promise<Response> {
-    if (encodedId !== undefined) {
-        const row = await env.DB.prepare("SELECT avatar_key FROM accounts WHERE id = ? AND status = 'active'").bind(decodeURIComponent(encodedId)).first<{ avatar_key: string | null }>();
-        const object = row?.avatar_key ? await env.FILES.get(row.avatar_key) : null;
-        if (!object) throw new HttpError(404, 'AVATAR_NOT_FOUND', '头像不存在');
-        return new Response(object.body, { headers: {
-            'Content-Type': object.httpMetadata?.contentType ?? 'application/octet-stream',
-            'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'; sandbox",
-            'Cache-Control': 'no-store',
-        } });
-    }
-    const session = await requireSession(env.DB, request);
-    const work = (async () => {
+export const avatarRoutes = new Hono<AppEnv>();
+
+avatarRoutes.get('/profiles/:id/avatar', async c => {
+    const row = await c.env.DB.prepare("SELECT avatar_key FROM accounts WHERE id = ? AND status = 'active'").bind(c.req.param('id')).first<{ avatar_key: string | null }>();
+    const object = row?.avatar_key ? await c.env.FILES.get(row.avatar_key) : null;
+    if (!object) throw new HttpError(404, 'AVATAR_NOT_FOUND', '头像不存在');
+    return new Response(object.body, { headers: {
+        'Content-Type': object.httpMetadata?.contentType ?? 'application/octet-stream',
+        'X-Content-Type-Options': 'nosniff', 'Content-Security-Policy': "default-src 'none'; sandbox",
+        'Cache-Control': 'no-store',
+    } });
+});
+avatarRoutes.put('/me/avatar', sameOrigin(c => replaceAvatar(c, true)));
+avatarRoutes.delete('/me/avatar', sameOrigin(c => replaceAvatar(c, false)));
+
+async function replaceAvatar(c: Ctx, upload: boolean) {
+    const env = c.env, session = await requireSession(env.DB, c.req.raw);
+    return keepAlive(c, (async () => {
         let key: string | null = null;
         try {
-            if (request.method === 'PUT') {
-                const bytes = await imageBody(request), contentType = imageType(bytes);
-                if (request.headers.get('content-type')?.split(';')[0] !== contentType) throw new HttpError(415, 'AVATAR_TYPE_MISMATCH', '头像内容与类型不符');
+            if (upload) {
+                const bytes = await imageBody(c.req.raw), contentType = imageType(bytes);
+                if (c.req.header('content-type')?.split(';')[0] !== contentType) throw new HttpError(415, 'AVATAR_TYPE_MISMATCH', '头像内容与类型不符');
                 key = `avatars/${session.id}/${crypto.randomUUID()}`;
                 await env.FILES.put(key, bytes, { httpMetadata: { contentType } });
             }
@@ -77,7 +83,5 @@ export async function avatarRoutes(request: Request, env: Env, { encodedId, wait
             throw error;
         }
         return json({ data: await accountDetail(env.DB, session.id) });
-    })();
-    waitUntil(work.then(() => undefined, () => undefined));
-    return work;
+    })());
 }

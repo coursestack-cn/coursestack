@@ -3,8 +3,10 @@ import { Hono } from 'hono';
 import { matchedRoutes } from 'hono/route';
 import { createDatabase } from './db/index.ts';
 import type { AppEnv } from './discussions/types.ts';
-import { HttpError, json, methodNotAllowed, requireSameOrigin } from './http.ts';
-import { matchManualRoute } from './manual-routes.ts';
+import { HttpError, json, methodNotAllowed } from './http.ts';
+import { authRoutes } from './auth/routes.ts';
+import { accountRoutes } from './accounts/routes.ts';
+import { avatarRoutes } from './accounts/avatar.ts';
 import { accountImportRoutes } from './accounts/imports.ts';
 import { authenticate } from './auth/middleware.ts';
 import { searchRoutes } from './search/routes.ts';
@@ -35,16 +37,6 @@ app.use('*', async (c, next) => {
 });
 
 app.use('*', async (c, next) => {
-    const manual = matchManualRoute(new URL(c.req.url).pathname);
-    if (manual) {
-        const { path, methods } = manual.route;
-        c.set('routePattern', path);
-        if (!Object.hasOwn(methods, c.req.method)) return methodNotAllowed(Object.keys(methods));
-        if (c.req.method !== 'GET') requireSameOrigin(c.req.raw);
-        return methods[c.req.method](c.req.raw, c.env, { path, encodedId: manual.encodedId, waitUntil(work) {
-            try { c.executionCtx.waitUntil(work); } catch { /* Direct test calls have no execution context. */ }
-        } });
-    }
     const route = matchedRoutes(c).find(r => r.method !== 'ALL' || r.path === '/api/health');
     c.set('routePattern', route?.path ?? 'unmatched');
     if (!route) {
@@ -71,6 +63,10 @@ app.all('/api/health', async (c) => {
 
 app.route('/api/internal', internalRoutes);
 app.get('/api/openapi.json', c => c.json(openapi));
+// Session routes answer before the authenticated API, which would reject a pending password change.
+app.route('/api', authRoutes);
+app.route('/api', accountRoutes);
+app.route('/api', avatarRoutes);
 const api = new Hono<AppEnv>();
 api.use('*', authenticate);
 api.route('/', accountImportRoutes);

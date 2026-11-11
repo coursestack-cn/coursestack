@@ -58,6 +58,21 @@ export function requireSameOrigin(request: Request) {
     }
 }
 
+// Wraps write handlers outside the authenticated API, which checks Origin itself. A wrapper rather than
+// route middleware keeps one registered route per method, as the OpenAPI coverage check expects.
+export function sameOrigin(handler: (c: Ctx) => Promise<Response>) {
+    return (c: Ctx) => {
+        requireSameOrigin(c.req.raw);
+        return handler(c);
+    };
+}
+
+// Lets cleanup inside the work finish even if the client disconnects first.
+export function keepAlive<T>(c: Ctx, work: Promise<T>): Promise<T> {
+    try { c.executionCtx.waitUntil(work.then(() => undefined, () => undefined)); } catch { /* Direct test calls have no execution context. */ }
+    return work;
+}
+
 export function stringField(body: Record<string, unknown>, name: string, max = 80): string {
     const value = body[name];
     if (typeof value !== 'string' || !value.trim() || value.length > max) {

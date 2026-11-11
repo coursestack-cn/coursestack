@@ -13,10 +13,10 @@ test('known paths reject unsupported methods before checking credentials, body o
         ['PATCH', '/api/materials/material-a/versions/1/preview', ['GET', 'HEAD']],
         ['PATCH', '/api/internal/documents', ['GET', 'HEAD']],
         ['GET', '/api/admin/accounts/import/preview', ['POST']],
-        ['PUT', '/api/admin/accounts', ['GET', 'POST']],
-        ['POST', '/api/admin/accounts/a', ['GET', 'PATCH', 'DELETE']],
+        ['PUT', '/api/admin/accounts', ['GET', 'POST', 'HEAD']],
+        ['POST', '/api/admin/accounts/a', ['GET', 'PATCH', 'DELETE', 'HEAD']],
         ['GET', '/api/admin/accounts/a/password', ['POST']],
-        ['PATCH', '/api/profiles/a/avatar', ['GET']],
+        ['PATCH', '/api/profiles/a/avatar', ['GET', 'HEAD']],
         ['GET', '/api/auth/login', ['POST']],
         ['POST', '/api/health', ['GET']],
     ]) {
@@ -38,10 +38,10 @@ test('valid methods retain their original auth, HEAD, Origin, JSON and size rule
     const head = await call('HEAD', '/api/search');
     assert.equal(head.status, 200);
     assert.equal(await head.text(), '');
-    const manualHead = await call('HEAD', '/api/auth/me');
-    assert.equal(manualHead.status, 405);
-    assert.equal(manualHead.headers.get('Allow'), 'GET');
-    assert.equal(await manualHead.text(), '');
+    // Session routes are ordinary Hono routes: HEAD runs the GET handler and its checks without a body.
+    const sessionHead = await call('HEAD', '/api/auth/me');
+    assert.equal(sessionHead.status, 401);
+    assert.equal(await sessionHead.text(), '');
     assert.equal((await call('GET', '/api/me/profile')).status, 401);
     assert.equal((await call('POST', '/api/admin/accounts/import/preview', { headers: { Origin: origin } })).status, 401);
     for (const path of ['/api/auth/login', '/api/courses']) {
