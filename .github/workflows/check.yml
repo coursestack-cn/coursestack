@@ -1,0 +1,67 @@
+name: Check
+
+run-name: Check ${{ github.event.pull_request.title || github.ref_name }}
+
+# Runs the deploy workflow's checks before a change reaches main, which deploys on every update.
+# It uses no secrets and never touches Cloudflare resources.
+on:
+  pull_request:
+    branches:
+      - main
+
+permissions:
+  contents: read
+
+concurrency:
+  group: check-${{ github.event.pull_request.number }}
+  cancel-in-progress: true
+
+jobs:
+  check:
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      CI: 'true'
+    defaults:
+      run:
+        shell: bash
+        working-directory: backend
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v6
+        with:
+          persist-credentials: false
+
+      - name: Set up pnpm and Node.js
+        uses: pnpm/setup@fa36a5ef7dcdefc3a7cb25655c122e00cf6e636e # v3.1.2
+        with:
+          working-directory: backend
+          runtime: node@24
+          install: false
+          cache: true
+          cache-dependency-path: |
+            backend/pnpm-lock.yaml
+            frontend/pnpm-lock.yaml
+
+      - name: Install backend dependencies
+        run: pnpm install --frozen-lockfile
+
+      - name: Install frontend dependencies
+        working-directory: frontend
+        run: pnpm install --frozen-lockfile
+
+      - name: Check backend types
+        run: pnpm check
+
+      - name: Check database migrations
+        run: pnpm db:check
+
+      - name: Check OpenAPI contract
+        run: pnpm openapi:check
+
+      - name: Test backend
+        run: pnpm test
+
+      - name: Check and build frontend
+        working-directory: frontend
+        run: pnpm build
